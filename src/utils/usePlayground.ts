@@ -41,6 +41,9 @@ export function usePlayground() {
     };
 
     const initSDK = async () => {
+      // Standalone hosting (e.g. GitHub Pages): the Playground SDK only works inside
+      // the Playground iframe, so skip it entirely instead of crashing the game.
+      if (window.self === window.top && !(window as any).__PLAYGROUND_PREVIEW__) return;
       try {
         const isSandboxPreview =
           window.location.hostname === 'test.com' ||
@@ -73,6 +76,7 @@ export function usePlayground() {
         }
       } catch (error) {
         console.error('Playground SDK initialization failed:', error);
+        sdkRef.current = null;
       }
     };
 
