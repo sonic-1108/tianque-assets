@@ -262,6 +262,9 @@ export function Game({
       if ((c.counterTimer ?? 0) > 0) c.counterTimer = (c.counterTimer ?? 0) - dt;
       if ((c.rootTimer ?? 0) > 0) c.rootTimer = (c.rootTimer ?? 0) - dt;
       if ((c.doubleJumpTimer ?? 0) > 0) c.doubleJumpTimer = (c.doubleJumpTimer ?? 0) - dt;
+      if ((c.protectTimer ?? 0) > 0) c.protectTimer = (c.protectTimer ?? 0) - dt;
+      const stunnedNow = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown' || c.actionState === 'buried';
+      if (!stunnedNow && (c.stunLoad ?? 0) > 0) c.stunLoad = Math.max(0, (c.stunLoad ?? 0) - dt * 4);
       if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
     }
     // 淬毒: poison damage over time
@@ -384,8 +387,9 @@ export function Game({
       if (!c.isGrounded && c.actionState !== 'buried' && !hovering) {
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
-        if (c.pos[1] <= 0 && c.pos[1] > -0.6 && overGround(c)) {
-          c.pos[1] = 0;
+        const gh = groundHeight(c);
+        if (c.vel[1] <= 0 && c.pos[1] <= gh && c.pos[1] > gh - 0.6) {
+          c.pos[1] = gh;
           const impact = -c.vel[1];
           c.vel[1] = 0;
           c.isGrounded = true;
@@ -415,6 +419,12 @@ export function Game({
         c.vel[2] *= k;
       }
       applyBounds(i, c);
+      if (c.isGrounded && c.pos[1] > 0.01 && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - 0.05) {
+        c.isGrounded = false;
+        c.vel[1] = Math.min(c.vel[1], 0);
+        if (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'block') c.actionState = 'jump';
+      }
+      if ((c.protectTimer ?? 0) > 0 && Math.random() < 0.12) vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.0, '#e5e7eb', 0.25, 0.05);
       let diff = c.targetRotY - c.rotY;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -572,6 +582,7 @@ export function Game({
       const req = intent.request;
       if (!req) return false;
 
+
       // Soft lock: attacks snap toward a nearby opponent that is roughly in front
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
@@ -618,6 +629,39 @@ export function Game({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
+      // 受身: dodge out of hitstun / launch / knockdown (long cooldown)
+      const stunned = cur === 'hitstun' || cur === 'launched' || cur === 'knockdown' || cur === 'buried';
+      if (stunned) {
+        if (req !== 'dodge') return false;
+        if ((c.cooldowns.breakout ?? 0) > 0) return report('受身', `冷却中 (${(c.cooldowns.breakout ?? 0).toFixed(1)}s)`), false;
+        c.cooldowns.breakout = ranger ? 10 : 15;
+        const dir = vA.copy(intent.move);
+        if (dir.lengthSq() < 0.01) dir.set(c.pos[0] - foe.pos[0], 0, c.pos[2] - foe.pos[2]);
+        dir.y = 0;
+        if (dir.lengthSq() < 0.0001) dir.copy(fwdOf(c.rotY)).multiplyScalar(-1);
+        dir.normalize();
+        if (cur === 'buried') {
+          c.pos[1] = 0;
+          c.isGrounded = true;
+        }
+        c.actionState = 'dodge';
+        c.stateTimer = 0;
+        c.stateDuration = phasesFor(c).dodge!.totalDuration;
+        c.rotY = c.targetRotY = Math.atan2(-dir.x, -dir.z);
+        const sp = ranger ? 18 : 14;
+        c.vel[0] = dir.x * sp;
+        c.vel[2] = dir.z * sp;
+        if (!c.isGrounded) c.vel[1] = Math.max(c.vel[1], 4);
+        c.dodgeIframeTimer = 0.55;
+        c.perfectDodgeUsed = true;
+        c.stunLoad = 0;
+        c.juggleCount = 0;
+        vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.8, '#f8fafc', 0.35, 0.1, 0.3);
+        vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '受身', true, '#f8fafc');
+        if (isPlayer) gameAudio.playRetroJump();
+        report('受身', '成功脱离');
+        return true;
+      }
       const color = colorFor(slot, c);
       const rooted = (c.rootTimer ?? 0) > 0 && c.isGrounded;
       if (rooted && (req === 'dodge' || req === 'jump')) return report(req === 'dodge' ? '闪避' : '跳跃', '被定身'), false;
@@ -717,10 +761,10 @@ export function Game({
           c.stateTimer = 0;
           c.stateDuration = phasesFor(c).dodge!.totalDuration;
           c.rotY = c.targetRotY = rollYaw;
-          c.vel[0] = dir.x * 15;
-          c.vel[2] = dir.z * 15;
-          c.dodgeIframeTimer = 0.35;
-          c.dodgeCooldownTimer = 0.9;
+          c.vel[0] = dir.x * (ranger ? 18 : 15);
+          c.vel[2] = dir.z * (ranger ? 18 : 15);
+          c.dodgeIframeTimer = ranger ? 0.42 : 0.35;
+          c.dodgeCooldownTimer = ranger ? 0.6 : 0.9;
           c.perfectDodgeUsed = false;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.55);
           if (isPlayer) gameAudio.playRetroJump();
@@ -949,7 +993,7 @@ export function Game({
       if (airborne && !o.unblockable && o.state !== 'buried') {
         const jc = def.juggleCount ?? 0;
         dmg *= Math.pow(0.85, jc);
-        if (jc < 4) {
+        if (jc < 3) {
           o.launch = Math.max(o.launch ?? 0, Math.max(2.5, 6 - jc * 0.9));
           o.state = 'launched';
           o.dur = 0.9;
@@ -1009,7 +1053,8 @@ export function Game({
       att.comboResetTimer = 2.5;
       if (rage) att.hp = Math.min(att.maxHp, att.hp + Math.round(dmg * 0.15));
 
-      const armored = def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried';
+      const protectedNow = (def.protectTimer ?? 0) > 0;
+      const armored = protectedNow || (def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried');
       const stayBuried = def.actionState === 'buried' && o.state !== 'buried';
       if (!armored && !stayBuried) {
         const knock = o.knock ?? 4;
@@ -1027,6 +1072,14 @@ export function Game({
         def.stateDuration = o.dur ?? 0.35;
         def.rotY = def.targetRotY = yawTo(def.pos, att.pos);
         def.isBlocking = false;
+        // 保护: a long stun chain grants a short window where you can't be stunned again
+        def.stunLoad = (def.stunLoad ?? 0) + (o.launch || o.state === 'knockdown' || o.state === 'buried' ? 2 : 1);
+        if (def.stunLoad >= 8) {
+          def.stunLoad = 0;
+          def.protectTimer = 1.8;
+          vfx.ring(vA.set(def.pos[0], def.pos[1] + 0.05, def.pos[2]), 2.2, '#f1f5f9', 0.5, 0.12, 0.3);
+          vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.5, def.pos[2]), '保护', true, '#f1f5f9');
+        }
       }
       att.mp = Math.min(att.maxMp, att.mp + (o.heavy ? 6 : 3));
       def.whiteFlashTimer = o.heavy ? 0.1 : 0.06;
@@ -1052,7 +1105,8 @@ export function Game({
     function resolveAttacks(slot: number, c: CombatantState, foe: CombatantState) {
       if (c.hp <= 0) return;
       const fwd = fwdOf(c.rotY).clone();
-      const dist = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      // melee can't reach someone standing on a pillar above you (and vice versa)
+      const dist = Math.abs(foe.pos[1] - c.pos[1]) > 2.2 ? 99 : Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
       const inFront = (fwd.x * (foe.pos[0] - c.pos[0]) + fwd.z * (foe.pos[2] - c.pos[2])) / Math.max(0.001, dist) > 0.2;
       const cfg = phasesFor(c)[c.actionState];
       const active = !!cfg && c.stateTimer >= cfg.startup && c.stateTimer <= cfg.startup + cfg.active;
@@ -1300,13 +1354,13 @@ export function Game({
       if ((st === 'attack_1' || st === 'attack_2') && ready) {
         c.volleyShots = 1;
         const from = handPos(c, fwd);
-        fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from), 34, { dmg: 42 });
+        fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from), 36, { dmg: 52 });
         gameAudio.playCrispClick();
       }
       if (st === 'attack_3' && !c.backSlash && ready) {
         c.volleyShots = 1;
         const from = handPos(c, fwd);
-        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 34, { dmg: 36, knock: 3, dur: 0.3 });
+        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 36, { dmg: 42, knock: 3, dur: 0.3 });
         gameAudio.playArcadeLaser();
       }
       if (st === 'attack_3' && c.backSlash && t >= 0.28 && !c.hasHitCurrentMove) {
@@ -1325,12 +1379,12 @@ export function Game({
         const from = handPos(c, fwd);
         const d = aimDir(c, foe, fwd, from);
         d.y = Math.max(-0.08, Math.min(0.08, d.y));
-        fireProjectile(slot, c, 'boomerang', from, d.normalize(), 18, { dmg: 65, knock: 5, dur: 0.4, life: 3, noPassive: true });
+        fireProjectile(slot, c, 'boomerang', from, d.normalize(), 18, { dmg: 85, knock: 5, dur: 0.4, life: 3, noPassive: true });
       }
       if (st === 'skill_2' && ready) {
         c.volleyShots = 1;
         const from = handPos(c, fwd);
-        fireProjectile(slot, c, 'pin', from, aimDir(c, foe, fwd, from), 42, { dmg: 60, root: 1.5, dur: 0.3, noPassive: true });
+        fireProjectile(slot, c, 'pin', from, aimDir(c, foe, fwd, from), 42, { dmg: 70, root: 1.5, dur: 0.3, noPassive: true });
         vfx.flash(from, color, 10, 0.1, 4);
       }
       if (st === 'skill_3' && t >= 0.12 && shots === 0) {
@@ -1338,7 +1392,7 @@ export function Game({
         c.volleyShots = 1;
         const from = handPos(c, fwd);
         from.y = c.pos[1] + 1.2;
-        for (let k = 0; k < 7; k++) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, (k - 3) * 0.17), 30, { dmg: 30, knock: 2 });
+        for (let k = 0; k < 7; k++) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, (k - 3) * 0.17), 30, { dmg: 38, knock: 2 });
         gameAudio.playArcadeLaser();
       }
       if (st === 'skill_4' && Math.random() < 0.4) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.1, c.pos[2]), 1, '#4ade80', 0.3, 1.5, 0.06);
@@ -1367,7 +1421,7 @@ export function Game({
             const ty = focus ? foe.pos[1] + 0.9 : 0;
             const from = new THREE.Vector3(c.pos[0] + (Math.random() - 0.5) * 0.8, c.pos[1] + 1.3, c.pos[2] + (Math.random() - 0.5) * 0.8);
             const dir = new THREE.Vector3(tx, ty, tz).sub(from).normalize();
-            fireProjectile(slot, c, 'dart', from, dir, 30, { dmg: 15, knock: 0.6, dur: 0.16, noStop: true, noPassive: true, life: 0.7 });
+            fireProjectile(slot, c, 'dart', from, dir, 30, { dmg: 18, knock: 0.6, dur: 0.16, noStop: true, noPassive: true, life: 0.7 });
           }
           if (Math.random() < 0.12) vfx.ring(vB.set(rc[0], 0.05, rc[1]), 4, color, 0.3, 0.08);
           if (Math.random() < 0.3) vfx.embers(vC.set(c.pos[0], c.pos[1] + 1, c.pos[2]), 2, '#f9a8d4', 0.5, -1, 0.07);
@@ -1404,7 +1458,7 @@ export function Game({
               break;
             }
             for (const pl of pillars) {
-              if (Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
+              if (p.pos.y < (pl.h ?? 99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
                 dead = true;
                 vfx.sparkBurst(vB.copy(p.pos), 6, '#e5e7eb', 4, 0.05);
                 break;
@@ -1427,7 +1481,7 @@ export function Game({
             if (def.hp < before) {
               if (p.kind === 'dart' && !p.noStop) {
                 owner.dartHits = (owner.dartHits ?? 0) + 1;
-                if (owner.dartHits >= 5) {
+                if (owner.dartHits >= 4) {
                   owner.dartHits = 0;
                   owner.pierceNext = true;
                   vfx.damageNumber(vA.set(owner.pos[0], owner.pos[1] + 2.2, owner.pos[2]), '袖里乾坤', true, GOLD);
@@ -1460,6 +1514,19 @@ export function Game({
       }
     }
 
+    /** AI uses 受身 to escape a stun chain (not instantly, so combos still land) */
+    function aiBreakout(me: CombatantState, ai: AIMemory, dt2: number) {
+      const st = me.actionState;
+      const stunned = st === 'hitstun' || st === 'launched' || st === 'knockdown' || st === 'buried';
+      if (!stunned || (me.cooldowns.breakout ?? 0) > 0 || me.hp <= 0) return false;
+      if ((me.stunLoad ?? 0) >= 3 && Math.random() < dt2 * 1.2) {
+        ai.request = 'dodge';
+        ai.requestTtl = 0.3;
+        return true;
+      }
+      return false;
+    }
+
     function runRangerAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
       const ai = aiRef.current;
       const dx = foe.pos[0] - me.pos[0];
@@ -1482,6 +1549,11 @@ export function Game({
         ai.requestTtl = 0.35;
       };
       const foeAttacking = SWING_STATES.has(foe.actionState) && phaseOf(foe).phase !== 'recovery';
+      if (aiBreakout(me, ai, dt2)) {
+        out.move.copy(toFoe).multiplyScalar(-1);
+        out.request = ai.request;
+        return;
+      }
 
       // keep a dart string going
       if (ai.comboLeft > 0 && (me.actionState === 'attack_1' || me.actionState === 'attack_2') && phaseOf(me).phase === 'recovery') {
@@ -1610,6 +1682,16 @@ export function Game({
       if (fromKO) onRoundEvent?.({ type: 'reset' });
     }
 
+    /** Height of whatever is under the fighter: arena floor or the top of a pillar / crate */
+    function groundHeight(c: CombatantState) {
+      let g = overGround(c) ? 0 : -99;
+      for (const pl of map.pillars || []) {
+        if (pl.h === undefined) continue;
+        if (c.pos[1] >= pl.h - 0.45 && Math.hypot(c.pos[0] - pl.x, c.pos[2] - pl.z) < pl.r + 0.15) g = Math.max(g, pl.h);
+      }
+      return g;
+    }
+
     function overGround(c: CombatantState) {
       if (map.id === 'lavacliff') return Math.hypot(c.pos[0], c.pos[2]) <= map.radius + 0.35;
       return true;
@@ -1732,6 +1814,7 @@ export function Game({
         }
       }
       for (const pl of map.pillars || []) {
+        if (c.pos[1] >= (pl.h ?? 99) - 0.45) continue; // standing on (or above) it
         const dx = c.pos[0] - pl.x;
         const dz = c.pos[2] - pl.z;
         const dd = Math.hypot(dx, dz);
@@ -2021,6 +2104,10 @@ export function Game({
         ai.requestTtl = 0.35;
       };
 
+      if (aiBreakout(me, ai, dt2)) {
+        out.request = ai.request;
+        return;
+      }
       // 钉地斩 follow-up after an AI jump
       if (ai.airFollow > 0) {
         ai.airFollow -= dt2;
@@ -2039,7 +2126,12 @@ export function Game({
       if (ai.think <= 0 && free && !ai.request) {
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
-        if (foeAttacking && dist < 3.6 && r < 0.45) {
+        if (foe.pos[1] - me.pos[1] > 2) {
+          // opponent is up on a pillar: can't reach, so guard against darts and wait below
+          ai.plan = r < 0.5 ? 'guard' : 'circle';
+          ai.planTimer = 0.6;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        } else if (foeAttacking && dist < 3.6 && r < 0.45) {
           if (r < 0.25 && me.dodgeCooldownTimer <= 0) {
             ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
             ask('dodge');

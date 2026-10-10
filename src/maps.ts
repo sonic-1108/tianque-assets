@@ -6,6 +6,8 @@ export interface Circle {
   x: number;
   z: number;
   r: number;
+  /** top height a fighter can stand on (undefined = too tall, solid) */
+  h?: number;
 }
 
 export interface MapDef {
@@ -52,7 +54,7 @@ export const MAPS: Record<MapId, MapDef> = {
     name: '天阙演武场',
     subtitle: '石柱环立的古老演武场',
     icon: '🏛️',
-    mechanics: ['外圈石墙 + 六根石柱', '被击飞撞上墙或柱子：额外受伤并眩晕', '蛮牛冲、旋风刃把人逼到墙角最强'],
+    mechanics: ['外圈石墙 + 六根石柱（三根完整、三根断柱，可以跳上去）', '被击飞撞上墙或柱子：额外受伤并眩晕', '蛮牛冲、旋风刃把人逼到墙角最强'],
     homeClass: 'Berserker',
     homeClassName: '狂刃',
     homeBonus: '伤害 +10%',
@@ -67,7 +69,8 @@ export const MAPS: Record<MapId, MapDef> = {
     keyIntensity: 2.6,
     exposure: 1.15,
     cardGradient: 'from-amber-900/80 via-stone-800/80 to-zinc-900/90',
-    pillars: ring(6, 8.2, 0.8, Math.PI / 6),
+    // alternate full pillars (top 5.25 m) and broken stumps (2.6 m): stepping stones for double jumps
+    pillars: ring(6, 8.2, 0.8, Math.PI / 6).map((p, i) => ({ ...p, h: i % 2 ? 2.6 : 5.25 })),
   },
   lavacliff: {
     id: 'lavacliff',
@@ -115,9 +118,9 @@ export const MAPS: Record<MapId, MapDef> = {
     pillars: [
       { x: 0, z: -4.8, r: 0.42 },
       { x: 0, z: 3.8, r: 0.42 },
-      { x: 2.7, z: -9.2, r: 0.75 },
-      { x: -2.8, z: 8.6, r: 0.75 },
-      { x: -2.9, z: -0.6, r: 0.7 },
+      { x: 2.7, z: -9.2, r: 0.75, h: 1.1 },
+      { x: -2.8, z: 8.6, r: 0.75, h: 1.1 },
+      { x: -2.9, z: -0.6, r: 0.7, h: 1.1 },
     ],
   },
   bamboo: {

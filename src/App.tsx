@@ -364,6 +364,8 @@ export default function App() {
     cdSkill4: 0,
     cdUlt: 0,
     cdSpecial: 0,
+    cdBreak: 0,
+    protect: false,
     poisonBuff: 0,
     pierceNext: false,
     isBloodRage: false,
@@ -401,6 +403,8 @@ export default function App() {
         cdSkill4: p1.cooldowns.skill4 || 0,
         cdUlt: p1.cooldowns.ultimate || 0,
         cdSpecial: p1.cooldowns.special || 0,
+        cdBreak: p1.cooldowns.breakout || 0,
+        protect: (p1.protectTimer || 0) > 0,
         poisonBuff: p1.poisonBuff || 0,
         pierceNext: !!p1.pierceNext,
         isBloodRage: p1.buffs.some((b) => b.type === 'blood_rage'),
@@ -726,6 +730,12 @@ export default function App() {
                 </span>
               </div>
 
+              {hudMirror.protect && <span className="text-slate-100 font-bold">保护中</span>}
+              {hudMirror.cdBreak > 0 ? (
+                <span className="text-zinc-500 font-mono">受身 {hudMirror.cdBreak.toFixed(0)}s</span>
+              ) : (
+                <span className="text-slate-200 font-bold" title="被打僵直、击飞、倒地时按 Shift 脱身">受身就绪</span>
+              )}
               {hudMirror.dodgeCd > 0 ? (
                 <span className="text-zinc-500 font-mono">
                   闪避冷却: {hudMirror.dodgeCd.toFixed(1)}s
@@ -1035,6 +1045,7 @@ export default function App() {
                 <p>• Tab 键：锁定 / 切换最近敌方目标，鼠标中键：清除目标锁定</p>
                 <p>• F3 键：开启 / 关闭实时调试监控面板（查看按键与动作切片）</p>
                 <p>• P 键：切换 对战模式（霍岩影会走位、连招、格挡、闪避）/ 木桩模式（不还手）</p>
+                <p>• 受身：被打僵直、击飞、倒地时按 Shift 立刻脱身（狂刃冷却15秒，暗器10秒）。被连续控太久会自动触发「保护」，1.8秒内不会再被控。</p>
                 <p>• 鼠标右键格挡：正面受击减伤60%且不会被打断；天崩无法格挡，只能翻滚躲开</p>
                 <p>• 完美格挡：被打中前0.2秒内按右键，免伤并弹开对手；极限闪避：贴着攻击翻滚触发慢动作。两者之后下一击伤害+50%</p>
                 <p>• 浮空追击：对手被击飞时用普攻可以在空中继续追打，最多4下</p>

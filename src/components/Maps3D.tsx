@@ -129,32 +129,56 @@ function TempleMap() {
           </mesh>
         );
       })}
-      {/* pillars with braziers */}
-      {def.pillars!.map((p, i) => (
-        <group key={i} position={[p.x, 0, p.z]}>
-          <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[p.r + 0.25, p.r + 0.35, 0.5, 20]} />
-            <meshStandardMaterial color="#6e655b" roughness={0.9} />
-          </mesh>
-          <mesh position={[0, 2.6, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[p.r * 0.85, p.r, 4.4, 20]} />
-            <meshStandardMaterial color="#9a8f81" roughness={0.85} />
-          </mesh>
-          <mesh position={[0, 5.0, 0]} castShadow>
-            <cylinderGeometry args={[p.r + 0.3, p.r * 0.85, 0.5, 20]} />
-            <meshStandardMaterial color="#7a6f62" roughness={0.85} />
-          </mesh>
-          <mesh position={[0, 5.45, 0]}>
-            <cylinderGeometry args={[0.55, 0.3, 0.4, 16]} />
-            <meshStandardMaterial color="#3b2a1c" metalness={0.6} roughness={0.4} />
-          </mesh>
-          <mesh position={[0, 5.75, 0]}>
-            <coneGeometry args={[0.35, 0.8, 12]} />
-            <meshBasicMaterial color={new THREE.Color(3, 1.3, 0.3)} toneMapped={false} />
-          </mesh>
-          <pointLight position={[0, 6.1, 0]} color="#ffa04a" intensity={6} distance={9} />
-        </group>
-      ))}
+      {/* pillars with braziers; every other one is a broken stump you can jump onto */}
+      {def.pillars!.map((p, i) => {
+        const broken = (p.h ?? 99) < 4;
+        const shaft = broken ? (p.h ?? 2.6) - 0.5 : 4.4;
+        return (
+          <group key={i} position={[p.x, 0, p.z]}>
+            <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
+              <cylinderGeometry args={[p.r + 0.25, p.r + 0.35, 0.5, 20]} />
+              <meshStandardMaterial color="#6e655b" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.5 + shaft / 2, 0]} castShadow receiveShadow>
+              <cylinderGeometry args={[p.r * (broken ? 0.95 : 0.85), p.r, shaft, 20]} />
+              <meshStandardMaterial color="#9a8f81" roughness={0.85} />
+            </mesh>
+            {broken ? (
+              <>
+                {/* jagged break: a few tilted chunks on the flat top */}
+                <mesh position={[0.25, p.h! + 0.12, 0.1]} rotation={[0.3, 0.6, 0.2]} castShadow>
+                  <boxGeometry args={[0.45, 0.3, 0.35]} />
+                  <meshStandardMaterial color="#8a7f72" roughness={0.9} />
+                </mesh>
+                <mesh position={[-0.3, p.h! + 0.08, -0.2]} rotation={[-0.2, 1.2, 0.1]} castShadow>
+                  <boxGeometry args={[0.35, 0.2, 0.3]} />
+                  <meshStandardMaterial color="#7d7366" roughness={0.9} />
+                </mesh>
+                <mesh position={[1.1, 0.15, 0.6]} rotation={[0.2, 0.4, 1.3]} castShadow receiveShadow>
+                  <cylinderGeometry args={[p.r * 0.8, p.r * 0.8, 1.1, 14]} />
+                  <meshStandardMaterial color="#8f8478" roughness={0.9} />
+                </mesh>
+              </>
+            ) : (
+              <>
+                <mesh position={[0, 5.0, 0]} castShadow>
+                  <cylinderGeometry args={[p.r + 0.3, p.r * 0.85, 0.5, 20]} />
+                  <meshStandardMaterial color="#7a6f62" roughness={0.85} />
+                </mesh>
+                <mesh position={[0, 5.45, 0]}>
+                  <cylinderGeometry args={[0.55, 0.3, 0.4, 16]} />
+                  <meshStandardMaterial color="#3b2a1c" metalness={0.6} roughness={0.4} />
+                </mesh>
+                <mesh position={[0, 5.75, 0]}>
+                  <coneGeometry args={[0.35, 0.8, 12]} />
+                  <meshBasicMaterial color={new THREE.Color(3, 1.3, 0.3)} toneMapped={false} />
+                </mesh>
+                <pointLight position={[0, 6.1, 0]} color="#ffa04a" intensity={6} distance={9} />
+              </>
+            )}
+          </group>
+        );
+      })}
     </group>
   );
 }
@@ -526,10 +550,6 @@ function SeaMap() {
             <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
               <boxGeometry args={[p.r * 1.7, 1.1, p.r * 1.7]} />
               <meshStandardMaterial color="#6b4a2c" roughness={0.85} />
-            </mesh>
-            <mesh position={[0.1, 1.35, -0.05]} rotation={[0, 0.4, 0]} castShadow>
-              <boxGeometry args={[p.r * 1.1, 0.5, p.r * 1.1]} />
-              <meshStandardMaterial color="#7a5634" roughness={0.85} />
             </mesh>
           </group>
         ))}
