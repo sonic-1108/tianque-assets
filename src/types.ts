@@ -25,7 +25,8 @@ export type CharacterActionState =
   | 'launched'
   | 'knockdown'
   | 'getup'
-  | 'dead';
+  | 'dead'
+  | 'buried';
 
 export interface SkillDefinition {
   id: string;
@@ -169,6 +170,11 @@ export interface CombatantState {
   counterTimer?: number;
   /** whether the current dodge already triggered a perfect dodge */
   perfectDodgeUsed?: boolean;
+  /** mini-combo flags */
+  airSlam?: boolean; // 1 pressed in the air: 钉地斩
+  airSlash?: boolean; // left click in the air: 下劈
+  dodgeSlash?: boolean; // left click out of a dodge: 回身斩
+  dodgeEndAt?: number;
   buffs: CombatantBuff[];
   totalDamageDealt: number;
   totalHealingDone: number;

@@ -75,6 +75,7 @@ interface AIMemory {
   request: InputKeyAction | null;
   requestTtl: number;
   dodgeDir: number;
+  airFollow: number; // >0: jumped, will press 1 mid-air for 钉地斩
 }
 
 const yawTo = (from: number[], to: number[]) => Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
@@ -113,7 +114,7 @@ export function Game({
   const wasGrounded = useRef([true, true]);
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
-  const aiRef = useRef<AIMemory>({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1 });
+  const aiRef = useRef<AIMemory>({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
 
   // ---------- VFX ----------
   const vfx = useMemo(() => new VFXSystem(), []);
@@ -291,14 +292,34 @@ export function Game({
       const c = fighters[i];
       const cdt = c.hitStopTimer > 0 ? dt * 0.08 : dt;
       c.stateTimer += cdt;
-      if (c.stateDuration > 0 && c.stateTimer >= c.stateDuration && c.hp > 0) {
+      // Buried: stuck in the ground, then blasted up into the air (juggle window)
+      if (c.actionState === 'buried') {
+        c.vel[0] = 0;
+        c.vel[2] = 0;
+        c.pos[1] = THREE.MathUtils.damp(c.pos[1], -0.75, 25, cdt);
+        if (c.stateTimer >= c.stateDuration && c.hp > 0) {
+          c.pos[1] = 0;
+          c.vel[1] = 8.5;
+          c.isGrounded = false;
+          c.actionState = 'launched';
+          c.stateTimer = 0;
+          c.stateDuration = 0.9;
+          c.juggleCount = 0;
+          vfx.rocks(vB.set(c.pos[0], 0, c.pos[2]), 10, 6, 0.1);
+          vfx.dustPuff(vB, 16, 0.6, 3, 0.7);
+          vfx.ring(vB, 1.8, '#d6c2a8', 0.35, 0.14, 0.3);
+          gameAudio.playMeleePunch();
+        }
+      }
+      if (c.actionState === 'dodge' && c.stateDuration > 0 && c.stateTimer >= c.stateDuration) c.dodgeEndAt = gt;
+      if (c.stateDuration > 0 && c.stateTimer >= c.stateDuration && c.hp > 0 && c.actionState !== 'buried') {
         if (c.actionState !== 'idle' && c.actionState !== 'run' && c.actionState !== 'jump' && c.actionState !== 'block') {
           if (c.actionState === 'knockdown') c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.5); // wake-up invulnerability
           c.actionState = c.isGrounded ? 'idle' : 'jump';
           c.stateDuration = 0;
         }
       }
-      if (!c.isGrounded) {
+      if (!c.isGrounded && c.actionState !== 'buried') {
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
         if (c.pos[1] <= 0) {
@@ -504,6 +525,9 @@ export function Game({
         c.hasHitCurrentMove = false;
         c.multiHitCounter = 0;
         c.actionsPerformed += 1;
+        c.airSlam = false;
+        c.airSlash = false;
+        c.dodgeSlash = false;
         c.rotY = intent.faceYaw;
         c.targetRotY = intent.faceYaw;
         if (push > 0) {
@@ -565,6 +589,25 @@ export function Game({
           return true;
         }
         case 'attack': {
+          // 下劈: left click while airborne
+          if (!c.isGrounded && (cur === 'jump' || cur === 'idle' || cur === 'run')) {
+            start('attack_3', 2);
+            c.stateDuration = 3; // ends on landing
+            c.vel[1] = Math.min(c.vel[1], -16);
+            c.airSlash = true;
+            gameAudio.playSwordClash();
+            report('普攻', '下劈');
+            return true;
+          }
+          // 回身斩: left click during the back half of a dodge or right after it
+          if (c.isGrounded && ((cur === 'dodge' && c.stateTimer > 0.18) || (free && gt - (c.dodgeEndAt ?? -9) < 0.3))) {
+            start('attack_2', 13);
+            c.dodgeSlash = true;
+            vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 8, 0.3, 2, 0.5);
+            gameAudio.playSwordClash();
+            report('普攻', '回身斩');
+            return true;
+          }
           let next: CharacterActionState | null = null;
           if (free) next = 'attack_1';
           else if (cur === 'attack_1' && phase === 'recovery') next = 'attack_2';
@@ -578,8 +621,15 @@ export function Game({
         case 'skill1': {
           if (!paySkill(0, 'skill1', '1')) return false;
           start('skill_1', ACTION_PHASE_CONFIGS.skill_1!.forwardMomentum);
-          if (!c.isGrounded) c.vel[1] = -20;
-          else {
+          if (!c.isGrounded) {
+            // 钉地斩: dive straight down, impact on landing
+            c.vel[1] = -24;
+            c.vel[0] *= 0.3;
+            c.vel[2] *= 0.3;
+            c.airSlam = true;
+            c.stateDuration = 3; // ends on landing
+            report('1: 裂地斩', '钉地斩');
+          } else {
             c.vel[1] = 5.5;
             c.isGrounded = false;
           }
@@ -723,7 +773,7 @@ export function Game({
       }
       // Juggle: airborne targets stay in the air for a few hits, with damage decay
       const airborne = !def.isGrounded && (def.actionState === 'launched' || def.actionState === 'knockdown' || def.actionState === 'hitstun');
-      if (airborne && !o.unblockable) {
+      if (airborne && !o.unblockable && o.state !== 'buried') {
         const jc = def.juggleCount ?? 0;
         dmg *= Math.pow(0.85, jc);
         if (jc < 4) {
@@ -786,8 +836,9 @@ export function Game({
       att.comboResetTimer = 2.5;
       if (rage) att.hp = Math.min(att.maxHp, att.hp + Math.round(dmg * 0.15));
 
-      const armored = def.hasSuperArmor && !o.launch && o.state !== 'knockdown';
-      if (!armored) {
+      const armored = def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried';
+      const stayBuried = def.actionState === 'buried' && o.state !== 'buried';
+      if (!armored && !stayBuried) {
         const knock = o.knock ?? 4;
         def.vel[0] = hitDir.x * knock;
         def.vel[2] = hitDir.z * knock;
@@ -795,6 +846,9 @@ export function Game({
           def.vel[1] = o.launch;
           def.isGrounded = false;
         }
+        def.airSlam = false;
+        def.airSlash = false;
+        def.dodgeSlash = false;
         def.actionState = o.state ?? 'hitstun';
         def.stateTimer = 0;
         def.stateDuration = o.dur ?? 0.35;
@@ -846,14 +900,71 @@ export function Game({
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
       const color = slot === 0 ? (rage ? '#ff1f2f' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
 
-      if (c.actionState.startsWith('attack_') && active && !c.hasHitCurrentMove && dist < 2.6 && inFront) {
+      if (c.actionState.startsWith('attack_') && !c.airSlash && !c.dodgeSlash && active && !c.hasHitCurrentMove && dist < 2.6 && inFront) {
         c.hasHitCurrentMove = true;
         if (c.actionState === 'attack_1') applyHit(slot, c, foe, 60, { knock: 3.5 });
         else if (c.actionState === 'attack_2') applyHit(slot, c, foe, 85, { knock: 4.5 });
         else applyHit(slot, c, foe, 150, { heavy: true, crit: true, knock: 9, state: 'knockdown', dur: 0.9, launch: 4, shake: 0.35 });
       }
 
-      if (c.actionState === 'skill_1' && active && !c.hasHitCurrentMove) {
+      // ---------- mini combos ----------
+      // 钉地斩: lands and nails the opponent into the ground
+      if (c.actionState === 'skill_1' && c.airSlam) {
+        if (!c.isGrounded) vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.8, c.pos[2]), 4, color, 0.3, 4, 0.1);
+        else if (!c.hasHitCurrentMove) {
+          c.hasHitCurrentMove = true;
+          c.airSlam = false;
+          const cfg1 = ACTION_PHASE_CONFIGS.skill_1!;
+          c.stateTimer = cfg1.startup + cfg1.active;
+          c.stateDuration = cfg1.totalDuration;
+          const ix = c.pos[0] + fwd.x * 0.8;
+          const iz = c.pos[2] + fwd.z * 0.8;
+          vfx.groundSlam(vB.set(ix, 0, iz), 0.85, color);
+          controller?.addShake(slot === 0 ? 0.55 : 0.3);
+          gameAudio.playGeneralExplosion();
+          if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.8 && foe.hp > 0) {
+            applyHit(slot, c, foe, 160, { heavy: true, crit: true, knock: 0, state: 'buried', dur: 0.5 });
+            if (foe.actionState === 'buried') {
+              foe.isGrounded = true;
+              foe.vel[1] = 0;
+              foe.pos[1] = Math.min(foe.pos[1], 0);
+              vfx.decal(vB.set(foe.pos[0], 0, foe.pos[2]), 2.2, 1.5);
+              vfx.damageNumber(vA.set(foe.pos[0], 2.4, foe.pos[2]), '钉地!', true, '#fde68a');
+            }
+          }
+        }
+      }
+      // 下劈: airborne downward slash, impact on landing
+      if (c.actionState === 'attack_3' && c.airSlash) {
+        if (c.isGrounded && !c.hasHitCurrentMove) {
+          c.hasHitCurrentMove = true;
+          c.airSlash = false;
+          c.stateTimer = 0.45;
+          c.stateDuration = 0.7;
+          const ix = c.pos[0] + fwd.x * 1.0;
+          const iz = c.pos[2] + fwd.z * 1.0;
+          vfx.ring(vB.set(ix, 0, iz), 1.8, color, 0.35, 0.14, 0.5);
+          vfx.dustPuff(vB, 12, 0.5, 2.5, 0.6);
+          vfx.rocks(vB, 6, 5, 0.08);
+          controller?.addShake(slot === 0 ? 0.35 : 0.2);
+          if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.4 && foe.hp > 0) {
+            applyHit(slot, c, foe, 120, { heavy: true, knock: 5, state: 'knockdown', dur: 0.8, launch: 3 });
+          }
+        }
+        return;
+      }
+      // 回身斩: dash slash out of a dodge
+      if (c.actionState === 'attack_2' && c.dodgeSlash) {
+        if (c.stateTimer < 0.25) vfx.chargeWave(vB.set(c.pos[0], 0, c.pos[2]), fwd, color);
+        if (active && !c.hasHitCurrentMove && dist < 2.8 && inFront) {
+          c.hasHitCurrentMove = true;
+          applyHit(slot, c, foe, 110, { heavy: true, crit: true, knock: 7, dur: 0.55 });
+        }
+        if (c.stateTimer > 0.4) c.dodgeSlash = false;
+        return;
+      }
+
+      if (c.actionState === 'skill_1' && !c.airSlam && active && !c.hasHitCurrentMove) {
         c.hasHitCurrentMove = true;
         const ix = c.pos[0] + fwd.x * 1.5;
         const iz = c.pos[2] + fwd.z * 1.5;
@@ -973,6 +1084,15 @@ export function Game({
         ai.requestTtl = 0.35;
       };
 
+      // 钉地斩 follow-up after an AI jump
+      if (ai.airFollow > 0) {
+        ai.airFollow -= dt2;
+        if (!me.isGrounded && me.vel[1] < 3 && ai.airFollow < 0.25) {
+          ask('skill1');
+          ai.airFollow = 0;
+        }
+      }
+
       // continue a combo string
       if (ai.comboLeft > 0 && (me.actionState === 'attack_1' || me.actionState === 'attack_2') && phaseOf(me).phase === 'recovery') {
         if (dist < 3) ask('attack');
@@ -1011,6 +1131,9 @@ export function Game({
           if (r < 0.55) {
             ask('attack');
             ai.comboLeft = Math.random() < 0.6 ? 2 : 1;
+          } else if (r < 0.62 && ready('skill1') && me.mp >= 20) {
+            ask('jump');
+            ai.airFollow = 0.6;
           } else if (r < 0.68 && ready('skill2') && me.mp >= 25) ask('skill2');
           else if (r < 0.78 && ready('skill1') && me.mp >= 20) ask('skill1');
           else if (r < 0.9) {

@@ -445,7 +445,7 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
     } else if (st === 'hitstun') {
       if (restarted) hitVariantRef.current = (hitVariantRef.current + 1) % 2;
       key = hitVariantRef.current ? 'hit_b' : 'hit_a';
-    } else if (st === 'launched') {
+    } else if (st === 'launched' || st === 'buried') {
       key = 'launched';
     } else if (st === 'knockdown' || st === 'dead') {
       key = 'knockdown';
