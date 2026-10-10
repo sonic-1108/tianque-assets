@@ -189,6 +189,19 @@ export const ACTION_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPh
   },
 };
 
+/** 暗器 (Ranger): quick, light actions. Merged over ACTION_PHASE_CONFIGS. */
+export const RANGER_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPhaseConfig>> = {
+  attack_1: { totalDuration: 0.34, startup: 0.07, active: 0.15, recovery: 0.12, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  attack_2: { totalDuration: 0.34, startup: 0.07, active: 0.15, recovery: 0.12, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  attack_3: { totalDuration: 0.42, startup: 0.08, active: 0.1, recovery: 0.24, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
+  dodge: { totalDuration: 0.42, startup: 0.02, active: 0.3, recovery: 0.1, canMoveRatio: 0, forwardMomentum: 15, cancelableByDodge: false, cancelableBySkill: true, cancelableByJump: false, allowAirCast: true },
+  skill_1: { totalDuration: 0.42, startup: 0.12, active: 0.08, recovery: 0.22, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  skill_2: { totalDuration: 0.36, startup: 0.1, active: 0.08, recovery: 0.18, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  skill_3: { totalDuration: 0.62, startup: 0.06, active: 0.2, recovery: 0.36, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: false, cancelableBySkill: true, cancelableByJump: false, allowAirCast: true },
+  skill_4: { totalDuration: 0.4, startup: 0.1, active: 0.1, recovery: 0.2, canMoveRatio: 0.5, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  ultimate: { totalDuration: 2.9, startup: 0.45, active: 2.0, recovery: 0.45, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: false, cancelableBySkill: false, cancelableByJump: false, allowAirCast: true },
+};
+
 export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
   Berserker: {
     id: 'Berserker',
@@ -504,6 +517,28 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
         icon: '👑',
         isSuper: true,
       },
+    ],
+  },
+  Ranger: {
+    id: 'Ranger',
+    name: '暗器',
+    defaultCharacter: '沈惊鸿',
+    role: '中距离暗器 / 灵巧风筝 (Ranged Skirmisher)',
+    roleType: 'dps',
+    description: '一身暗器的江南女侠。身法极快、血量偏低，用飞镖在中距离持续消耗，被贴身就后跳拉开。',
+    hp: 1000,
+    mp: 100,
+    speedRatio: 1.05,
+    attackSpeedRatio: 1.4,
+    staggerPower: 0.6,
+    passiveName: '袖里乾坤',
+    passiveDesc: '飞镖每命中5次，下一发变成金色穿透镖：伤害翻倍，无视格挡。',
+    skills: [
+      { id: 'boomerang', name: '回旋镖', key: '1 / Q', description: '掷出一枚大回旋镖，飞出约9米后折返，去程和回程都会伤人并把人推开。', mpCost: 15, cooldown: 5, icon: '🪃' },
+      { id: 'pin_dart', name: '定身镖', key: '2 / E', description: '掷出一枚重镖，命中后把对手钉在原地1.5秒，期间无法移动（仍可出招）。', mpCost: 20, cooldown: 9, icon: '📌' },
+      { id: 'swallow_flip', name: '燕返', key: '3', description: '向后空翻跃出一大段距离，同时向前方扇形甩出7枚飞镖。翻身过程中短暂无敌，用来逃离近身。', mpCost: 15, cooldown: 6, icon: '🕊️' },
+      { id: 'poison', name: '淬毒', key: '4', description: '6秒内所有飞镖淬上剧毒，命中叠加中毒（最多5层），每层每0.5秒持续掉血，持续4秒。', mpCost: 10, cooldown: 14, icon: '☠️' },
+      { id: 'rain_of_darts', name: '暴雨梨花', key: 'R', description: '纵身跃上半空悬停约2秒，向下方大片区域洒下漫天飞镖。悬空期间霸体。', mpCost: 50, cooldown: 22, icon: '🌸', isSuper: true },
     ],
   },
 };

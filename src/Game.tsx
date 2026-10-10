@@ -5,9 +5,9 @@ import { EffectComposer, Bloom, Vignette, ToneMapping } from '@react-three/postp
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
-import { CombatantState, GameState, TargetingState, CharacterActionState } from './types';
+import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId } from './types';
 import { GameInputSnapshot, InputKeyAction } from './input';
-import { ACTION_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
+import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER } from './maps';
@@ -31,6 +31,8 @@ interface GameSceneProps {
   /** true = 霍岩影 fights back; false = passive training dummy */
   aiEnabledRef: React.MutableRefObject<boolean>;
   mapId: MapId;
+  playerClass?: CharacterClassId;
+  enemyClass?: CharacterClassId;
   showBoneAxes?: boolean;
   onRoundEvent?: (e: RoundEvent) => void;
   onVfxCountChange?: (count: number) => void;
@@ -60,6 +62,38 @@ const SWING_STATES = new Set<CharacterActionState>(['attack_1', 'attack_2', 'att
 const ARMOR_STATES = new Set<CharacterActionState>(['skill_1', 'skill_2', 'skill_3', 'ultimate']);
 const PLAYER_COLOR = '#ff4a1c';
 const ENEMY_COLOR = '#3fa9ff';
+const RANGER_PLAYER_COLOR = '#2dd4bf';
+const RANGER_ENEMY_COLOR = '#a78bfa';
+const GOLD = '#fbbf24';
+const POISON_COLOR = '#86efac';
+const UP = new THREE.Vector3(0, 1, 0);
+
+const phasesFor = (c: CombatantState) => (c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : ACTION_PHASE_CONFIGS);
+const colorFor = (slot: number, c: CombatantState) =>
+  c.classId === 'Ranger' ? (slot === 0 ? RANGER_PLAYER_COLOR : RANGER_ENEMY_COLOR) : slot === 0 ? PLAYER_COLOR : ENEMY_COLOR;
+
+/** A flying 暗器 (dart, pin or boomerang) */
+interface Projectile {
+  kind: 'dart' | 'pin' | 'boomerang';
+  obj: THREE.Object3D;
+  slot: number;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  life: number;
+  dmg: number;
+  knock: number;
+  dur: number;
+  color: string;
+  pierce: boolean;
+  poison: boolean;
+  root: number;
+  noStop: boolean;
+  spent: boolean;
+  traveled: number;
+  back: boolean;
+  hitOut: boolean;
+  hitBack: boolean;
+}
 
 /** What a fighter wants to do this frame (from keyboard or from the AI). */
 interface Intent {
@@ -92,6 +126,8 @@ export function Game({
   targetingRefState,
   aiEnabledRef,
   mapId,
+  playerClass = 'Berserker',
+  enemyClass = 'Berserker',
   showBoneAxes,
   onRoundEvent,
   onVfxCountChange,
@@ -126,7 +162,8 @@ export function Game({
   const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
   useEffect(() => {
     pendingResetRef.current = true;
-  }, [mapId]);
+  }, [mapId, playerClass, enemyClass]);
+  const projRef = useRef<Projectile[]>([]);
   const auraTimers = useRef([0, 0]);
   const footTimers = useRef([0, 0]);
   const wasGrounded = useRef([true, true]);
@@ -189,9 +226,8 @@ export function Game({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const baseSpeed = (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS.Berserker.speedRatio || 0.75);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85);
     const jumpVel = getConfig('jumpVelocity') || 11;
-    const skills = CLASS_CONFIGS.Berserker.skills;
 
     const p1 = p1RefState.current;
     const en = dummyRefState.current;
@@ -224,6 +260,24 @@ export function Game({
       }
       c.mp = Math.min(c.maxMp, c.mp + dt * 8);
       if ((c.counterTimer ?? 0) > 0) c.counterTimer = (c.counterTimer ?? 0) - dt;
+      if ((c.rootTimer ?? 0) > 0) c.rootTimer = (c.rootTimer ?? 0) - dt;
+      if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
+    }
+    // 淬毒: poison damage over time
+    for (let i = 0; i < 2; i++) {
+      const c = fighters[i];
+      if ((c.poisonTimer ?? 0) <= 0 || c.hp <= 0) continue;
+      c.poisonTimer = (c.poisonTimer ?? 0) - dt;
+      c.poisonTick = (c.poisonTick ?? 0) + dt;
+      if (c.poisonTick >= 0.5) {
+        c.poisonTick = 0;
+        const d = 7 * Math.max(1, c.poisonStacks ?? 1);
+        c.hp = Math.max(0, c.hp - d);
+        vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 1.9, c.pos[2]), d, false, POISON_COLOR);
+        vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), 4, '#22c55e', 0.4, 1.2, 0.07);
+        if (c.hp <= 0) koCheck(i, colorFor(1 - i, fighters[1 - i]));
+      }
+      if (c.poisonTimer <= 0) c.poisonStacks = 0;
     }
 
     // ---------- round flow ----------
@@ -268,7 +322,7 @@ export function Game({
       move: pMove,
       faceYaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : camYaw,
       request: round.over ? null : input.peekBuffer(),
-      block: actions.special && !round.over,
+      block: actions.special && !round.over && p1.classId !== 'Ranger',
     };
 
     // Opponent: AI brain
@@ -290,6 +344,7 @@ export function Game({
     // ================= COMBAT =================
     resolveAttacks(0, p1, en);
     resolveAttacks(1, en, p1);
+    updateProjectiles(dt);
 
     // ================= PHYSICS =================
     for (let i = 0; i < 2; i++) {
@@ -323,7 +378,9 @@ export function Game({
           c.stateDuration = 0;
         }
       }
-      if (!c.isGrounded && c.actionState !== 'buried') {
+      const hovering = c.classId === 'Ranger' && c.actionState === 'ultimate' && c.stateTimer > 0.45 && c.stateTimer < 2.45;
+      if (hovering) c.vel[1] = 0;
+      if (!c.isGrounded && c.actionState !== 'buried' && !hovering) {
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
         if (c.pos[1] <= 0 && c.pos[1] > -0.6 && overGround(c)) {
@@ -340,6 +397,12 @@ export function Game({
           }
           if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
         }
+      }
+      const pinned = (c.rootTimer ?? 0) > 0 && c.isGrounded && c.actionState !== 'launched' && c.actionState !== 'knockdown';
+      if (pinned) {
+        c.vel[0] = 0;
+        c.vel[2] = 0;
+        if (Math.random() < 0.15) vfx.ring(vB.set(c.pos[0], 0.04, c.pos[2]), 0.9, '#5eead4', 0.25, 0.06);
       }
       c.pos[0] += c.vel[0] * cdt;
       c.pos[2] += c.vel[2] * cdt;
@@ -426,16 +489,17 @@ export function Game({
     [p1, en].forEach((c, i) => {
       const s = (i === 0 ? playerSockets : enemySockets).current;
       const t = trails[i];
-      const cfg = ACTION_PHASE_CONFIGS[c.actionState];
+      const cfg = phasesFor(c)[c.actionState];
       const swinging =
         SWING_STATES.has(c.actionState) &&
         (c.actionState === 'skill_2' ||
           c.actionState === 'skill_3' ||
           (c.actionState === 'ultimate' ? !!c.ultSlamStarted && c.stateTimer < 1.0 : !!cfg && c.stateTimer >= cfg.startup * 0.4 && c.stateTimer <= cfg.startup + cfg.active + 0.05));
-      t.right.emitting = swinging;
-      t.left.emitting = swinging && c.actionState !== 'attack_1';
+      const rangerC = c.classId === 'Ranger';
+      t.right.emitting = rangerC ? c.actionState === 'attack_3' && !!c.backSlash && c.stateTimer < 0.3 : swinging;
+      t.left.emitting = !rangerC && swinging && c.actionState !== 'attack_1';
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
-      const col = i === 0 ? (rage ? '#ff1030' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
+      const col = rangerC ? colorFor(i, c) : i === 0 ? (rage ? '#ff1030' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
       t.right.setColor(col, 2.2);
       t.left.setColor(col, 2.2);
       if (s.rightBase && s.rightTip) t.right.update(rawDt, s.rightBase.getWorldPosition(vA), s.rightTip.getWorldPosition(vB), now);
@@ -474,7 +538,7 @@ export function Game({
     }
 
     function phaseOf(c: CombatantState) {
-      const cfg = ACTION_PHASE_CONFIGS[c.actionState];
+      const cfg = phasesFor(c)[c.actionState];
       if (!cfg || c.stateDuration <= 0) return { phase: 'none' as const, progress: 0 };
       const t = c.stateTimer;
       if (t < cfg.startup) return { phase: 'startup' as const, progress: t / Math.max(0.0001, cfg.startup) };
@@ -485,9 +549,11 @@ export function Game({
     function executeIntent(slot: number, c: CombatantState, foe: CombatantState, intent: Intent): boolean {
       if (c.hp <= 0) return false;
       const isPlayer = slot === 0;
+      const ranger = c.classId === 'Ranger';
+      const skills = CLASS_CONFIGS[c.classId].skills;
       const dbg = input.debug;
       const cur = c.actionState;
-      const cfgCur = ACTION_PHASE_CONFIGS[cur];
+      const cfgCur = phasesFor(c)[cur];
       const { phase, progress } = phaseOf(c);
       const free = isFree(c);
       const basic = cur.startsWith('attack_');
@@ -507,16 +573,17 @@ export function Game({
       // Soft lock: attacks snap toward a nearby opponent that is roughly in front
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-        if (fd < 4.2 && foe.hp > 0) {
+        const range = ranger ? 22 : 4.2;
+        if (fd < range && foe.hp > 0) {
           const ty = yawTo(c.pos, foe.pos);
           let dd = ty - intent.faceYaw;
           while (dd > Math.PI) dd -= Math.PI * 2;
           while (dd < -Math.PI) dd += Math.PI * 2;
-          if (Math.abs(dd) < 1.25) intent.faceYaw = ty;
+          if (Math.abs(dd) < (ranger && fd > 4.2 ? 0.4 : 1.25)) intent.faceYaw = ty;
         }
       }
       const start = (next: CharacterActionState, push = 0) => {
-        const cfg = ACTION_PHASE_CONFIGS[next]!;
+        const cfg = phasesFor(c)[next]!;
         c.actionState = next;
         c.stateTimer = 0;
         c.stateDuration = cfg.totalDuration;
@@ -549,11 +616,93 @@ export function Game({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
-      const color = isPlayer ? PLAYER_COLOR : ENEMY_COLOR;
-      const sfx = isPlayer ? 1 : 0.6;
-      void sfx;
+      const color = colorFor(slot, c);
+      const rooted = (c.rootTimer ?? 0) > 0 && c.isGrounded;
+      if (rooted && (req === 'dodge' || req === 'jump')) return report(req === 'dodge' ? '闪避' : '跳跃', '被定身'), false;
+
+      if (ranger && req !== 'dodge' && req !== 'jump') {
+        const f = fwdOf(intent.faceYaw).clone();
+        switch (req) {
+          case 'attack': {
+            let next: CharacterActionState | null = null;
+            if (free || (cur === 'dodge' && c.stateTimer > 0.22)) next = 'attack_1';
+            else if (cur === 'attack_1' && phase === 'recovery') next = 'attack_2';
+            else if (cur === 'attack_2' && phase === 'recovery') next = 'attack_3';
+            else if (cur === 'attack_3' && !c.backSlash && phase === 'recovery') next = 'attack_1';
+            if (!next) return report('普攻', `被 [${cur} ${phase}] 占用`), false;
+            start(next);
+            c.volleyShots = 0;
+            c.backSlash = false;
+            report('普攻', next === 'attack_3' ? '三连镖' : '飞镖');
+            return true;
+          }
+          case 'special': {
+            if ((c.cooldowns.special ?? 0) > 0) return report('右键: 撩刀后撤', '冷却中'), false;
+            if (!canSkill && !canDodge) return report('右键: 撩刀后撤', `被 [${cur} ${phase}] 占用`), false;
+            c.cooldowns.special = 2.5;
+            start('attack_3', rooted ? 0 : 4);
+            c.backSlash = true;
+            c.volleyShots = 0;
+            gameAudio.playSwordClash();
+            report('右键: 撩刀后撤', '成功施放 (Cast)');
+            return true;
+          }
+          case 'skill1':
+          case 'skill2': {
+            const one = req === 'skill1';
+            if (!paySkill(one ? 0 : 1, req, one ? '1' : '2')) return false;
+            start(one ? 'skill_1' : 'skill_2');
+            c.volleyShots = 0;
+            gameAudio.playArcadeLaser();
+            return true;
+          }
+          case 'skill3': {
+            if (!paySkill(2, 'skill3', '3')) return false;
+            start('skill_3');
+            c.volleyShots = 0;
+            if (!rooted) {
+              c.vel[0] = -f.x * 17;
+              c.vel[2] = -f.z * 17;
+            }
+            c.vel[1] = 7.5;
+            c.isGrounded = false;
+            c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.4);
+            c.perfectDodgeUsed = true;
+            vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.5);
+            if (isPlayer) gameAudio.playRetroJump();
+            return true;
+          }
+          case 'skill4': {
+            if (!paySkill(3, 'skill4', '4')) return false;
+            start('skill_4');
+            c.poisonBuff = 6;
+            vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
+            vfx.embers(vC.set(c.pos[0], 0.4, c.pos[2]), 30, '#4ade80', 0.6, 2.5, 0.07);
+            gameAudio.playPowerupChime();
+            return true;
+          }
+          case 'ultimate': {
+            if (!paySkill(4, 'ultimate', 'R')) return false;
+            start('ultimate');
+            c.vel[0] = 0;
+            c.vel[2] = 0;
+            c.vel[1] = 12;
+            c.isGrounded = false;
+            c.volleyShots = 0;
+            const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+            c.rainCenter = foe.hp > 0 && fd < 14 ? [foe.pos[0], foe.pos[2]] : [c.pos[0] + f.x * 7, c.pos[2] + f.z * 7];
+            vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
+            vfx.embers(vC.set(c.pos[0], 0.3, c.pos[2]), 30, color, 0.6, 4, 0.08);
+            gameAudio.playVictoryFanfare();
+            return true;
+          }
+        }
+        return false;
+      }
 
       switch (req) {
+        case 'special':
+          return true; // berserker: right click is block (held), nothing to cast
         case 'dodge': {
           if (c.dodgeCooldownTimer > 0 || !canDodge) return report('闪避', '无法闪避'), false;
           const dir = vA.copy(intent.move);
@@ -563,7 +712,7 @@ export function Game({
           const rollYaw = Math.atan2(-dir.x, -dir.z);
           c.actionState = 'dodge';
           c.stateTimer = 0;
-          c.stateDuration = ACTION_PHASE_CONFIGS.dodge!.totalDuration;
+          c.stateDuration = phasesFor(c).dodge!.totalDuration;
           c.rotY = c.targetRotY = rollYaw;
           c.vel[0] = dir.x * 15;
           c.vel[2] = dir.z * 15;
@@ -611,14 +760,14 @@ export function Game({
           else if (cur === 'attack_1' && phase === 'recovery') next = 'attack_2';
           else if (cur === 'attack_2' && phase === 'recovery') next = 'attack_3';
           if (!next) return report('普攻', `被 [${cur} ${phase}] 占用`), false;
-          start(next, ACTION_PHASE_CONFIGS[next]!.forwardMomentum);
+          start(next, phasesFor(c)[next]!.forwardMomentum);
           gameAudio.playSwordClash();
           report('普攻', `施放 ${next.slice(-1)} 段斩`);
           return true;
         }
         case 'skill1': {
           if (!paySkill(0, 'skill1', '1')) return false;
-          start('skill_1', ACTION_PHASE_CONFIGS.skill_1!.forwardMomentum);
+          start('skill_1', phasesFor(c).skill_1!.forwardMomentum);
           if (!c.isGrounded) {
             // 钉地斩: dive straight down, impact on landing
             c.vel[1] = -24;
@@ -637,14 +786,14 @@ export function Game({
         case 'skill2': {
           if (!paySkill(1, 'skill2', '2')) return false;
           start('skill_2', 0);
-          vfx.setVortex(true, ACTION_PHASE_CONFIGS.skill_2!.totalDuration, slot);
+          vfx.setVortex(true, phasesFor(c).skill_2!.totalDuration, slot);
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 18, 1, 3, 0.7);
           gameAudio.playArcadeLaser();
           return true;
         }
         case 'skill3': {
           if (!paySkill(2, 'skill3', '3')) return false;
-          start('skill_3', ACTION_PHASE_CONFIGS.skill_3!.forwardMomentum);
+          start('skill_3', phasesFor(c).skill_3!.forwardMomentum);
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 14, 0.5, 2.5, 0.6);
           gameAudio.playGunshotBlast();
           return true;
@@ -670,7 +819,7 @@ export function Game({
         }
         case 'ultimate': {
           if (!paySkill(4, 'ultimate', 'R')) return false;
-          start('ultimate', ACTION_PHASE_CONFIGS.ultimate!.forwardMomentum);
+          start('ultimate', phasesFor(c).ultimate!.forwardMomentum);
           c.vel[1] = 13;
           c.isGrounded = false;
           c.ultSlamStarted = false;
@@ -686,17 +835,19 @@ export function Game({
 
     function applyMovement(c: CombatantState, intent: Intent) {
       const st = c.actionState;
-      const whirl = st === 'skill_2';
-      const charge = st === 'skill_3';
+      const ranger = c.classId === 'Ranger';
+      const whirl = !ranger && st === 'skill_2';
+      const charge = !ranger && st === 'skill_3';
       const dodging = st === 'dodge';
-      const blocking = intent.block && c.isGrounded && c.hp > 0 && (st === 'idle' || st === 'run' || st === 'block');
+      const rangerThrow = ranger && (st === 'attack_1' || st === 'attack_2' || st === 'skill_4');
+      const blocking = !ranger && intent.block && c.isGrounded && c.hp > 0 && (st === 'idle' || st === 'run' || st === 'block');
       if (blocking && !c.isBlocking) c.blockStart = gt;
       c.isBlocking = blocking;
       if (blocking) {
         c.actionState = 'block';
         c.stateDuration = 0;
       } else if (st === 'block') c.actionState = 'idle';
-      c.hasSuperArmor = ARMOR_STATES.has(c.actionState);
+      c.hasSuperArmor = ranger ? c.actionState === 'ultimate' : ARMOR_STATES.has(c.actionState);
 
       // local move (x = right, z = forward relative to facing) drives strafe/backpedal animation
       const f = fwdOf(c.rotY);
@@ -704,16 +855,17 @@ export function Game({
       const rZ = -Math.sin(c.rotY);
       c.localMove = [intent.move.x * rX + intent.move.z * rZ, intent.move.x * f.x + intent.move.z * f.z];
 
-      const canMove = !dodging && !charge && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || whirl);
+      const canMove = !dodging && !charge && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || whirl || rangerThrow);
       if (canMove) {
         if (intent.move.lengthSq() > 0.01) {
           vA.copy(intent.move);
           const lz2 = c.localMove[1];
           let mult = lz2 < -0.3 ? 0.6 : Math.abs(c.localMove[0]) > 0.7 ? 0.85 : 1;
           if (whirl) mult = 0.45;
+          if (rangerThrow) mult = 0.55;
           if (c.actionState === 'block') mult = 0.25;
           if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
-          const spd = baseSpeed * mult * Math.min(1, vA.length());
+          const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
           const accel = c.isGrounded ? 18 : 6;
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], vA.x * spd, accel, dt);
@@ -734,14 +886,14 @@ export function Game({
       att: CombatantState,
       def: CombatantState,
       base: number,
-      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean }
+      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean }
     ) {
       if (def.hp <= 0) return;
       const o = { ...oIn };
       const attackerIsPlayer = slot === 0;
       const hitDir = vC.set(def.pos[0] - att.pos[0], 0, def.pos[2] - att.pos[2]).normalize();
       const chest = vB.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]).addScaledVector(hitDir, -0.35);
-      const color = attackerIsPlayer ? PLAYER_COLOR : ENEMY_COLOR;
+      const color = colorFor(slot, att);
 
       // dodge i-frames / wake-up invulnerability
       if (def.dodgeIframeTimer > 0) {
@@ -789,7 +941,7 @@ export function Game({
       const frontal = facing.x * -hitDir.x + facing.z * -hitDir.z > 0.2;
       if (def.isBlocking && frontal && !o.unblockable && gt - (def.blockStart ?? -9) < 0.22) {
         // Perfect block: attacker is knocked off balance, defender gets a counter window
-        if (!att.hasSuperArmor) {
+        if (!att.hasSuperArmor && !o.ranged) {
           att.actionState = 'hitstun';
           att.stateTimer = 0;
           att.stateDuration = 0.65;
@@ -855,19 +1007,20 @@ export function Game({
       }
       att.mp = Math.min(att.maxMp, att.mp + (o.heavy ? 6 : 3));
       def.whiteFlashTimer = o.heavy ? 0.1 : 0.06;
-      const stop = o.heavy ? 0.11 : 0.055;
+      const stop = o.noStop ? 0 : o.heavy ? 0.11 : 0.055;
       if (!o.noMark) vfx.slashMark(chest, color, o.heavy ? 1.3 : 0.9);
-      controller?.kick(o.heavy ? -4.5 : -1.2);
+      if (!o.noStop) controller?.kick(o.heavy ? -4.5 : -1.2);
       att.hitStopTimer = stop;
       def.hitStopTimer = stop;
-      vfx.hitImpact(chest, hitDir, !!o.heavy, color);
+      if (o.noStop) vfx.sparkBurst(chest, 6, color, 5, 0.06, hitDir, 1.2);
+      else vfx.hitImpact(chest, hitDir, !!o.heavy, color);
       vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.05, def.pos[2]), dmg, !!o.crit, attackerIsPlayer ? '#ffffff' : '#ff8a8a');
       if (o.crit) gameAudio.playChiptuneExplosion();
       else gameAudio.playMeleePunch();
       if (attackerIsPlayer && o.shake) controller?.addShake(o.shake);
       if (!attackerIsPlayer) {
-        controller?.addShake(o.heavy ? 0.45 : 0.18);
-        onRoundEvent?.({ type: 'playerHit', heavy: !!o.heavy });
+        controller?.addShake(o.noStop ? 0.05 : o.heavy ? 0.45 : 0.18);
+        if (!o.noStop) onRoundEvent?.({ type: 'playerHit', heavy: !!o.heavy });
       }
 
       koCheck(def === p1 ? 0 : 1, color);
@@ -878,10 +1031,14 @@ export function Game({
       const fwd = fwdOf(c.rotY).clone();
       const dist = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
       const inFront = (fwd.x * (foe.pos[0] - c.pos[0]) + fwd.z * (foe.pos[2] - c.pos[2])) / Math.max(0.001, dist) > 0.2;
-      const cfg = ACTION_PHASE_CONFIGS[c.actionState];
+      const cfg = phasesFor(c)[c.actionState];
       const active = !!cfg && c.stateTimer >= cfg.startup && c.stateTimer <= cfg.startup + cfg.active;
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
       const color = slot === 0 ? (rage ? '#ff1f2f' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
+      if (c.classId === 'Ranger') {
+        resolveRanger(slot, c, foe, fwd, dist, inFront, active);
+        return;
+      }
 
       if (c.actionState.startsWith('attack_') && !c.airSlash && !c.dodgeSlash && active && !c.hasHitCurrentMove && dist < 2.6 && inFront) {
         c.hasHitCurrentMove = true;
@@ -897,7 +1054,7 @@ export function Game({
         else if (!c.hasHitCurrentMove) {
           c.hasHitCurrentMove = true;
           c.airSlam = false;
-          const cfg1 = ACTION_PHASE_CONFIGS.skill_1!;
+          const cfg1 = phasesFor(c).skill_1!;
           c.stateTimer = cfg1.startup + cfg1.active;
           c.stateDuration = cfg1.totalDuration;
           const ix = c.pos[0] + fwd.x * 0.8;
@@ -1005,7 +1162,7 @@ export function Game({
           c.hasHitCurrentMove = true;
           applyHit(slot, c, foe, 170, { heavy: true, crit: true, knock: 15, launch: 7, state: 'knockdown', dur: 1, shake: 0.55 });
           // Charge connects: jump straight to recovery so a skill can be chained immediately
-          const c3 = ACTION_PHASE_CONFIGS.skill_3!;
+          const c3 = phasesFor(c).skill_3!;
           c.stateTimer = Math.max(c.stateTimer, c3.startup + c3.active);
           vfx.ring(vB.set(foe.pos[0], 0, foe.pos[2]), 2.2, color, 0.4, 0.14, 0.4);
           c.vel[0] *= 0.2;
@@ -1040,11 +1197,352 @@ export function Game({
     }
 
     // ======================================================
+    // 暗器 (Ranger)
+    // ======================================================
+    function handPos(c: CombatantState, fwd: THREE.Vector3) {
+      const rx = Math.cos(c.rotY);
+      const rz = -Math.sin(c.rotY);
+      return new THREE.Vector3(c.pos[0] + fwd.x * 0.45 + rx * 0.18, c.pos[1] + 1.35, c.pos[2] + fwd.z * 0.45 + rz * 0.18);
+    }
+
+    /** Aim at the opponent's chest when they are roughly in front, otherwise straight ahead */
+    function aimDir(c: CombatantState, foe: CombatantState, fwd: THREE.Vector3, from: THREE.Vector3, spread = 0) {
+      const tx = foe.pos[0] - c.pos[0];
+      const tz = foe.pos[2] - c.pos[2];
+      const d = Math.hypot(tx, tz);
+      const cos = (fwd.x * tx + fwd.z * tz) / Math.max(0.001, d);
+      const dir =
+        foe.hp > 0 && d < 24 && cos > 0.8
+          ? new THREE.Vector3(foe.pos[0], foe.pos[1] + 1.05, foe.pos[2]).sub(from).normalize()
+          : new THREE.Vector3(fwd.x, -0.02, fwd.z).normalize();
+      if (spread) dir.applyAxisAngle(UP, spread);
+      return dir;
+    }
+
+    function fireProjectile(
+      slot: number,
+      c: CombatantState,
+      kind: Projectile['kind'],
+      from: THREE.Vector3,
+      dir: THREE.Vector3,
+      speed: number,
+      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean }
+    ) {
+      const obj = vfx.takeProjectile(kind);
+      if (!obj) return;
+      let pierce = false;
+      let dmg = o.dmg;
+      let color = colorFor(slot, c);
+      if (kind === 'dart' && c.pierceNext && !o.noPassive) {
+        // 袖里乾坤: golden piercing dart
+        c.pierceNext = false;
+        pierce = true;
+        dmg *= 2;
+        color = GOLD;
+      }
+      obj.scale.setScalar(kind === 'pin' ? 2.2 : pierce ? 1.6 : 1);
+      obj.position.copy(from);
+      const p: Projectile = {
+        kind,
+        obj,
+        slot,
+        pos: from.clone(),
+        vel: dir.clone().multiplyScalar(speed),
+        life: o.life ?? 0.8,
+        dmg,
+        knock: o.knock ?? 1.2,
+        dur: o.dur ?? 0.22,
+        color,
+        pierce,
+        poison: (c.poisonBuff ?? 0) > 0,
+        root: o.root ?? 0,
+        noStop: !!o.noStop,
+        spent: false,
+        traveled: 0,
+        back: false,
+        hitOut: false,
+        hitBack: false,
+      };
+      projRef.current.push(p);
+    }
+
+    function resolveRanger(slot: number, c: CombatantState, foe: CombatantState, fwd: THREE.Vector3, dist: number, inFront: boolean, active: boolean) {
+      const cfg = phasesFor(c)[c.actionState];
+      const st = c.actionState;
+      const t = c.stateTimer;
+      const shots = c.volleyShots ?? 0;
+      const color = colorFor(slot, c);
+      const ready = !!cfg && t >= cfg.startup && shots === 0;
+
+      if ((st === 'attack_1' || st === 'attack_2') && ready) {
+        c.volleyShots = 1;
+        const from = handPos(c, fwd);
+        fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from), 34, { dmg: 42 });
+        gameAudio.playCrispClick();
+      }
+      if (st === 'attack_3' && !c.backSlash && ready) {
+        c.volleyShots = 1;
+        const from = handPos(c, fwd);
+        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 34, { dmg: 36, knock: 3, dur: 0.3 });
+        gameAudio.playArcadeLaser();
+      }
+      if (st === 'attack_3' && c.backSlash && active && !c.hasHitCurrentMove) {
+        // 撩刀后撤: backhand slash, then spring away
+        c.hasHitCurrentMove = true;
+        vfx.slashMark(vB.set(c.pos[0] + fwd.x * 0.9, c.pos[1] + 1.1, c.pos[2] + fwd.z * 0.9), color, 1.0);
+        if (dist < 2.5 && inFront) applyHit(slot, c, foe, 55, { knock: 6, dur: 0.45 });
+        if ((c.rootTimer ?? 0) <= 0) {
+          c.vel[0] = -fwd.x * 13;
+          c.vel[2] = -fwd.z * 13;
+        }
+        vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 8, 0.3, 2, 0.45);
+      }
+      if (st === 'skill_1' && ready) {
+        c.volleyShots = 1;
+        const from = handPos(c, fwd);
+        const d = aimDir(c, foe, fwd, from);
+        d.y = Math.max(-0.08, Math.min(0.08, d.y));
+        fireProjectile(slot, c, 'boomerang', from, d.normalize(), 18, { dmg: 65, knock: 5, dur: 0.4, life: 3, noPassive: true });
+      }
+      if (st === 'skill_2' && ready) {
+        c.volleyShots = 1;
+        const from = handPos(c, fwd);
+        fireProjectile(slot, c, 'pin', from, aimDir(c, foe, fwd, from), 42, { dmg: 60, root: 1.5, dur: 0.3, noPassive: true });
+        vfx.flash(from, color, 10, 0.1, 4);
+      }
+      if (st === 'skill_3' && t >= 0.12 && shots === 0) {
+        // 燕返: fan of 7 darts thrown mid-backflip
+        c.volleyShots = 1;
+        const from = handPos(c, fwd);
+        from.y = c.pos[1] + 1.2;
+        for (let k = 0; k < 7; k++) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, (k - 3) * 0.17), 30, { dmg: 30, knock: 2 });
+        gameAudio.playArcadeLaser();
+      }
+      if (st === 'skill_4' && Math.random() < 0.4) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.1, c.pos[2]), 1, '#4ade80', 0.3, 1.5, 0.06);
+      if ((c.poisonBuff ?? 0) > 0 && Math.random() < 0.15) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.2, c.pos[2]), 1, '#4ade80', 0.35, 1, 0.05);
+      if (c.pierceNext && Math.random() < 0.2) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.3, c.pos[2]), 1, GOLD, 0.3, 1, 0.05);
+
+      if (st === 'ultimate') {
+        // 暴雨梨花: hover and rain darts on an area that drifts toward the opponent
+        const rc = c.rainCenter ?? [c.pos[0], c.pos[2]];
+        if (t > 0.45 && t < 2.45) {
+          c.vel[0] = 0;
+          c.vel[2] = 0;
+          if (foe.hp > 0) {
+            rc[0] = THREE.MathUtils.damp(rc[0], foe.pos[0], 1.6, dt);
+            rc[1] = THREE.MathUtils.damp(rc[1], foe.pos[2], 1.6, dt);
+          }
+          c.rainCenter = rc;
+          const target = Math.floor((t - 0.45) / 0.05) + 1;
+          while ((c.volleyShots ?? 0) < target) {
+            c.volleyShots = (c.volleyShots ?? 0) + 1;
+            const focus = Math.random() < 0.5 && foe.hp > 0;
+            const a = Math.random() * Math.PI * 2;
+            const r = focus ? Math.random() * 0.7 : Math.sqrt(Math.random()) * 4;
+            const tx = (focus ? foe.pos[0] : rc[0]) + Math.cos(a) * r;
+            const tz = (focus ? foe.pos[2] : rc[1]) + Math.sin(a) * r;
+            const ty = focus ? foe.pos[1] + 0.9 : 0;
+            const from = new THREE.Vector3(c.pos[0] + (Math.random() - 0.5) * 0.8, c.pos[1] + 1.3, c.pos[2] + (Math.random() - 0.5) * 0.8);
+            const dir = new THREE.Vector3(tx, ty, tz).sub(from).normalize();
+            fireProjectile(slot, c, 'dart', from, dir, 30, { dmg: 15, knock: 0.6, dur: 0.16, noStop: true, noPassive: true, life: 0.7 });
+          }
+          if (Math.random() < 0.12) vfx.ring(vB.set(rc[0], 0.05, rc[1]), 4, color, 0.3, 0.08);
+          if (Math.random() < 0.3) vfx.embers(vC.set(c.pos[0], c.pos[1] + 1, c.pos[2]), 2, '#f9a8d4', 0.5, -1, 0.07);
+        }
+      }
+    }
+
+    function updateProjectiles(step: number) {
+      const list = projRef.current;
+      const pillars = map.pillars || [];
+      for (let n = list.length - 1; n >= 0; n--) {
+        const p = list[n];
+        const owner = fighters[p.slot];
+        const def = fighters[1 - p.slot];
+        p.life -= step;
+        let dead = p.life <= 0;
+        if (p.kind === 'boomerang') {
+          if (!p.back && p.traveled >= 9) p.back = true;
+          if (p.back) {
+            vA.set(owner.pos[0], owner.pos[1] + 1.2, owner.pos[2]).sub(p.pos);
+            if (vA.length() < 0.8 || owner.hp <= 0) dead = true;
+            p.vel.copy(vA.normalize().multiplyScalar(20));
+          }
+          p.obj.rotation.y += step * 26;
+        }
+        // two substeps so fast darts never skip through a body
+        for (let sub = 0; sub < 2 && !dead; sub++) {
+          p.pos.addScaledVector(p.vel, step / 2);
+          p.traveled += (p.vel.length() * step) / 2;
+          if (p.kind !== 'boomerang') {
+            if (p.pos.y < 0.02) {
+              dead = true;
+              vfx.sparkBurst(vB.copy(p.pos).setY(0.05), 3, p.color, 2.5, 0.05);
+              break;
+            }
+            for (const pl of pillars) {
+              if (Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
+                dead = true;
+                vfx.sparkBurst(vB.copy(p.pos), 6, '#e5e7eb', 4, 0.05);
+                break;
+              }
+            }
+            if (dead) break;
+          }
+          const can = p.kind === 'boomerang' ? (p.back ? !p.hitBack : !p.hitOut) : !p.spent;
+          if (!can || def.hp <= 0) continue;
+          const hd = Math.hypot(p.pos.x - def.pos[0], p.pos.z - def.pos[2]);
+          const rad = p.kind === 'boomerang' ? 0.9 : 0.55;
+          if (hd < rad && p.pos.y > def.pos[1] - 0.1 && p.pos.y < def.pos[1] + 1.95) {
+            if (p.kind === 'boomerang') {
+              if (p.back) p.hitBack = true;
+              else p.hitOut = true;
+            } else p.spent = true;
+            const before = def.hp;
+            const dodged = def.dodgeIframeTimer > 0;
+            applyHit(p.slot, owner, def, p.dmg, { knock: p.knock, dur: p.dur, noMark: true, noStop: p.noStop, unblockable: p.pierce, crit: p.pierce, heavy: p.kind !== 'dart', ranged: true });
+            if (def.hp < before) {
+              if (p.kind === 'dart' && !p.noStop) {
+                owner.dartHits = (owner.dartHits ?? 0) + 1;
+                if (owner.dartHits >= 5) {
+                  owner.dartHits = 0;
+                  owner.pierceNext = true;
+                  vfx.damageNumber(vA.set(owner.pos[0], owner.pos[1] + 2.2, owner.pos[2]), '袖里乾坤', true, GOLD);
+                }
+              }
+              if (p.poison) {
+                def.poisonStacks = Math.min(5, (def.poisonStacks ?? 0) + 1);
+                def.poisonTimer = 4;
+              }
+              if (p.root > 0 && def.hp > 0) {
+                def.rootTimer = p.root;
+                vfx.ring(vA.set(def.pos[0], 0.05, def.pos[2]), 1.3, '#5eead4', 0.5, 0.12, 0.4);
+                vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.4, def.pos[2]), '定身', true, '#5eead4');
+              }
+            }
+            if (p.kind === 'pin' || (p.kind === 'dart' && !p.pierce && !dodged)) {
+              dead = true;
+              break;
+            }
+          }
+        }
+        if (dead) {
+          vfx.releaseProjectile(p.obj);
+          list.splice(n, 1);
+          continue;
+        }
+        p.obj.position.copy(p.pos);
+        if (p.kind !== 'boomerang') p.obj.lookAt(vC.copy(p.pos).sub(p.vel));
+        if (Math.random() < (p.pierce ? 0.9 : 0.35)) vfx.dartTrail(p.pos, p.color);
+      }
+    }
+
+    function runRangerAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
+      const ai = aiRef.current;
+      const dx = foe.pos[0] - me.pos[0];
+      const dz = foe.pos[2] - me.pos[2];
+      const dist = Math.hypot(dx, dz);
+      const toFoe = new THREE.Vector3(dx, 0, dz).normalize();
+      const side = new THREE.Vector3(-toFoe.z, 0, toFoe.x);
+      out.faceYaw = yawTo(me.pos, foe.pos);
+
+      ai.think -= dt2;
+      ai.planTimer -= dt2;
+      if (ai.request) {
+        ai.requestTtl -= dt2;
+        if (ai.requestTtl <= 0) ai.request = null;
+      }
+      const ready = (k: string) => (me.cooldowns[k] ?? 0) <= 0;
+      const free = isFree(me);
+      const ask = (r: InputKeyAction) => {
+        ai.request = r;
+        ai.requestTtl = 0.35;
+      };
+      const foeAttacking = SWING_STATES.has(foe.actionState) && phaseOf(foe).phase !== 'recovery';
+
+      // keep a dart string going
+      if (ai.comboLeft > 0 && (me.actionState === 'attack_1' || me.actionState === 'attack_2') && phaseOf(me).phase === 'recovery') {
+        if (dist < 16) ask('attack');
+        ai.comboLeft -= 1;
+      }
+
+      if (ai.think <= 0 && free && !ai.request) {
+        ai.think = 0.18 + Math.random() * 0.22;
+        const r = Math.random();
+        if (dist < 3.2) {
+          // too close: get out
+          if (ready('skill3') && me.mp >= 15 && r < 0.45) ask('skill3');
+          else if (ready('special') && r < 0.75) ask('special');
+          else if (me.dodgeCooldownTimer <= 0 && foeAttacking) {
+            ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
+            ask('dodge');
+          }
+          ai.plan = 'retreat';
+          ai.planTimer = 0.6;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        } else if (foeAttacking && dist < 5 && me.dodgeCooldownTimer <= 0 && r < 0.4) {
+          ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
+          ask('dodge');
+        } else if (dist > 13) {
+          ai.plan = 'approach';
+          ai.planTimer = 0.6;
+        } else {
+          if (ready('ultimate') && me.mp >= 50 && dist < 10 && r < 0.1) ask('ultimate');
+          else if (ready('skill4') && me.mp >= 10 && r < 0.18) ask('skill4');
+          else if (ready('skill2') && me.mp >= 20 && r < 0.3) ask('skill2');
+          else if (ready('skill1') && me.mp >= 15 && dist < 10 && r < 0.42) ask('skill1');
+          else if (r < 0.85) {
+            ask('attack');
+            ai.comboLeft = Math.random() < 0.6 ? 2 : 1;
+          }
+          ai.plan = 'circle';
+          ai.planTimer = 0.5 + Math.random() * 0.5;
+          if (Math.random() < 0.3) ai.strafe = -ai.strafe;
+        }
+      }
+
+      if (ai.planTimer <= 0) ai.plan = dist > 10 ? 'approach' : dist < 5.5 ? 'retreat' : 'circle';
+      switch (ai.plan) {
+        case 'approach':
+          out.move.copy(toFoe).addScaledVector(side, 0.3 * ai.strafe);
+          break;
+        case 'retreat':
+          out.move.copy(toFoe).multiplyScalar(-1).addScaledVector(side, 0.5 * ai.strafe);
+          break;
+        default: {
+          // circle at kiting range (6-9 m)
+          const want = dist < 6 ? -0.5 : dist > 9 ? 0.5 : 0;
+          out.move.copy(side).multiplyScalar(ai.strafe).addScaledVector(toFoe, want);
+        }
+      }
+      if (ai.request === 'dodge') out.move.copy(side).multiplyScalar(ai.dodgeDir).addScaledVector(toFoe, -0.5);
+      {
+        const px = me.pos[0] + out.move.x * 2.2;
+        const pz = me.pos[2] + out.move.z * 2.2;
+        if (danger(me.pos[0], me.pos[2], 0) || danger(px, pz, 0)) {
+          const s2 = safeSpot(me.pos[0], me.pos[2]);
+          out.move.set(s2[0] - me.pos[0], 0, s2[1] - me.pos[2]);
+          if (out.move.lengthSq() > 0.01) out.move.normalize();
+          if (ai.request === 'dodge' || ai.request === 'jump' || ai.request === 'skill3') ai.request = null;
+        }
+      }
+      if (out.move.lengthSq() > 1) out.move.normalize();
+      out.request = ai.request;
+    }
+
+    // ======================================================
     // MAP SYSTEM
     // ======================================================
     function resetRound(fromKO: boolean) {
       round.over = false;
+      p1.classId = playerClass;
+      en.classId = enemyClass;
       for (const c of fighters) {
+        const cc = CLASS_CONFIGS[c.classId];
+        c.maxHp = cc.hp;
+        c.maxMp = cc.mp;
+        c.name = cc.name;
+        c.characterName = cc.defaultCharacter;
         c.hp = c.maxHp;
         c.mp = c.maxMp;
         c.vel = [0, 0, 0];
@@ -1057,8 +1555,17 @@ export function Game({
         c.isGrounded = true;
         c.juggleCount = 0;
         c.dodgeIframeTimer = 0.6;
+        c.rootTimer = 0;
+        c.poisonStacks = 0;
+        c.poisonTimer = 0;
+        c.poisonBuff = 0;
+        c.dartHits = 0;
+        c.pierceNext = false;
+        c.backSlash = false;
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
+      for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
+      projRef.current = [];
       p1.pos = [map.spawnPlayer[0], 0, map.spawnPlayer[1]];
       en.pos = [map.spawnEnemy[0], 0, map.spawnEnemy[1]];
       p1.rotY = p1.targetRotY = yawTo(p1.pos, en.pos);
@@ -1465,6 +1972,7 @@ export function Game({
     // player's attacks, keeps spacing, combos, uses skills.
     // ------------------------------------------------------
     function runAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
+      if (me.classId === 'Ranger') return runRangerAI(me, foe, out, dt2);
       const ai = aiRef.current;
       const dx = foe.pos[0] - me.pos[0];
       const dz = foe.pos[2] - me.pos[2];
@@ -1617,6 +2125,7 @@ export function Game({
 
       <group ref={playerGroupRef}>
         <CharacterRig3D
+          classId={playerClass}
           combatantRef={p1RefState}
           isPlayer
           socketsRef={playerSockets}
@@ -1627,7 +2136,7 @@ export function Game({
       </group>
 
       <group ref={enemyGroupRef} position={[0, 0, -6]}>
-        <CharacterRig3D combatantRef={dummyRefState} isPlayer={false} socketsRef={enemySockets} />
+        <CharacterRig3D classId={enemyClass} combatantRef={dummyRefState} isPlayer={false} socketsRef={enemySockets} />
       </group>
 
       <primitive object={vfx.root} />
