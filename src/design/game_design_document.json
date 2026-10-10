@@ -1,0 +1,131 @@
+{
+  "title": "Crown Clash 3D",
+  "hook": "Master fast dynamic 3D combos",
+  "game_overview": "A high-octane 3D arena fighter with fast aerial juggles, multi-form morphing weapons, super cancels, and fluid esports duel combat.",
+  "artstyle": "anime",
+  "genre": "action_adventure",
+  "winning_condition": "Deplete the opponent's health bar to zero across arena match rounds.",
+  "losing_condition": "Player health reaches zero before defeating the opponent.",
+  "player_mode": "single_player",
+  "supported_orientations": [
+    "landscape"
+  ],
+  "input_methods": [
+    "keyboard",
+    "touch",
+    "mouse"
+  ],
+  "score_options": {
+    "score_type": "points",
+    "score_order": "higher_is_better"
+  },
+  "low_end_device_support": false,
+  "mobile_playable": true,
+  "language": [
+    "zh",
+    "en"
+  ],
+  "content_descriptors": [
+    "violence"
+  ],
+  "controls": [
+    {
+      "input": "W / A / S / D",
+      "action": "Move character in full 3D space across the arena"
+    },
+    {
+      "input": "J / Attack Button",
+      "action": "Perform 4-hit normal attack combo string"
+    },
+    {
+      "input": "K / Jump Button",
+      "action": "Jump into the air (supports double jump and air control)"
+    },
+    {
+      "input": "L / Guard Button",
+      "action": "Guard against frontal attacks or trigger mid-air recovery tech"
+    },
+    {
+      "input": "U / Skill 1",
+      "action": "Execute Class Skill 1 (e.g., Piercing Thrust or Dragon Lunger)"
+    },
+    {
+      "input": "I / Skill 2",
+      "action": "Execute Class Skill 2 (e.g., Sky Soar Launcher / Aerial Juggler)"
+    },
+    {
+      "input": "O / Skill 3",
+      "action": "Execute Class Skill 3 (e.g., Whirling Sweep / Form Special)"
+    },
+    {
+      "input": "Q / Form Switch",
+      "action": "Morph Omniform Weapon between Spear, Cannon, Staff, and Shield"
+    },
+    {
+      "input": "Spacebar / Super Button",
+      "action": "Unleash Ultimate Super Move with cinematic camera zoom"
+    }
+  ],
+  "sections": [
+    {
+      "title": "Design Pillars",
+      "content": "1. Expressive 3D Combat: Full XZ plane omnidirectional mobility with 3D hitboxes, dynamic launch vectors, aerial juggles, and OTG interactions. 2. Weapon Morphing Mastery: Instant form transformations that cancel recovery windows for high-skill ceiling play. 3. Cinematic Game Feel: Responsive hit-stop frames, camera punch, slash trails, dynamic lighting, and spectator esports immersion.",
+      "summary": "Core guiding tenets of high-speed competitive 3D arena combat."
+    },
+    {
+      "title": "Core Loop",
+      "content": "Players select their class and battle in 3D arenas across Training Mode and Best-of-3 Esports Tournaments. Combatants utilize neutral footsies, launchers, aerial juggles, super cancels, and defense techs. Depleting the rival's HP wins the round and triggers slow-motion KO replay camera shots.",
+      "summary": "The moment-to-moment fighting cycle and match progression."
+    },
+    {
+      "title": "Core Mechanics",
+      "content": "1. 4-Hit Basic Attack String: Smooth chaining normals cancelable into special skills. 2. Aerial Juggles & Decay: Launchers send opponents airborne; consecutive mid-air hits accumulate Juggle Decay until hard fall reset. 3. Multi-Form Morphing: Omniform weapon transforms between Spear (melee rush), Cannon (ranged artillery), Staff (AoE elements), and Shield (perfect guard counter). 4. Air Tech & Super Armor: Recover from launches using L/Tech; heavy skills grant poise through incoming hits.",
+      "summary": "Combat mechanics including launch vectors, juggle decay, hit-stop, and cancels."
+    },
+    {
+      "title": "3D Camera & Movement Alignment",
+      "content": "3D Coordinate System: Right-handed system (+Y is Up, +X is Right, -Z is Forward). Dynamic Camera: Continuously tracks the midpoint between combatants, adjusting distance and elevation dynamically based on character separation and height. Super activations trigger cinematic close-ups and slow-motion freeze frames before resuming normal tracking.",
+      "summary": "Midpoint tracking camera with cinematic dynamic framing and 3D coordinate convention."
+    },
+    {
+      "title": "3D Scene & Environment Structure",
+      "content": "Environments include a grand ancient stone arena with torchlights and pillars, and a high-tech neon esports stadium with pulsating floor grids and animated spectator silhouettes. Lighting features key directional sunlight with soft shadow maps, hemisphere ambient fill, and colored rim lights. Post-processing delivers bloom on energy effects, subtle vignette, and radial hit blurs.",
+      "summary": "Procedural colosseums and glowing esports arenas with soft shadows and post-processing."
+    },
+    {
+      "title": "Characters & Enemies",
+      "content": "1. Omniform Prodigy: Master of all martial forms wielding a morphing mechanical apparatus. 2. Arcane Lancer: Spear combo specialist emphasizing high mobility, dragon-aura thrusts, and aerial dive crashes. 3. Training Dummy: Non-retaliating sparring partner displaying real-time damage, combo count, and juggle meters. 4. Tactical AI: Features 3 difficulty tiers with spacing, sidestepping, hit confirms, and air tech recovery.",
+      "summary": "Detailed articulated 3D character rigs with distinct martial classes and AI archetypes."
+    },
+    {
+      "title": "Fairness Tools",
+      "content": "Clear telegraphing of unblockable or super-armor attacks via character emissive glowing shaders; on-screen Juggle Decay meter showing juggle escape thresholds; distinct audio-visual cue for perfect guard timings.",
+      "summary": "Visual indicators and mechanics ensuring competitive fairness."
+    },
+    {
+      "title": "Juice & Game Feel",
+      "content": "Anticipation Juice: Character rig joint wind-ups and weapon charge glows. State Change Juice: Form transformation mechanical particle bursts, running dust clouds, and jump launch shockwaves. Impact Juice: 3 to 6 frame hit-stop freezes, multi-tier screen shake, white flash material overrides, ribbon weapon motion trails, floating 3D Chinese combat damage numbers, and combo rating announcements.",
+      "summary": "Satisfying audio-visual feedback on every attack and defensive action."
+    },
+    {
+      "title": "Social Mechanics & Audience",
+      "content": "Appeals to fans of high-speed 3D fighters and competitive gaming. Features detailed post-match APM and combo statistics.",
+      "summary": "Single-player esports challenge with local training and leaderboard integration."
+    },
+    {
+      "title": "Accessibility",
+      "content": "Full key rebinding interface, virtual touch HUD with dedicated action buttons for mobile devices, graphic quality toggles (Low, Med, High), and audio volume sliders.",
+      "summary": "Customizable inputs and responsive mobile adaptation."
+    },
+    {
+      "title": "Structural Integrity",
+      "content": "MMO Login Main Menu (\u8363\u8000\u5dc5\u5cf0) -> Class Selection with 3D rotating character inspection -> Mode Select (Training / AI Arena / Tournament) -> 3D Combat Viewport -> Victory/Defeat Results with APM, damage output, and combo statistics.",
+      "summary": "Menu flow from MMO-styled login screen to class selection and battle results."
+    },
+    {
+      "title": "Virtual Touch Controls Implementation",
+      "content": "Renders an on-screen virtual joystick / D-pad on the bottom-left and circular action buttons (Attack, Jump, Guard, Skills 1-3, Morph, Super) on the bottom-right. Handles pointer events with touch-none and high z-index.",
+      "summary": "Dedicated responsive touch interface for mobile devices."
+    }
+  ]
+}
