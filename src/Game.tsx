@@ -13,6 +13,7 @@ import { Maps3D } from './components/Maps3D';
 import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { CameraController } from './CameraController';
+import type { NetSession } from './net';
 
 export type RoundEvent =
   | { type: 'ko'; winner: 'player' | 'enemy' }
@@ -33,6 +34,8 @@ interface GameSceneProps {
   mapId: MapId;
   playerClass?: CharacterClassId;
   enemyClass?: CharacterClassId;
+  /** online 1v1: host simulates, guest mirrors */
+  net?: NetSession | null;
   showBoneAxes?: boolean;
   onRoundEvent?: (e: RoundEvent) => void;
   onVfxCountChange?: (count: number) => void;
@@ -134,6 +137,7 @@ export function Game({
   mapId,
   playerClass = 'Berserker',
   enemyClass = 'Berserker',
+  net = null,
   showBoneAxes,
   onRoundEvent,
   onVfxCountChange,
@@ -170,6 +174,10 @@ export function Game({
     pendingResetRef.current = true;
   }, [mapId, playerClass, enemyClass]);
   const projRef = useRef<Projectile[]>([]);
+  const netSendRef = useRef(0);
+  const lastSnapRef = useRef<unknown>(null);
+  const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
+
   const auraTimers = useRef([0, 0]);
   const footTimers = useRef([0, 0]);
   const wasGrounded = useRef([true, true]);
@@ -188,6 +196,42 @@ export function Game({
   );
   useEffect(() => () => vfx.dispose(), [vfx]);
   useEffect(() => vfx.setViewportHeight(size.height), [vfx, size.height]);
+
+  // Online host: record every top-level effect and sound so the guest can replay them
+  useEffect(() => {
+    if (!net || net.role !== 'host') return;
+    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail'];
+    const enc = (x: any) =>
+      x instanceof THREE.Vector3 ? { v3: [+x.x.toFixed(3), +x.y.toFixed(3), +x.z.toFixed(3)] } : x instanceof THREE.Color ? '#' + x.getHexString() : typeof x === 'function' ? null : x;
+    let depth = 0;
+    const restore: (() => void)[] = [];
+    const v = vfx as any;
+    for (const name of VFX_CALLS) {
+      const orig = v[name];
+      if (typeof orig !== 'function') continue;
+      v[name] = function (...args: any[]) {
+        if (depth === 0) net.events.push(['v', name, args.map(enc)]);
+        depth++;
+        try {
+          return orig.apply(this, args);
+        } finally {
+          depth--;
+        }
+      };
+      restore.push(() => (v[name] = orig));
+    }
+    const a = gameAudio as any;
+    for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(a))) {
+      if (!name.startsWith('play') || typeof a[name] !== 'function') continue;
+      const orig = a[name];
+      a[name] = function (...args: any[]) {
+        net.events.push(['a', name]);
+        return orig.apply(this, args);
+      };
+      restore.push(() => delete a[name]);
+    }
+    return () => restore.forEach((r) => r());
+  }, [net, vfx]);
 
   // ---------- environment ----------
   useEffect(() => {
@@ -245,6 +289,11 @@ export function Game({
     const controller = cameraControllerRef.current;
     const aiOn = aiEnabledRef.current;
     const round = roundRef.current;
+    const camYaw = controller ? controller.yaw : 0;
+    const basis = controller ? controller.getMoveBasis() : { forward: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0) };
+    const guest = net?.role === 'guest';
+    if (guest) guestSync(rawDt, camYaw, basis);
+    else {
 
     // ---------- shared timers ----------
     for (const c of fighters) {
@@ -314,8 +363,6 @@ export function Game({
       targeting.lockedEnemyId = null;
     }
 
-    const camYaw = controller ? controller.yaw : 0;
-    const basis = controller ? controller.getMoveBasis() : { forward: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0) };
 
     // ================= INTENTS =================
     // Player: keyboard + mouse, MMO facing (body follows camera)
@@ -337,7 +384,17 @@ export function Game({
 
     // Opponent: AI brain
     const enemyIntent: Intent = { move: new THREE.Vector3(), faceYaw: yawTo(en.pos, p1.pos), request: null, block: false };
-    if (aiOn && !round.over && en.hp > 0) runAI(en, p1, enemyIntent, dt);
+    if (net?.role === 'host') {
+      // online: the guest's controls drive the second fighter
+      const r = net.remote;
+      enemyIntent.move.set(r.mx, 0, r.mz);
+      if (enemyIntent.move.lengthSq() > 1) enemyIntent.move.normalize();
+      enemyIntent.faceYaw = r.yaw;
+      enemyIntent.block = r.blk && !round.over && en.classId !== 'Ranger';
+      enemyIntent.request = round.over || en.hp <= 0 ? null : (r.req as InputKeyAction | null);
+      r.reqTtl -= dt;
+      if (r.reqTtl <= 0) r.req = null;
+    } else if (aiOn && !round.over && en.hp > 0) runAI(en, p1, enemyIntent, dt);
     else if (!aiOn) {
       enemyIntent.faceYaw = en.targetRotY;
     }
@@ -346,7 +403,10 @@ export function Game({
     const p1Ok = executeIntent(0, p1, en, playerIntent);
     if (p1Ok && playerIntent.request) input.consumeBuffer();
     const enOk = executeIntent(1, en, p1, enemyIntent);
-    if (enOk) aiRef.current.request = null;
+    if (enOk) {
+      aiRef.current.request = null;
+      if (net?.role === 'host') net.remote.req = null;
+    }
 
     applyMovement(p1, playerIntent);
     applyMovement(en, enemyIntent);
@@ -476,6 +536,8 @@ export function Game({
       gameAudio.playPowerupChime();
     }
 
+    }
+
     // ================= TRANSFORMS / CAMERA / LIGHTS =================
     if (playerGroupRef.current) {
       playerGroupRef.current.position.set(p1.pos[0], p1.pos[1], p1.pos[2]);
@@ -546,6 +608,129 @@ export function Game({
         camPitch: controller ? controller.pitch : 0.3,
         camDist: controller ? controller.distance : 5,
       });
+    }
+
+    if (net?.role === 'host' && net.status === 'connected' && nowMs - netSendRef.current > 33) {
+      netSendRef.current = nowMs;
+      net.send({
+        t: 's',
+        f: [p1, en],
+        p: projRef.current.map((pr) => [
+          pr.kind,
+          +pr.pos.x.toFixed(3),
+          +pr.pos.y.toFixed(3),
+          +pr.pos.z.toFixed(3),
+          pr.stuck !== undefined || pr.falling ? 0 : +pr.vel.x.toFixed(2),
+          pr.stuck !== undefined || pr.falling ? 0 : +pr.vel.y.toFixed(2),
+          pr.stuck !== undefined || pr.falling ? 0 : +pr.vel.z.toFixed(2),
+          pr.obj.quaternion.x,
+          pr.obj.quaternion.y,
+          pr.obj.quaternion.z,
+          pr.obj.quaternion.w,
+          colorFor(pr.slot, fighters[pr.slot]),
+          pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
+        ]),
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning },
+        ev: net.events.splice(0),
+      });
+    }
+
+    // ======================================================
+    // guest: mirror the host's simulation, send our controls
+    // ======================================================
+    function guestSync(realDt: number, yaw: number, bas: { forward: THREE.Vector3; right: THREE.Vector3 }) {
+      const n = net!;
+      // ---- controls -> host
+      if (just.lockEnemy) {
+        just.lockEnemy = false;
+        targeting.lockedEnemyId = targeting.lockedEnemyId ? null : en.id;
+      }
+      if (just.clearTarget) {
+        just.clearTarget = false;
+        targeting.lockedEnemyId = null;
+      }
+      let gx = 0;
+      let gz = 0;
+      if (actions.right) gx += 1;
+      if (actions.left) gx -= 1;
+      if (actions.forward) gz += 1;
+      if (actions.backward) gz -= 1;
+      const mv = vA.copy(bas.forward).multiplyScalar(gz).addScaledVector(bas.right, gx);
+      if (mv.lengthSq() > 1) mv.normalize();
+      for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
+      const req = input.consumeBuffer();
+      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, req });
+
+      // ---- host state -> our two fighters (we are the host's slot 1)
+      const snaps = n.snaps;
+      if (snaps.length) {
+        const s1 = snaps[snaps.length - 1];
+        const s0 = snaps.length > 1 ? snaps[snaps.length - 2] : s1;
+        const span = Math.max(16, s1.at - s0.at);
+        const k = THREE.MathUtils.clamp((performance.now() - s1.at) / span, 0, 1);
+        const fresh = s1 !== lastSnapRef.current;
+        ([[p1, 1], [en, 0]] as [CombatantState, number][]).forEach(([c, idx], local) => {
+          const a = s0.msg.f[idx];
+          const b = s1.msg.f[idx];
+          const prevHp = c.hp;
+          const prevState = c.actionState;
+          const shown = c.stateTimer;
+          Object.assign(c, b);
+          c.pos = [a.pos[0] + (b.pos[0] - a.pos[0]) * k, a.pos[1] + (b.pos[1] - a.pos[1]) * k, a.pos[2] + (b.pos[2] - a.pos[2]) * k];
+          let dr = b.rotY - a.rotY;
+          while (dr > Math.PI) dr -= Math.PI * 2;
+          while (dr < -Math.PI) dr += Math.PI * 2;
+          c.rotY = a.rotY + dr * k;
+          // keep the animation clock moving forward between packets (a jump back would restart clips)
+          const restarted = b.actionState !== prevState || (fresh && b.stateTimer + 0.001 < a.stateTimer && a.actionState === b.actionState);
+          c.stateTimer = restarted ? b.stateTimer : Math.max(shown + realDt * 0.9, b.stateTimer);
+          if (local === 0 && b.hp < prevHp - 0.5) {
+            onRoundEvent?.({ type: 'playerHit', heavy: prevHp - b.hp > 120 });
+            controller?.addShake(prevHp - b.hp > 120 ? 0.4 : 0.15);
+          }
+        });
+        if (fresh) {
+          lastSnapRef.current = s1;
+          Object.assign(mapRuntime, s1.msg.m);
+          // projectiles: rebuild from the host's list
+          for (const g of guestProjRef.current) vfx.releaseProjectile(g.obj);
+          guestProjRef.current = [];
+          for (const q of s1.msg.p) {
+            const obj = vfx.takeProjectile(q[0], q[11], q[12]);
+            if (!obj) continue;
+            obj.position.set(q[1], q[2], q[3]);
+            obj.quaternion.set(q[7], q[8], q[9], q[10]);
+            guestProjRef.current.push({ obj, vel: new THREE.Vector3(q[4], q[5], q[6]), kind: q[0] });
+          }
+        }
+        for (const g of guestProjRef.current) {
+          g.obj.position.addScaledVector(g.vel, realDt);
+          if (g.kind === 'boomerang') {
+            const sp = g.obj.getObjectByName('spin');
+            if (sp) sp.rotation.y += realDt * 28;
+          }
+        }
+      }
+      // ---- replay the host's effects and sounds
+      for (const ev of n.inbox.splice(0)) {
+        if (ev[0] === 'a') {
+          const fn = (gameAudio as any)[ev[1]];
+          if (typeof fn === 'function') fn.call(gameAudio);
+          continue;
+        }
+        const fn = (vfx as any)[ev[1]];
+        if (typeof fn !== 'function') continue;
+        const args = (ev[2] as any[]).map((x) => (x && typeof x === 'object' && 'v3' in x ? new THREE.Vector3(x.v3[0], x.v3[1], x.v3[2]) : x));
+        // slot-indexed effects: the host's slot 0 is our opponent
+        if ((ev[1] === 'setVortex' || ev[1] === 'pillarAt') && typeof args[2] === 'number') args[2] = 1 - args[2];
+        fn.apply(vfx, args);
+      }
+      // sky tint from lightning / eruption, same as on the host
+      bgBase.set(map.background);
+      bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
+      bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
+      if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
+      if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
     }
 
     // ======================================================

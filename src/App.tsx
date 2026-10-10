@@ -8,6 +8,7 @@ import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId } from './maps';
 import type { CharacterClassId } from './types';
+import { NetSession, makeRoomCode, NetMessage } from './net';
 import {
   GameState,
   CombatantState,
@@ -156,8 +157,17 @@ export default function App() {
   const [isMapSelectOpen, setIsMapSelectOpen] = useState(true);
   const [playerClass, setPlayerClass] = useState<CharacterClassId>('Berserker');
   const [enemyClass, setEnemyClass] = useState<CharacterClassId>('Berserker');
+  const playerClassRef = useRef<CharacterClassId>('Berserker');
+  playerClassRef.current = playerClass;
   const HOTBAR_INFO = HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
-  const enemyShadow = `${CLASS_CONFIGS[enemyClass].defaultCharacter}影`;
+  // ---------- online 1v1 ----------
+  const [net, setNet] = useState<NetSession | null>(null);
+  const netRef = useRef<NetSession | null>(null);
+  const [, setNetTick] = useState(0);
+  const [joinCode, setJoinCode] = useState('');
+  const cfgKeyRef = useRef('');
+  const online = !!net && net.status === 'connected';
+  const enemyShadow = online ? `${CLASS_CONFIGS[enemyClass].defaultCharacter}（对手）` : `${CLASS_CONFIGS[enemyClass].defaultCharacter}影`;
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
@@ -168,6 +178,7 @@ export default function App() {
   const [hurtFlash, setHurtFlash] = useState(0);
   const [screenFlash, setScreenFlash] = useState<{ n: number; color: string }>({ n: 0, color: '' });
   const toggleAI = useCallback(() => {
+    if (netRef.current) return; // online: the opponent is a real player
     aiEnabledRef.current = !aiEnabledRef.current;
     setAiEnabled(aiEnabledRef.current);
   }, []);
@@ -183,6 +194,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleAI]);
   const handleRoundEvent = useCallback((e: RoundEvent) => {
+    const n = netRef.current;
+    if (n && n.role === 'host' && e.type !== 'playerHit') n.send({ t: 're', e });
     if (e.type === 'ko') {
       setRoundBanner(e.winner);
       setScore((s) => ({ ...s, [e.winner]: s[e.winner] + 1 }));
@@ -196,6 +209,71 @@ export default function App() {
       setScreenFlash((f) => ({ n: f.n + 1, color: e.color }));
     }
   }, []);
+
+  const startNet = useCallback(
+    (role: 'host' | 'guest', code: string) => {
+      netRef.current?.close();
+      const n = new NetSession(role, code);
+      n.subscribe(() => {
+        setNetTick((t) => t + 1);
+        if (n.status === 'connected') {
+          aiEnabledRef.current = true;
+          setAiEnabled(true);
+          setScore({ player: 0, enemy: 0 });
+          if (n.role === 'guest') n.send({ t: 'hello', cls: playerClassRef.current });
+        }
+        if (n.status === 'closed' && netRef.current === n) {
+          setToast((t) => ({ n: t.n + 1, text: '联机已断开，回到单机模式' }));
+          netRef.current = null;
+          setNet(null);
+          setIsMapSelectOpen(true);
+        }
+      });
+      n.onMessage = (m: NetMessage) => {
+        if (m.t === 'cfg' && n.role === 'guest') {
+          setMapId(m.map);
+          setPlayerClass(m.guestCls);
+          setEnemyClass(m.hostCls);
+          setRoundBanner(null);
+          setIsMapSelectOpen(false);
+        } else if (m.t === 're' && n.role === 'guest') {
+          const e = m.e as RoundEvent;
+          // the host's "player" is our opponent
+          if (e.type === 'ko') handleRoundEvent({ type: 'ko', winner: e.winner === 'player' ? 'enemy' : 'player' });
+          else handleRoundEvent(e);
+        } else if (m.t === 'bye') {
+          n.close();
+        }
+      };
+      netRef.current = n;
+      setNet(n);
+      n.start();
+    },
+    [handleRoundEvent]
+  );
+  const leaveNet = useCallback(() => {
+    const n = netRef.current;
+    netRef.current = null;
+    setNet(null);
+    n?.close();
+  }, []);
+  useEffect(() => () => netRef.current?.close(), []);
+  // guest: tell the host which class we picked
+  useEffect(() => {
+    if (net && net.role === 'guest' && net.status === 'connected') net.send({ t: 'hello', cls: playerClass });
+  }, [net, net?.status, playerClass]);
+  // host: the guest's pick is our opponent; push the match config whenever we start / change it
+  useEffect(() => {
+    if (!net || net.role !== 'host' || net.status !== 'connected') return;
+    if (net.remoteClass && net.remoteClass !== enemyClass) setEnemyClass(net.remoteClass);
+    const guestCls = net.remoteClass || enemyClass;
+    const key = `${mapId}|${playerClass}|${guestCls}|${isMapSelectOpen}`;
+    if (!isMapSelectOpen && key !== cfgKeyRef.current) {
+      cfgKeyRef.current = key;
+      net.send({ t: 'cfg', map: mapId, hostCls: playerClass, guestCls, seq: Date.now() });
+    }
+    if (isMapSelectOpen) cfgKeyRef.current = '';
+  });
 
   // Blood Rage Screen Edge Flash
   const [bloodRageFlash, setBloodRageFlash] = useState(false);
@@ -476,8 +554,67 @@ export default function App() {
               <h2 className="text-3xl font-black text-amber-300 tracking-widest">选择战场</h2>
               <p className="text-xs text-zinc-400 mt-1">每张地图都有自己的机制和主场职业，主场职业在该地图伤害 +10%</p>
             </div>
+            {/* ONLINE 1v1 */}
+            <div className="mb-4 bg-zinc-900/80 border border-sky-700/60 rounded-2xl p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-black text-sky-300">🌐 联机对战（1v1）</span>
+                {net && (
+                  <button onClick={leaveNet} className="text-[11px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded-lg px-2 py-0.5">
+                    退出联机
+                  </button>
+                )}
+              </div>
+              {!net && (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    onClick={() => startNet('host', makeRoomCode())}
+                    className="flex-1 bg-sky-700 hover:bg-sky-600 text-white text-sm font-bold rounded-xl py-2"
+                  >
+                    创建房间
+                  </button>
+                  <div className="flex-1 flex gap-2">
+                    <input
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
+                      placeholder="输入房间号"
+                      className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm font-mono tracking-widest text-white"
+                    />
+                    <button
+                      disabled={joinCode.length !== 5}
+                      onClick={() => startNet('guest', joinCode)}
+                      className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-sm font-bold rounded-xl px-4"
+                    >
+                      加入
+                    </button>
+                  </div>
+                </div>
+              )}
+              {net && (
+                <div className="text-xs text-zinc-300 space-y-1">
+                  {net.role === 'host' && (
+                    <div className="flex items-center gap-2">
+                      房间号
+                      <span className="font-mono text-lg font-black tracking-[0.3em] text-amber-300">{net.code}</span>
+                      <button onClick={() => navigator.clipboard?.writeText(net.code)} className="text-[11px] border border-zinc-700 rounded px-1.5">
+                        复制
+                      </button>
+                    </div>
+                  )}
+                  {net.status === 'opening' && <div>正在连接联机服务器…</div>}
+                  {net.status === 'waiting' && <div>把房间号发给朋友，让他打开同一个网址，在这里输入房间号加入。等待对手…</div>}
+                  {net.status === 'connecting' && <div>正在加入房间 {net.code}…</div>}
+                  {net.status === 'connected' && net.role === 'host' && (
+                    <div className="text-emerald-300 font-bold">
+                      对手已加入 ✓ 对手职业：{CLASS_CONFIGS[net.remoteClass || enemyClass].name}。选好你的职业，点一张地图开打。
+                    </div>
+                  )}
+                  {net.status === 'connected' && net.role === 'guest' && <div className="text-emerald-300 font-bold">已加入房间 ✓ 选好你的职业，等房主选地图开打。</div>}
+                  {net.status === 'error' && <div className="text-red-400 font-bold">{net.error}</div>}
+                </div>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-              {([['你的职业', playerClass, setPlayerClass], ['对手职业', enemyClass, setEnemyClass]] as const).map(([label, cur, set]) => (
+              {(net ? ([['你的职业', playerClass, setPlayerClass]] as const) : ([['你的职业', playerClass, setPlayerClass], ['对手职业', enemyClass, setEnemyClass]] as const)).map(([label, cur, set]) => (
                 <div key={label} className="bg-zinc-900/80 border border-zinc-700 rounded-2xl p-3">
                   <div className="text-xs font-bold text-zinc-300 mb-2">{label}</div>
                   <div className="flex gap-2">
@@ -514,7 +651,7 @@ export default function App() {
                 return (
                   <button
                     key={id}
-                    disabled={!m.available}
+                    disabled={!m.available || net?.role === 'guest'}
                     onClick={() => {
                       gameAudio.playCrispClick();
                       setMapId(id);
@@ -607,6 +744,7 @@ export default function App() {
               mapId={mapId}
               playerClass={playerClass}
               enemyClass={enemyClass}
+              net={online ? net : null}
               onRoundEvent={handleRoundEvent}
               onVfxCountChange={setVfxCount}
               onDebugUpdate={setDebugData}
