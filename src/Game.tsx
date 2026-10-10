@@ -261,6 +261,7 @@ export function Game({
       c.mp = Math.min(c.maxMp, c.mp + dt * 8);
       if ((c.counterTimer ?? 0) > 0) c.counterTimer = (c.counterTimer ?? 0) - dt;
       if ((c.rootTimer ?? 0) > 0) c.rootTimer = (c.rootTimer ?? 0) - dt;
+      if ((c.doubleJumpTimer ?? 0) > 0) c.doubleJumpTimer = (c.doubleJumpTimer ?? 0) - dt;
       if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
     }
     // 淬毒: poison damage over time
@@ -389,6 +390,7 @@ export function Game({
           c.vel[1] = 0;
           c.isGrounded = true;
           c.juggleCount = 0;
+          c.doubleJumped = false;
           if (c.actionState === 'jump') c.actionState = 'idle';
           if (c.actionState === 'launched') {
             c.actionState = 'knockdown';
@@ -725,6 +727,26 @@ export function Game({
           return true;
         }
         case 'jump': {
+          // 暗器: second jump in mid-air (with a somersault)
+          const airOk = cur === 'jump' || cur === 'idle' || cur === 'run' || (cur.startsWith('attack_') && phase === 'recovery') || (cur.startsWith('skill_') && phase === 'recovery');
+          if (ranger && !c.isGrounded && !c.doubleJumped && airOk) {
+            c.doubleJumped = true;
+            c.doubleJumpTimer = 0.45;
+            c.vel[1] = jumpVel * 0.95;
+            const mv = intent.move;
+            if (mv.lengthSq() > 0.01) {
+              const sp = speedOf(c);
+              c.vel[0] = mv.x * sp;
+              c.vel[2] = mv.z * sp;
+            }
+            c.actionState = 'jump';
+            c.stateDuration = 0;
+            vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 1.1, color, 0.3, 0.08, 0.2);
+            vfx.embers(vC.set(c.pos[0], c.pos[1] + 0.3, c.pos[2]), 10, '#e0fdfa', 0.4, -1.5, 0.06);
+            if (isPlayer) gameAudio.playRetroJump();
+            report('跳跃', '二段跳');
+            return true;
+          }
           if (!canJump) return report('跳跃', '无法起跳'), false;
           c.vel[1] = jumpVel;
           c.isGrounded = false;
@@ -862,7 +884,7 @@ export function Game({
           const lz2 = c.localMove[1];
           let mult = lz2 < -0.3 ? 0.6 : Math.abs(c.localMove[0]) > 0.7 ? 0.85 : 1;
           if (whirl) mult = 0.45;
-          if (rangerThrow) mult = 0.55;
+          if (rangerThrow) mult = 0.8;
           if (c.actionState === 'block') mult = 0.25;
           if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
           const spd = speedOf(c) * mult * Math.min(1, vA.length());

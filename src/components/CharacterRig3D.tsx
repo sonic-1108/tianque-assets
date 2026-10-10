@@ -554,7 +554,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // Locomotion playback speed matches ground speed (no foot sliding)
     const cur = actionsRef.current[currentKeyRef.current];
     if (cur && (currentKeyRef.current === 'run' || currentKeyRef.current === 'walk')) {
-      const base = currentKeyRef.current === 'run' ? 6.0 : 2.2;
+      const base = currentKeyRef.current === 'run' ? (classId === 'Ranger' ? 7.5 : 6.0) : 2.2;
       const ts = THREE.MathUtils.clamp(speed / base, 0.6, 1.8);
       cur.setEffectiveTimeScale(backward ? -ts : ts);
     }
@@ -583,6 +583,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     // Ultimate: forward somersault on the way up
     if (st === 'ultimate' && key === 'ult_air') flipRef.current = THREE.MathUtils.clamp(c.stateTimer / 0.55, 0, 1) * Math.PI * 2;
+    else if ((c.doubleJumpTimer ?? 0) > 0 && !c.isGrounded) flipRef.current = (1 - (c.doubleJumpTimer ?? 0) / 0.45) * Math.PI * 2;
     else flipRef.current = 0;
 
     let leanX = 0;
