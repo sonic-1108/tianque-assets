@@ -466,8 +466,8 @@ export default function App() {
 
       {/* MAP SELECT */}
       {isMapSelectOpen && !modelProgress.isLoading && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm overflow-y-auto flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm overflow-y-auto flex justify-center p-4">
+          <div className="w-full max-w-5xl my-auto">
             <div className="text-center mb-5">
               <h2 className="text-3xl font-black text-amber-300 tracking-widest">选择战场</h2>
               <p className="text-xs text-zinc-400 mt-1">每张地图都有自己的机制和主场职业，主场职业在该地图伤害 +10%</p>

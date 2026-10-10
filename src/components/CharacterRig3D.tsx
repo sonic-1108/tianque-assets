@@ -92,15 +92,16 @@ const CLIP_PLAN: Record<string, ClipSpec> = {
 /** 暗器 overrides: throws, flips, light footwork */
 const RANGER_CLIP_PLAN: Record<string, ClipSpec> = {
   ...CLIP_PLAN,
-  attack_1: { match: ['throw', 'box_01', 'punch', 'slash'], start: 0.15, end: 0.6, fit: true },
-  attack_2: { match: ['throw_02', 'throw', 'box_03', 'punch'], start: 0.15, end: 0.6, fit: true },
-  attack_3: { match: ['kick', 'slash', 'box_02'], start: 0.25, end: 0.55, fit: true },
-  skill_1: { match: ['throw', 'box_02', 'punch'], start: 0.1, end: 0.6, fit: true },
-  skill_2: { match: ['throw', 'box_01', 'punch'], start: 0.1, end: 0.6, fit: true },
-  skill_3: { match: ['backflip', 'back_flip', 'flip', 'dive'], start: 0.05, end: 0.75, fit: true },
-  skill_4: { match: ['cheer', 'agree', 'idle'], start: 0.0, end: 0.3, fit: true },
-  r_rain: { match: ['throw', 'box_02', 'box_01'], start: 0.15, end: 0.6, loop: true, speed: 2.2 },
+  attack_1: { match: ['throw', 'box_01', 'punch'], start: 0.1, end: 0.45, fit: true },
+  attack_2: { match: ['throw_02', 'chop', 'box_01'], start: 0.2, end: 0.55, fit: true },
+  attack_3: { match: ['slash', 'kick', 'chop'], start: 0.25, end: 0.52, fit: true },
+  skill_1: { match: ['slash', 'chop'], start: 0.22, end: 0.55, fit: true },
+  skill_2: { match: ['chop', 'volleyball', 'box_01'], start: 0.2, end: 0.55, fit: true },
+  skill_3: { match: ['backflip', 'jump', 'dive'], start: 0.0, end: 0.3, fit: true },
+  skill_4: { match: ['agree', 'angry_02', 'idle'], start: 0.0, end: 0.4, fit: true },
+  r_rain: { match: ['box_01', 'chop', 'punch'], start: 0.1, end: 0.45, loop: true, speed: 2.2 },
   dodge: { match: ['roll', 'dodge', 'dive', 'flip'], start: 0.36, end: 0.92, fit: true },
+  knockdown: { match: ['fall', 'death', 'die', 'hit_to_stomach'], start: 0.3, end: 0.9, fit: true },
 };
 const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : CLIP_PLAN);
 
