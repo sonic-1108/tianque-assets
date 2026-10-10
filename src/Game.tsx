@@ -93,6 +93,10 @@ interface Projectile {
   back: boolean;
   hitOut: boolean;
   hitBack: boolean;
+  /** >0: embedded in the ground / a pillar, seconds left before it disappears */
+  stuck?: number;
+  /** knocked away by a block: tumbles down under gravity */
+  falling?: boolean;
   /** boomerang loop path */
   path?: { o: THREE.Vector3; f: THREE.Vector3; s: THREE.Vector3; L: number; W: number; y0: number; ty: number; u: number; T: number };
 }
@@ -1469,6 +1473,16 @@ export function Game({
       vfx.embers(vA.set(def.pos[0], def.pos[1] + 1, def.pos[2]), 8, '#4ade80', 0.4, 1.5, 0.07);
     }
 
+    /** Bury a dart in whatever it hit: tip sinks in, the dart stays put for a while */
+    function embed(p: Projectile, seconds: number) {
+      const dir = vA.copy(p.vel).normalize();
+      p.pos.addScaledVector(dir, -0.35); // dart origin sits behind the tip; push the tip ~0.25 m in
+      p.obj.position.copy(p.pos);
+      p.obj.lookAt(vC.copy(p.pos).sub(dir));
+      p.stuck = seconds;
+      p.spent = true;
+    }
+
     function updateProjectiles(step: number) {
       const list = projRef.current;
       const pillars = map.pillars || [];
@@ -1477,6 +1491,29 @@ export function Game({
         const owner = fighters[p.slot];
         const def = fighters[1 - p.slot];
         p.life -= step;
+        if (p.stuck !== undefined) {
+          p.stuck -= step;
+          if (p.stuck <= 0) {
+            vfx.releaseProjectile(p.obj);
+            list.splice(n, 1);
+          }
+          continue;
+        }
+        if (p.falling) {
+          p.vel.y -= 22 * step;
+          p.pos.addScaledVector(p.vel, step);
+          p.obj.position.copy(p.pos);
+          p.obj.rotateX(step * 22);
+          p.obj.rotateY(step * 9);
+          if (p.pos.y < 0.04) {
+            p.pos.y = 0.04;
+            p.obj.position.copy(p.pos);
+            p.obj.rotation.set(0, Math.random() * 6, 0); // lies flat where it dropped
+            p.stuck = 1.6;
+            vfx.sparkBurst(vB.copy(p.pos), 3, '#e5e7eb', 2, 0.04);
+          }
+          continue;
+        }
         let dead = p.life <= 0;
         if (p.kind === 'boomerang') {
           const sp = p.obj.getObjectByName('spin');
@@ -1513,18 +1550,23 @@ export function Game({
           p.traveled += (p.vel.length() * step) / 2;
           if (p.kind !== 'boomerang') {
             if (p.pos.y < 0.02) {
-              dead = true;
-              vfx.sparkBurst(vB.copy(p.pos).setY(0.05), 3, p.color, 2.5, 0.05);
+              p.pos.y = 0.02;
+              embed(p, p.noStop ? 1.0 : 2.5);
+              vfx.dustPuff(vB.copy(p.pos), 2, 0.1, 0.8, 0.25);
               break;
             }
+            let wall = false;
             for (const pl of pillars) {
               if (p.pos.y < (pl.h ?? 99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
-                dead = true;
-                vfx.sparkBurst(vB.copy(p.pos), 6, '#e5e7eb', 4, 0.05);
+                wall = true;
                 break;
               }
             }
-            if (dead) break;
+            if (wall) {
+              embed(p, 2.5);
+              vfx.sparkBurst(vB.copy(p.pos), 6, '#fde68a', 4, 0.05);
+              break;
+            }
           }
           const can = p.kind === 'boomerang' ? (p.back ? !p.hitBack : !p.hitOut) : !p.spent;
           if (!can || def.hp <= 0) continue;
@@ -1537,6 +1579,7 @@ export function Game({
             } else p.spent = true;
             const before = def.hp;
             const dodged = def.dodgeIframeTimer > 0;
+            const guarding = def.isBlocking;
             applyHit(p.slot, owner, def, p.dmg, { knock: p.knock, dur: p.dur, noMark: true, noStop: p.noStop, unblockable: p.pierce, crit: p.pierce, heavy: p.kind !== 'dart', ranged: true });
             if (def.hp < before) {
               if (p.kind === 'dart' && !p.noStop) {
@@ -1556,6 +1599,13 @@ export function Game({
                 vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.4, def.pos[2]), '定身', true, '#5eead4');
               }
             }
+            if (guarding && !p.pierce && p.kind !== 'boomerang' && before - def.hp < p.dmg * 0.7) {
+              // blocked: the dart clangs off the blades and tumbles away
+              p.falling = true;
+              p.vel.set(-p.vel.x * 0.12 + (Math.random() - 0.5) * 3, 5 + Math.random() * 2, -p.vel.z * 0.12 + (Math.random() - 0.5) * 3);
+              vfx.sparkBurst(vB.copy(p.pos), 10, '#fff7d6', 6, 0.05);
+              break;
+            }
             if (p.kind === 'pin' || (p.kind === 'dart' && !p.pierce && !dodged)) {
               dead = true;
               break;
@@ -1568,9 +1618,14 @@ export function Game({
           continue;
         }
         p.obj.position.copy(p.pos);
-        if (p.kind !== 'boomerang') {
+        if (p.kind !== 'boomerang' && p.stuck === undefined && !p.falling) {
           p.obj.lookAt(vC.copy(p.pos).sub(p.vel));
-          p.obj.rotateZ(gt * 30); // spinning blade glints
+          const tassel = p.obj.getObjectByName('tassel');
+          if (tassel) {
+            // silk whips in the wind
+            tassel.rotation.x = Math.sin(gt * 42 + n) * 0.14;
+            tassel.rotation.y = Math.cos(gt * 35 + n * 1.7) * 0.14;
+          }
         }
         if (Math.random() < (p.pierce ? 0.7 : 0.15)) vfx.dartTrail(p.pos, p.color);
       }

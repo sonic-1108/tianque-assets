@@ -681,61 +681,73 @@ export class VFXSystem {
       g.fillRect(0, 0, 16, 128);
       return new THREE.CanvasTexture(c);
     })();
-    // diamond-section blade: a 4-sided spike, tip toward -Z
-    const tipGeo = new THREE.ConeGeometry(0.045, 0.26, 4);
-    tipGeo.rotateX(-Math.PI / 2);
-    tipGeo.translate(0, 0, -0.13);
-    const heelGeo = new THREE.ConeGeometry(0.045, 0.05, 4);
-    heelGeo.rotateX(Math.PI / 2);
-    heelGeo.translate(0, 0, 0.025);
-    const collarGeo = new THREE.CylinderGeometry(0.016, 0.02, 0.025, 8);
+    // 柳叶镖 blade: leaf outline extruded with a deep bevel, which gives a lens cross-section
+    // (thick spine, knife-sharp edges) that catches a bright rim of light
+    const leaf = new THREE.Shape();
+    leaf.moveTo(0, 0.3); // tip
+    leaf.bezierCurveTo(0.024, 0.22, 0.05, 0.1, 0.04, 0.0);
+    leaf.bezierCurveTo(0.034, -0.04, 0.018, -0.055, 0.013, -0.06);
+    leaf.lineTo(-0.014, -0.06);
+    leaf.bezierCurveTo(-0.018, -0.055, -0.034, -0.04, -0.04, 0.0);
+    leaf.bezierCurveTo(-0.05, 0.1, -0.024, 0.22, 0, 0.3);
+    const bladeGeo = new THREE.ExtrudeGeometry(leaf, { depth: 0.002, bevelEnabled: true, bevelThickness: 0.011, bevelSize: 0.012, bevelOffset: -0.012, bevelSegments: 3, curveSegments: 18 });
+    bladeGeo.translate(0, 0, -0.001);
+    bladeGeo.rotateX(-Math.PI / 2); // shape +Y (tip) -> -Z
+    bladeGeo.computeVertexNormals();
+    // blood groove down the middle of each face
+    const grooveGeo = new THREE.BoxGeometry(0.006, 0.0025, 0.2);
+    // collar + cord-wrapped grip + pommel ring
+    const collarGeo = new THREE.LatheGeometry(
+      [new THREE.Vector2(0.0, -0.012), new THREE.Vector2(0.02, -0.012), new THREE.Vector2(0.024, -0.004), new THREE.Vector2(0.024, 0.004), new THREE.Vector2(0.017, 0.012), new THREE.Vector2(0.0, 0.012)],
+      12
+    );
     collarGeo.rotateX(Math.PI / 2);
-    collarGeo.translate(0, 0, 0.06);
-    const gripGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.09, 6);
-    gripGeo.rotateX(Math.PI / 2);
-    gripGeo.translate(0, 0, 0.115);
-    const ringGeo = new THREE.TorusGeometry(0.026, 0.006, 6, 14);
-    ringGeo.translate(0, 0, 0.175);
-    // 红缨: three crossed silk strips fanning out behind the ring
-    const strip = new THREE.Shape();
-    strip.moveTo(-0.007, 0);
-    strip.lineTo(0.007, 0);
-    strip.lineTo(0.028, 0.24);
-    strip.lineTo(0.0, 0.21);
-    strip.lineTo(-0.028, 0.24);
-    strip.closePath();
-    const silkGeo = new THREE.ShapeGeometry(strip);
-    silkGeo.rotateX(Math.PI / 2); // strip runs backward along +Z from the ring
-    const tailGeo = new THREE.PlaneGeometry(0.03, 0.8);
+    collarGeo.translate(0, 0, 0.072);
+    const cordGeo = new THREE.TorusGeometry(0.0125, 0.0045, 5, 10);
+    const ringGeo = new THREE.TorusGeometry(0.024, 0.0055, 6, 16);
+    ringGeo.rotateY(Math.PI / 2);
+    ringGeo.translate(0, 0, 0.19);
+    // 红缨: a bundle of thin silk strands
+    const strandGeo = new THREE.PlaneGeometry(0.009, 1);
+    strandGeo.translate(0, 0.5, 0);
+    strandGeo.rotateX(Math.PI / 2); // runs backward along +Z
+    const tailGeo = new THREE.PlaneGeometry(0.025, 0.7);
     tailGeo.rotateX(-Math.PI / 2);
-    tailGeo.translate(0, 0, 0.55);
+    tailGeo.translate(0, 0, 0.5);
+    const cordMat = new THREE.MeshStandardMaterial({ color: '#3a2a1e', roughness: 0.95 });
     const makeDart = (scale: number) => {
       const g = new THREE.Group();
-      const bladeMat = iron.clone(); // own copy so a poisoned blade can take a green sheen
-      const tip = new THREE.Mesh(tipGeo, bladeMat);
-      tip.rotation.z = Math.PI / 4;
-      const heel = new THREE.Mesh(heelGeo, bladeMat);
-      heel.rotation.z = Math.PI / 4;
+      const bladeMat = new THREE.MeshStandardMaterial({ color: '#b4bac2', metalness: 0.95, roughness: 0.36, envMapIntensity: 1.8 });
+      const blade = new THREE.Mesh(bladeGeo, bladeMat);
+      const grooveMat = new THREE.MeshStandardMaterial({ color: '#25282c', metalness: 0.8, roughness: 0.6 });
+      const gTop = new THREE.Mesh(grooveGeo, grooveMat);
+      gTop.position.set(0, 0.0115, -0.06);
+      const gBot = gTop.clone();
+      gBot.position.y = -0.0115;
       const collar = new THREE.Mesh(collarGeo, bronze);
-      const grip = new THREE.Mesh(gripGeo, wrap);
-      const ring = new THREE.Mesh(ringGeo, iron);
-      const silkMat = new THREE.MeshStandardMaterial({ color: '#b3121b', roughness: 0.75, side: THREE.DoubleSide, emissive: new THREE.Color('#5a0508'), emissiveIntensity: 0.6 });
-      // five silk strips fanning out from the ring
-      const silks = [0, 1, 2, 3, 4].map((k) => {
-        const holder = new THREE.Group();
-        holder.position.z = 0.18;
-        holder.rotation.z = (k * Math.PI * 2) / 5;
-        const m = new THREE.Mesh(silkGeo, silkMat);
-        m.rotation.x = 0.22; // splay outward
-        holder.add(m);
-        return holder;
+      const cords = [0, 1, 2, 3, 4].map((k) => {
+        const c = new THREE.Mesh(cordGeo, cordMat);
+        c.position.z = 0.092 + k * 0.017;
+        return c;
       });
-      // faint motion streak in the thrower's colour so you can follow it in a fight
-      const tailMat = new THREE.MeshBasicMaterial({ map: tailTex, color: '#2dd4bf', transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(ringGeo, iron);
+      const silkMat = new THREE.MeshStandardMaterial({ color: '#b3121b', roughness: 0.55, metalness: 0.0, side: THREE.DoubleSide, emissive: new THREE.Color('#4a0306'), emissiveIntensity: 0.7 });
+      const tassel = new THREE.Group();
+      tassel.name = 'tassel';
+      tassel.position.z = 0.2;
+      for (let k = 0; k < 14; k++) {
+        const st = new THREE.Mesh(strandGeo, silkMat);
+        const a = (k / 14) * Math.PI * 2;
+        const spread = 0.12 + (k % 3) * 0.07;
+        st.rotation.set(Math.sin(a) * spread, Math.cos(a) * spread, a);
+        st.scale.set(1, 1, 0.16 + ((k * 7) % 5) * 0.025); // uneven strand lengths
+        tassel.add(st);
+      }
+      const tailMat = new THREE.MeshBasicMaterial({ map: tailTex, color: '#2dd4bf', transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
       const t1 = new THREE.Mesh(tailGeo, tailMat);
       const t2 = new THREE.Mesh(tailGeo, tailMat);
       t2.rotation.z = Math.PI / 2;
-      g.add(tip, heel, collar, grip, ring, ...silks, t1, t2);
+      g.add(blade, gTop, gBot, collar, ...cords, ring, tassel, t1, t2);
       g.userData.tail = tailMat;
       g.userData.silk = silkMat;
       g.userData.blade = bladeMat;
@@ -745,8 +757,8 @@ export class VFXSystem {
       this.root.add(g);
       return g;
     };
-    this.projPools.dart = Array.from({ length: 80 }, () => makeDart(2.2));
-    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(3.4));
+    this.projPools.dart = Array.from({ length: 90 }, () => makeDart(2.0));
+    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(3.0));
 
     // 回旋镖: dark forged iron chevron with a bronze hub
     const cres = new THREE.Shape();
@@ -826,15 +838,15 @@ export class VFXSystem {
     if (u.blade) {
       const b = u.blade as THREE.MeshStandardMaterial;
       if (variant === 'poison') {
-        b.color.set('#7f8f84');
-        b.emissive.set('#16a34a');
-        b.emissiveIntensity = 0.2;
+        b.color.set('#8fa596');
+        b.emissive.set('#0f5a25');
+        b.emissiveIntensity = 0.35;
       } else if (variant === 'gold') {
         b.color.set('#b08a3a');
         b.emissive.set('#5a3d00');
         b.emissiveIntensity = 0.5;
       } else {
-        b.color.set('#9aa1aa');
+        b.color.set('#b4bac2');
         b.emissive.set('#000000');
         b.emissiveIntensity = 0;
       }
