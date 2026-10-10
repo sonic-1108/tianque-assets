@@ -33,6 +33,30 @@ import {
 
 const STATIC_CANVAS_CAMERA = { fov: 55, near: 0.1, far: 200 };
 
+const SKILLS = CLASS_CONFIGS.Berserker.skills;
+const skillMeta = (i: number) => [`MP ${SKILLS[i].mpCost}`, `冷却 ${SKILLS[i].cooldown}s`];
+const HOTBAR_INFO: {
+  id: string; key: string; name: string; icon: string; short: string; desc: string; tip?: string;
+  meta: string[]; cdKey?: string; basic?: boolean; super?: boolean;
+}[] = [
+  { id: 'attack', key: '左键', name: '斩击', icon: '⚔️', short: '三段连斩', basic: true, meta: ['无消耗', '可连按'],
+    desc: '双刀三段连斩：第一段单刀横斩，第二段双刀交错，第三段跃起重劈并把对手击倒。在前一段的收招阶段再按左键即可接下一段。',
+    tip: '普攻收招时可以直接按技能或 Shift 取消硬直，例如：斩击×2 → 1 裂地斩。' },
+  { id: 'block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'],
+    desc: '按住右键交叉双刀格挡。正面受到的伤害减少60%，而且不会被打断或击飞。背后和天崩挡不住。',
+    tip: '看到霍岩影抬刀就按住，挡完马上反击。' },
+  { id: 'earth_cleave', key: '1', name: '裂地斩', icon: '💥', short: '跳劈击飞', cdKey: 'skill1', meta: skillMeta(0),
+    desc: SKILLS[0].description, tip: '击飞后对手在空中无法反击，可以接普攻追打。' },
+  { id: 'whirlwind_blade', key: '2', name: '旋风刃', icon: '🌪️', short: '旋转多段', cdKey: 'skill2', meta: skillMeta(1),
+    desc: SKILLS[1].description, tip: '贴身时用伤害最高；对手格挡时也能持续压制。' },
+  { id: 'bull_charge', key: '3', name: '蛮牛冲', icon: '🐂', short: '冲撞击倒', cdKey: 'skill3', meta: skillMeta(2),
+    desc: SKILLS[2].description, tip: '对手放技能前摇时冲过去，可以直接撞断他的招。' },
+  { id: 'blood_rage', key: '4', name: '血怒', icon: '🩸', short: '增伤吸血', cdKey: 'skill4', meta: ['生命 -10%', `冷却 ${SKILLS[3].cooldown}s`],
+    desc: SKILLS[3].description, tip: '先开血怒再接连招，吸血能把扣掉的血打回来。' },
+  { id: 'heaven_collapse', key: 'R', name: '天崩', icon: '🌋', short: '空翻砸地', cdKey: 'ultimate', super: true, meta: skillMeta(4),
+    desc: SKILLS[4].description, tip: '对手倒地起身时放最稳；看到对手跳起来要马上 Shift 翻滚。' },
+];
+
 interface CanvasLoadingScreenProps {
   progress: number;
   error: string | null;
@@ -99,6 +123,8 @@ export default function App() {
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
+
+  const [skillCard, setSkillCard] = useState<string | null>(null);
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
   const aiEnabledRef = useRef(true);
@@ -603,68 +629,78 @@ export default function App() {
         <span>菜单 (Esc)</span>
       </button>
 
-      {/* BOTTOM HOTBAR WITH LIVE COOLDOWNS */}
-      <div className="absolute bottom-4 inset-x-0 pointer-events-none flex flex-col items-center z-20 px-4">
-        <div className="bg-zinc-950/95 border border-zinc-800 rounded-3xl p-2.5 flex items-center gap-3 shadow-2xl pointer-events-auto backdrop-blur-md">
-          <div className="flex items-center gap-2 pr-3 border-r border-zinc-800">
-            <div className="flex flex-col items-center">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-700 to-red-800 border border-amber-400/60 flex flex-col items-center justify-center text-xs font-bold shadow-md">
-                <Sword className="w-4 h-4 text-amber-200 mb-0.5" />
-                <span className="text-[9px] text-amber-100">斩击</span>
+      {/* BOTTOM HOTBAR: short descriptions + right-click detail cards */}
+      <div className="absolute bottom-3 inset-x-0 pointer-events-none flex flex-col items-center z-20 px-4 gap-2">
+        {skillCard && (() => {
+          const info = HOTBAR_INFO.find((h) => h.id === skillCard);
+          if (!info) return null;
+          return (
+            <div className="pointer-events-auto w-[340px] max-w-full bg-zinc-950/95 border border-amber-500/60 rounded-2xl p-4 shadow-2xl backdrop-blur-md text-zinc-200">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-base font-black text-amber-300">
+                  {info.icon} {info.name} <span className="text-xs text-zinc-400 font-mono">[{info.key}]</span>
+                </span>
+                <button onClick={() => setSkillCard(null)} className="text-zinc-500 hover:text-zinc-200 text-xs px-1">关闭 ✕</button>
               </div>
-              <span className="text-[9px] text-zinc-400 mt-1">鼠标左键</span>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <div className="w-11 h-11 rounded-xl bg-zinc-800 border border-sky-400/60 flex flex-col items-center justify-center text-xs font-bold shadow-md">
-                <Shield className="w-4 h-4 text-sky-300 mb-0.5" />
-                <span className="text-[9px] text-sky-100">格挡</span>
+              <div className="flex gap-2 mb-2 text-[10px] font-mono">
+                {info.meta.map((m) => (
+                  <span key={m} className="bg-zinc-900 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-300">{m}</span>
+                ))}
               </div>
-              <span className="text-[9px] text-zinc-400 mt-1">鼠标右键</span>
+              <p className="text-xs leading-relaxed text-zinc-300">{info.desc}</p>
+              {info.tip && <p className="text-[11px] leading-relaxed text-amber-200/90 mt-2">💡 {info.tip}</p>}
             </div>
-          </div>
+          );
+        })()}
 
-          <div className="flex items-center gap-2">
-            {berserkerConfig.skills.map((s, idx) => {
-              const cd =
-                idx === 0
-                  ? hudMirror.cdSkill1
-                  : idx === 1
-                  ? hudMirror.cdSkill2
-                  : idx === 2
-                  ? hudMirror.cdSkill3
-                  : idx === 3
-                  ? hudMirror.cdSkill4
-                  : hudMirror.cdUlt;
-
-              const isOnCd = cd > 0;
-
-              return (
-                <div key={s.id} className="relative flex flex-col items-center">
+        <div className="bg-zinc-950/95 border border-zinc-800 rounded-3xl px-3 py-2 flex items-end gap-2 shadow-2xl pointer-events-auto backdrop-blur-md">
+          {HOTBAR_INFO.map((h, idx) => {
+            const cd =
+              h.cdKey === 'skill1' ? hudMirror.cdSkill1 :
+              h.cdKey === 'skill2' ? hudMirror.cdSkill2 :
+              h.cdKey === 'skill3' ? hudMirror.cdSkill3 :
+              h.cdKey === 'skill4' ? hudMirror.cdSkill4 :
+              h.cdKey === 'ultimate' ? hudMirror.cdUlt : 0;
+            const onCd = cd > 0;
+            const active = skillCard === h.id;
+            return (
+              <React.Fragment key={h.id}>
+                {idx === 2 && <div className="w-px self-stretch bg-zinc-800 mx-1" />}
+                <div
+                  className="flex flex-col items-center w-[62px] cursor-help select-none"
+                  title="右键查看技能介绍"
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSkillCard((c) => (c === h.id ? null : h.id));
+                  }}
+                >
                   <div
-                    className={`w-11 h-11 rounded-xl border relative overflow-hidden flex flex-col items-center justify-center text-base shadow-md ${
-                      s.isSuper
+                    className={`w-11 h-11 rounded-xl border relative overflow-hidden flex items-center justify-center text-lg shadow-md transition-all ${
+                      h.super
                         ? 'bg-gradient-to-br from-red-600 to-amber-700 border-amber-400'
+                        : h.basic
+                        ? 'bg-zinc-800 border-sky-500/50'
                         : 'bg-zinc-800 border-zinc-700'
-                    }`}
+                    } ${active ? 'ring-2 ring-amber-400' : ''}`}
                   >
-                    <span>{s.icon}</span>
-
-                    {/* Cooldown Mask Overlay */}
-                    {isOnCd && (
+                    <span>{h.icon}</span>
+                    {onCd && (
                       <div className="absolute inset-0 bg-black/75 flex items-center justify-center text-amber-300 font-mono font-bold text-xs">
-                        {cd.toFixed(1)}s
+                        {cd.toFixed(1)}
                       </div>
                     )}
                   </div>
-                  <span className="text-[9px] text-zinc-300 font-semibold mt-1">
-                    [{s.key}] {s.name}
+                  <span className="text-[10px] text-zinc-100 font-bold mt-1 leading-none">
+                    <span className="text-amber-400 font-mono">{h.key}</span> {h.name}
                   </span>
+                  <span className="text-[9px] text-zinc-400 mt-0.5 leading-tight text-center">{h.short}</span>
                 </div>
-              );
-            })}
-          </div>
+              </React.Fragment>
+            );
+          })}
         </div>
+        <span className="text-[10px] text-zinc-300 bg-black/60 rounded-full px-2.5 py-0.5 pointer-events-none">按 Esc 解锁鼠标后，右键技能图标查看详细介绍</span>
       </div>
 
       {/* F3 DEBUG PANEL (MONITORING & ANIMATION CLIP INSPECTION) */}

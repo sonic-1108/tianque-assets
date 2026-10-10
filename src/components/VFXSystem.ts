@@ -511,7 +511,7 @@ function makePillar() {
       ${NOISE_GLSL}
       void main(){
         float n = fbm(vec2(vUv.x * 8.0, vUv.y * 3.0 - uTime * 4.0));
-        float vfade = pow(1.0 - vUv.y, 1.6) * smoothstep(0.0, 0.05, vUv.y);
+        float vfade = pow(max(1.0 - vUv.y, 0.0), 1.6) * smoothstep(0.0, 0.05, vUv.y);
         float a = (0.35 + 0.65 * n) * vfade * uOpacity;
         if (a < 0.004) discard;
         gl_FragColor = vec4(mix(uColor, vec3(1.0, 0.9, 0.7), n * 0.4), a);
