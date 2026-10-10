@@ -93,6 +93,8 @@ interface Projectile {
   back: boolean;
   hitOut: boolean;
   hitBack: boolean;
+  /** boomerang loop path */
+  path?: { o: THREE.Vector3; f: THREE.Vector3; s: THREE.Vector3; L: number; W: number; y0: number; ty: number; u: number; T: number };
 }
 
 /** What a fighter wants to do this frame (from keyboard or from the AI). */
@@ -273,15 +275,15 @@ export function Game({
       if ((c.poisonTimer ?? 0) <= 0 || c.hp <= 0) continue;
       c.poisonTimer = (c.poisonTimer ?? 0) - dt;
       c.poisonTick = (c.poisonTick ?? 0) + dt;
-      if (c.poisonTick >= 0.5) {
+      if (c.poisonTick >= 0.25) {
         c.poisonTick = 0;
-        const d = 7 * Math.max(1, c.poisonStacks ?? 1);
+        const d = Math.max(1, Math.round((c.poisonDps ?? 0) * 0.25));
         c.hp = Math.max(0, c.hp - d);
         vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 1.9, c.pos[2]), d, false, POISON_COLOR);
         vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), 4, '#22c55e', 0.4, 1.2, 0.07);
         if (c.hp <= 0) koCheck(i, colorFor(1 - i, fighters[1 - i]));
       }
-      if (c.poisonTimer <= 0) c.poisonStacks = 0;
+      if (c.poisonTimer <= 0) c.poisonDps = 0;
     }
 
     // ---------- round flow ----------
@@ -722,7 +724,7 @@ export function Game({
           case 'skill4': {
             if (!paySkill(3, 'skill4', '4')) return false;
             start('skill_4');
-            c.poisonBuff = 6;
+            c.poisonBuff = 3;
             vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
             vfx.embers(vC.set(c.pos[0], 0.4, c.pos[2]), 30, '#4ade80', 0.6, 2.5, 0.07);
             gameAudio.playPowerupChime();
@@ -1303,21 +1305,24 @@ export function Game({
       from: THREE.Vector3,
       dir: THREE.Vector3,
       speed: number,
-      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean }
+      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean; target?: THREE.Vector3 }
     ) {
-      const obj = vfx.takeProjectile(kind);
-      if (!obj) return;
       let pierce = false;
       let dmg = o.dmg;
       let color = colorFor(slot, c);
       if (kind === 'dart' && c.pierceNext && !o.noPassive) {
         // 袖里乾坤: golden piercing dart
-        c.pierceNext = false;
         pierce = true;
         dmg *= 2;
         color = GOLD;
       }
-      obj.scale.setScalar(kind === 'pin' ? 2.2 : pierce ? 1.6 : 1);
+      const poisoned = (c.poisonBuff ?? 0) > 0 && c.actionState.startsWith('attack_');
+      const obj = vfx.takeProjectile(kind, poisoned && !pierce ? '#4ade80' : color);
+      if (!obj) return;
+      if (pierce) {
+        c.pierceNext = false;
+        obj.scale.multiplyScalar(1.35);
+      }
       obj.position.copy(from);
       const p: Projectile = {
         kind,
@@ -1329,9 +1334,9 @@ export function Game({
         dmg,
         knock: o.knock ?? 1.2,
         dur: o.dur ?? 0.22,
-        color,
+        color: poisoned && !pierce ? POISON_COLOR : color,
         pierce,
-        poison: (c.poisonBuff ?? 0) > 0,
+        poison: (c.poisonBuff ?? 0) > 0 && c.actionState.startsWith('attack_'),
         root: o.root ?? 0,
         noStop: !!o.noStop,
         spent: false,
@@ -1340,6 +1345,25 @@ export function Game({
         hitOut: false,
         hitBack: false,
       };
+      if (kind === 'boomerang') {
+        // flies out on a curve to the right, swings around the target and comes back on the left
+        const tgt = o.target ?? from.clone().addScaledVector(dir, 10);
+        const f = new THREE.Vector3(tgt.x - from.x, 0, tgt.z - from.z);
+        const L = THREE.MathUtils.clamp(f.length() + 1.5, 6, 12);
+        f.normalize();
+        p.path = {
+          o: from.clone(),
+          f,
+          s: new THREE.Vector3(-f.z, 0, f.x).multiplyScalar(-1),
+          L,
+          W: 4.2,
+          y0: from.y,
+          ty: THREE.MathUtils.clamp(tgt.y, 0.6, 7),
+          u: 0,
+          T: 0.75 + L * 0.07,
+        };
+        p.life = p.path.T + 0.5;
+      }
       projRef.current.push(p);
     }
 
@@ -1367,7 +1391,11 @@ export function Game({
         // 撩刀后撤: backhand slash, then spring away
         c.hasHitCurrentMove = true;
         vfx.slashMark(vB.set(c.pos[0] + fwd.x * 0.9, c.pos[1] + 1.1, c.pos[2] + fwd.z * 0.9), color, 1.0);
-        if (dist < 2.5 && inFront) applyHit(slot, c, foe, 55, { knock: 6, dur: 0.45 });
+        if (dist < 2.5 && inFront) {
+          const before = foe.hp;
+          applyHit(slot, c, foe, 55, { knock: 6, dur: 0.45 });
+          if ((c.poisonBuff ?? 0) > 0 && foe.hp < before) applyPoison(foe, before - foe.hp);
+        }
         if ((c.rootTimer ?? 0) <= 0) {
           c.vel[0] = -fwd.x * 13;
           c.vel[2] = -fwd.z * 13;
@@ -1378,8 +1406,11 @@ export function Game({
         c.volleyShots = 1;
         const from = handPos(c, fwd);
         const d = aimDir(c, foe, fwd, from);
-        d.y = Math.max(-0.08, Math.min(0.08, d.y));
-        fireProjectile(slot, c, 'boomerang', from, d.normalize(), 18, { dmg: 85, knock: 5, dur: 0.4, life: 3, noPassive: true });
+        const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+        const lockOn = foe.hp > 0 && fd < 14 && Math.abs(d.y) < 0.9 && d.x * fwd.x + d.z * fwd.z > 0.5;
+        const target = lockOn ? new THREE.Vector3(foe.pos[0], foe.pos[1] + 1.1, foe.pos[2]) : from.clone().addScaledVector(fwd, 10);
+        fireProjectile(slot, c, 'boomerang', from, d, 18, { dmg: 85, knock: 5, dur: 0.4, noPassive: true, target });
+        vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.2, colorFor(slot, c), 0.3, 0.08);
       }
       if (st === 'skill_2' && ready) {
         c.volleyShots = 1;
@@ -1429,6 +1460,15 @@ export function Game({
       }
     }
 
+    /** 淬毒: the last poisoned hit decides the poison (80% of that hit over 2 s) */
+    function applyPoison(def: CombatantState, dealt: number) {
+      if (dealt <= 0 || def.hp <= 0) return;
+      def.poisonDps = (dealt * 0.8) / 2;
+      def.poisonTimer = 2;
+      def.poisonTick = 0;
+      vfx.embers(vA.set(def.pos[0], def.pos[1] + 1, def.pos[2]), 8, '#4ade80', 0.4, 1.5, 0.07);
+    }
+
     function updateProjectiles(step: number) {
       const list = projRef.current;
       const pillars = map.pillars || [];
@@ -1439,17 +1479,37 @@ export function Game({
         p.life -= step;
         let dead = p.life <= 0;
         if (p.kind === 'boomerang') {
-          if (!p.back && p.traveled >= 9) p.back = true;
-          if (p.back) {
-            vA.set(owner.pos[0], owner.pos[1] + 1.2, owner.pos[2]).sub(p.pos);
-            if (vA.length() < 0.8 || owner.hp <= 0) dead = true;
-            p.vel.copy(vA.normalize().multiplyScalar(20));
-          }
-          p.obj.rotation.y += step * 26;
+          const sp = p.obj.getObjectByName('spin');
+          if (sp) sp.rotation.y += step * 28;
+          p.obj.rotation.z = p.path && p.path.u < 0.5 ? -0.35 : 0.35; // banks into the turn
         }
         // two substeps so fast darts never skip through a body
         for (let sub = 0; sub < 2 && !dead; sub++) {
-          p.pos.addScaledVector(p.vel, step / 2);
+          if (p.path) {
+            const P = p.path;
+            P.u += step / 2 / P.T;
+            if (P.u >= 1 || owner.hp <= 0) {
+              dead = true;
+              break;
+            }
+            const th = P.u * Math.PI * 2;
+            const prev = vC.copy(p.pos);
+            // the return leg bends toward wherever the thrower is now
+            const home = vA.set(owner.pos[0] - P.o.x, 0, owner.pos[2] - P.o.z).multiplyScalar(Math.max(0, P.u - 0.5) * 2);
+            p.pos
+              .copy(P.o)
+              .addScaledVector(P.f, (P.L / 2) * (1 - Math.cos(th)))
+              .addScaledVector(P.s, (P.W / 2) * Math.sin(th))
+              .add(home);
+            const baseY = P.u < 0.5 ? P.y0 : owner.pos[1] + 1.2;
+            p.pos.y = THREE.MathUtils.lerp(baseY, P.ty, Math.sin(P.u * Math.PI));
+            p.vel.copy(p.pos).sub(prev).multiplyScalar(2 / Math.max(1e-4, step));
+            p.back = P.u >= 0.5;
+            if (p.back && P.u > 0.85 && p.pos.distanceTo(vB.set(owner.pos[0], owner.pos[1] + 1.2, owner.pos[2])) < 1.0) {
+              dead = true;
+              break;
+            }
+          } else p.pos.addScaledVector(p.vel, step / 2);
           p.traveled += (p.vel.length() * step) / 2;
           if (p.kind !== 'boomerang') {
             if (p.pos.y < 0.02) {
@@ -1488,8 +1548,7 @@ export function Game({
                 }
               }
               if (p.poison) {
-                def.poisonStacks = Math.min(5, (def.poisonStacks ?? 0) + 1);
-                def.poisonTimer = 4;
+                applyPoison(def, before - def.hp);
               }
               if (p.root > 0 && def.hp > 0) {
                 def.rootTimer = p.root;
@@ -1509,7 +1568,10 @@ export function Game({
           continue;
         }
         p.obj.position.copy(p.pos);
-        if (p.kind !== 'boomerang') p.obj.lookAt(vC.copy(p.pos).sub(p.vel));
+        if (p.kind !== 'boomerang') {
+          p.obj.lookAt(vC.copy(p.pos).sub(p.vel));
+          p.obj.rotateZ(gt * 30); // spinning blade glints
+        }
         if (Math.random() < (p.pierce ? 0.9 : 0.35)) vfx.dartTrail(p.pos, p.color);
       }
     }
@@ -1652,6 +1714,7 @@ export function Game({
         c.dodgeIframeTimer = 0.6;
         c.rootTimer = 0;
         c.poisonStacks = 0;
+        c.poisonDps = 0;
         c.poisonTimer = 0;
         c.poisonBuff = 0;
         c.dartHits = 0;

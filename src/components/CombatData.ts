@@ -537,7 +537,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
       { id: 'boomerang', name: '回旋镖', key: '1 / Q', description: '掷出一枚大回旋镖，飞出约9米后折返，去程和回程都会伤人并把人推开。', mpCost: 15, cooldown: 5, icon: '🪃' },
       { id: 'pin_dart', name: '定身镖', key: '2 / E', description: '掷出一枚重镖，命中后把对手钉在原地1.5秒，期间无法移动（仍可出招）。', mpCost: 20, cooldown: 9, icon: '📌' },
       { id: 'swallow_flip', name: '燕返', key: '3', description: '向后空翻跃出一大段距离，同时向前方扇形甩出7枚飞镖。翻身过程中短暂无敌，用来逃离近身。', mpCost: 15, cooldown: 6, icon: '🕊️' },
-      { id: 'poison', name: '淬毒', key: '4', description: '6秒内所有飞镖淬上剧毒，命中叠加中毒（最多5层），每层每0.5秒持续掉血，持续4秒。', mpCost: 10, cooldown: 14, icon: '☠️' },
+      { id: 'poison', name: '淬毒', key: '4', description: '给接下来3秒内的普通攻击淬毒（左键飞镖、三连镖、右键撩刀）。淬毒的攻击命中后，对手在2秒内额外流失这一击伤害的80%，以最后一次淬毒命中为准重新计算。', mpCost: 10, cooldown: 10, icon: '☠️' },
       { id: 'rain_of_darts', name: '暴雨梨花', key: 'R', description: '纵身跃上半空悬停约2秒，向下方大片区域洒下漫天飞镖。悬空期间霸体。', mpCost: 50, cooldown: 22, icon: '🌸', isSuper: true },
     ],
   },

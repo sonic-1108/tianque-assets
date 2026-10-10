@@ -665,34 +665,71 @@ export class VFXSystem {
     }
 
     // ---- projectile meshes (暗器) ----
-    const steel = new THREE.MeshStandardMaterial({ color: '#dfe6ee', metalness: 0.95, roughness: 0.2 });
-    const glowTeal = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), toneMapped: false });
-    const dartGeo = new THREE.ConeGeometry(0.035, 0.32, 6);
-    dartGeo.rotateX(-Math.PI / 2); // tip points -Z
-    const finGeo = new THREE.PlaneGeometry(0.09, 0.12);
+    // 柳叶镖: a flat willow-leaf blade with a bright core and a long glowing tail so it reads in flight
+    const steel = new THREE.MeshStandardMaterial({ color: '#eef3f8', metalness: 0.9, roughness: 0.15, emissive: new THREE.Color('#5b6b7a'), emissiveIntensity: 0.4 });
+    const leaf = new THREE.Shape();
+    leaf.moveTo(0, -0.3);
+    leaf.quadraticCurveTo(0.07, -0.08, 0.035, 0.08);
+    leaf.lineTo(0, 0.12);
+    leaf.lineTo(-0.035, 0.08);
+    leaf.quadraticCurveTo(-0.07, -0.08, 0, -0.3);
+    const leafGeo = new THREE.ExtrudeGeometry(leaf, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 1 });
+    leafGeo.translate(0, 0, -0.006);
+    leafGeo.rotateX(Math.PI / 2); // tip (shape -Y) now points -Z, blade lies flat
+    const tailTex = (() => {
+      const c = document.createElement('canvas');
+      c.width = 16;
+      c.height = 128;
+      const g = c.getContext('2d')!;
+      const grd = g.createLinearGradient(0, 0, 0, 128);
+      grd.addColorStop(0, 'rgba(255,255,255,1)');
+      grd.addColorStop(0.25, 'rgba(255,255,255,0.7)');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 16, 128);
+      const t = new THREE.CanvasTexture(c);
+      return t;
+    })();
+    const tailGeo = new THREE.PlaneGeometry(0.12, 1.3);
+    tailGeo.rotateX(-Math.PI / 2);
+    tailGeo.translate(0, 0, 0.62); // trails behind the tip
+    const coreGeo = new THREE.SphereGeometry(0.06, 8, 6);
     const makeDart = (scale: number) => {
       const g = new THREE.Group();
-      const body = new THREE.Mesh(dartGeo, steel);
-      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), glowTeal);
-      glow.position.z = 0.12;
-      const fin = new THREE.Mesh(finGeo, new THREE.MeshBasicMaterial({ color: '#2dd4bf', side: THREE.DoubleSide, transparent: true, opacity: 0.85 }));
-      fin.position.z = 0.16;
-      g.add(body, glow, fin);
+      const body = new THREE.Mesh(leafGeo, steel);
+      const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), toneMapped: false });
+      const core = new THREE.Mesh(coreGeo, glowMat);
+      core.position.z = 0.02;
+      const tailMat = new THREE.MeshBasicMaterial({ map: tailTex, color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const t1 = new THREE.Mesh(tailGeo, tailMat);
+      const t2 = new THREE.Mesh(tailGeo, tailMat);
+      t2.rotation.z = Math.PI / 2; // crossed planes: visible from any angle
+      g.add(body, core, t1, t2);
+      g.userData.glow = [glowMat, tailMat];
+      g.userData.baseScale = scale;
       g.scale.setScalar(scale);
       g.visible = false;
       this.root.add(g);
       return g;
     };
-    this.projPools.dart = Array.from({ length: 60 }, () => makeDart(1));
-    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(2.2));
-    const boomGeo = new THREE.TorusGeometry(0.42, 0.06, 6, 24, Math.PI * 1.35);
+    this.projPools.dart = Array.from({ length: 80 }, () => makeDart(1.5));
+    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(2.6));
+    const boomGeo = new THREE.TorusGeometry(0.55, 0.07, 6, 28, Math.PI * 1.35);
     this.projPools.boomerang = Array.from({ length: 3 }, () => {
       const g = new THREE.Group();
+      const spin = new THREE.Group();
+      spin.name = 'spin';
       const m = new THREE.Mesh(boomGeo, steel);
       m.rotation.x = Math.PI / 2;
-      const e = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.025, 4, 24, Math.PI * 1.35), glowTeal);
+      const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), toneMapped: false });
+      const e = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.03, 4, 28, Math.PI * 1.35), glowMat);
       e.rotation.x = Math.PI / 2;
-      g.add(m, e);
+      const haloMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const halo = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.68, 32), haloMat);
+      halo.rotation.x = -Math.PI / 2;
+      spin.add(m, e, halo);
+      g.add(spin);
+      g.userData.glow = [glowMat, haloMat];
       g.visible = false;
       this.root.add(g);
       return g;
@@ -729,11 +766,17 @@ export class VFXSystem {
 
   // ---------------- projectiles ----------------
   /** Borrow a projectile mesh ('dart' | 'pin' | 'boomerang'); returns null if the pool is empty */
-  takeProjectile(kind: 'dart' | 'pin' | 'boomerang'): THREE.Object3D | null {
+  takeProjectile(kind: 'dart' | 'pin' | 'boomerang', color?: THREE.ColorRepresentation): THREE.Object3D | null {
     const pool = this.projPools[kind];
     const o = pool.find((x) => !x.visible);
     if (!o) return null;
     o.visible = true;
+    if (color !== undefined) {
+      // HDR tint so the glow blooms
+      const c = new THREE.Color(color).multiplyScalar(2.4);
+      for (const m of (o.userData.glow || []) as THREE.MeshBasicMaterial[]) m.color.copy(c);
+    }
+    if (o.userData.baseScale) o.scale.setScalar(o.userData.baseScale);
     return o;
   }
 

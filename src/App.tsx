@@ -77,7 +77,7 @@ const RANGER_HOTBAR: HotbarEntry[] = [
   { id: 'swallow_flip', key: '3', name: RS[2].name, icon: RS[2].icon, short: '后空翻七镖', cdKey: 'skill3', meta: rMeta(2), desc: RS[2].description,
     tip: '看到对手冲过来或起手大招时用，翻身那一下是无敌的。' },
   { id: 'poison', key: '4', name: RS[3].name, icon: RS[3].icon, short: '飞镖带毒', cdKey: 'skill4', meta: rMeta(3), desc: RS[3].description,
-    tip: '先开淬毒再丢一串飞镖，五层毒每秒掉七十血。' },
+    tip: '开淬毒后3秒内尽量打出最重的一下（三连镖或金色穿透镖），毒伤按最后一次命中算。' },
   { id: 'rain_of_darts', key: 'R', name: RS[4].name, icon: RS[4].icon, short: '悬空洒镖', cdKey: 'ultimate', super: true, meta: rMeta(4), desc: RS[4].description,
     tip: '先用 2 定身镖钉住对手，再开暴雨梨花，几乎全中。' },
 ];

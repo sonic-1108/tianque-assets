@@ -179,6 +179,7 @@ export interface CombatantState {
   /** 暗器 (Ranger) runtime */
   rootTimer?: number; // pinned in place by 定身镖
   poisonStacks?: number;
+  poisonDps?: number; // 淬毒: damage per second, set by the last poisoned hit
   poisonTimer?: number;
   poisonTick?: number;
   poisonBuff?: number; // 淬毒 active seconds left
