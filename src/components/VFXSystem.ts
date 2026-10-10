@@ -556,18 +556,15 @@ export class VFXSystem {
   private dmg: DmgFx[] = [];
   private lights: FlashLight[] = [];
   private crackTex = makeCrackTextures();
-  private vortex = makeVortex();
-  private pillar = makePillar();
-  private vortexLife = 0;
-  private vortexMax = 0;
-  private pillarLife = 0;
-  private pillarMax = 0;
+  // one whirlwind + one rage pillar per fighter slot (0 = player, 1 = opponent)
+  private slots = [0, 1].map(() => ({ vortex: makeVortex(), pillar: makePillar(), vLife: 0, vMax: 0, pLife: 0, pMax: 0 }));
   private time = 0;
   trails: RibbonTrail[] = [];
 
   constructor() {
     this.root.name = 'VFXSystem';
-    this.root.add(this.sparks.points, this.dust.points, this.debris.mesh, this.vortex.group, this.pillar.group);
+    this.root.add(this.sparks.points, this.dust.points, this.debris.mesh);
+    for (const sl of this.slots) this.root.add(sl.vortex.group, sl.pillar.group);
 
     const plane = new THREE.PlaneGeometry(1, 1);
     for (let i = 0; i < 14; i++) {
@@ -706,7 +703,7 @@ export class VFXSystem {
     }
   }
 
-  damageNumber(pos: THREE.Vector3, value: number, crit: boolean, color = '#ffffff') {
+  damageNumber(pos: THREE.Vector3, value: number | string, crit: boolean, color = '#ffffff') {
     const d = this.dmg.find((x) => !x.active) || this.dmg.reduce((a, b) => (a.life < b.life ? a : b));
     const ctx = d.canvas.getContext('2d')!;
     ctx.clearRect(0, 0, 256, 96);
@@ -738,26 +735,33 @@ export class VFXSystem {
   }
 
   // ---------------- continuous effects ----------------
-  setVortex(on: boolean, duration = 1.6) {
+  setVortex(on: boolean, duration = 1.6, slot = 0) {
+    const sl = this.slots[slot];
     if (on) {
-      this.vortexLife = duration;
-      this.vortexMax = duration;
-      this.vortex.group.visible = true;
+      sl.vLife = duration;
+      sl.vMax = duration;
+      sl.vortex.group.visible = true;
     } else {
-      this.vortexLife = Math.min(this.vortexLife, 0.15);
+      sl.vLife = Math.min(sl.vLife, 0.15);
     }
   }
 
-  pillarAt(duration: number, color: THREE.ColorRepresentation) {
-    this.pillarLife = duration;
-    this.pillarMax = duration;
-    this.pillar.mat.uniforms.uColor.value.set(color);
-    this.pillar.group.visible = true;
+  pillarAt(duration: number, color: THREE.ColorRepresentation, slot = 0) {
+    const sl = this.slots[slot];
+    sl.pLife = duration;
+    sl.pMax = duration;
+    sl.pillar.mat.uniforms.uColor.value.set(color);
+    sl.pillar.group.visible = true;
+  }
+
+  followFighter(slot: number, p: THREE.Vector3) {
+    const sl = this.slots[slot];
+    sl.vortex.group.position.set(p.x, p.y, p.z);
+    sl.pillar.group.position.set(p.x, 0, p.z);
   }
 
   followPlayer(p: THREE.Vector3) {
-    this.vortex.group.position.set(p.x, p.y, p.z);
-    this.pillar.group.position.set(p.x, 0, p.z);
+    this.followFighter(0, p);
   }
 
   // ---------------- composite skill effects ----------------
@@ -856,27 +860,25 @@ export class VFXSystem {
       l.light.intensity = l.peak * t * t;
     }
 
-    // Vortex
-    if (this.vortexLife > 0) {
-      this.vortexLife -= dt;
-      const t = 1 - this.vortexLife / Math.max(0.001, this.vortexMax);
-      const fadeIn = Math.min(1, t * 8);
-      const fadeOut = Math.min(1, this.vortexLife / 0.2);
-      this.vortex.mat.uniforms.uOpacity.value = 0.85 * fadeIn * fadeOut;
-      this.vortex.mat.uniforms.uTime.value = this.time;
-      this.vortex.outer.rotation.y -= dt * 11;
-      this.vortex.inner.rotation.y -= dt * 15;
-      if (this.vortexLife <= 0) this.vortex.group.visible = false;
-    }
-
-    // Pillar
-    if (this.pillarLife > 0) {
-      this.pillarLife -= dt;
-      const t = 1 - this.pillarLife / Math.max(0.001, this.pillarMax);
-      this.pillar.mat.uniforms.uOpacity.value = Math.min(1, t * 8) * Math.min(1, this.pillarLife / 0.35) * 0.9;
-      this.pillar.mat.uniforms.uTime.value = this.time;
-      this.pillar.group.scale.set(0.6 + 0.4 * easeOutCubic(Math.min(1, t * 4)), 1, 0.6 + 0.4 * easeOutCubic(Math.min(1, t * 4)));
-      if (this.pillarLife <= 0) this.pillar.group.visible = false;
+    for (const sl of this.slots) {
+      if (sl.vLife > 0) {
+        sl.vLife -= dt;
+        const t = 1 - sl.vLife / Math.max(0.001, sl.vMax);
+        sl.vortex.mat.uniforms.uOpacity.value = 0.85 * Math.min(1, t * 8) * Math.min(1, sl.vLife / 0.2);
+        sl.vortex.mat.uniforms.uTime.value = this.time;
+        sl.vortex.outer.rotation.y -= dt * 11;
+        sl.vortex.inner.rotation.y -= dt * 15;
+        if (sl.vLife <= 0) sl.vortex.group.visible = false;
+      }
+      if (sl.pLife > 0) {
+        sl.pLife -= dt;
+        const t = 1 - sl.pLife / Math.max(0.001, sl.pMax);
+        sl.pillar.mat.uniforms.uOpacity.value = Math.min(1, t * 8) * Math.min(1, sl.pLife / 0.35) * 0.9;
+        sl.pillar.mat.uniforms.uTime.value = this.time;
+        const g = 0.6 + 0.4 * easeOutCubic(Math.min(1, t * 4));
+        sl.pillar.group.scale.set(g, 1, g);
+        if (sl.pLife <= 0) sl.pillar.group.visible = false;
+      }
     }
 
     for (const tr of this.trails) {
@@ -891,8 +893,7 @@ export class VFXSystem {
     for (const d of this.decals) if (d.active) n++;
     for (const d of this.dmg) if (d.active) n++;
     for (const t of this.trails) n += t.count > 0 ? 1 : 0;
-    if (this.vortexLife > 0) n++;
-    if (this.pillarLife > 0) n++;
+    for (const sl of this.slots) n += (sl.vLife > 0 ? 1 : 0) + (sl.pLife > 0 ? 1 : 0);
     return n;
   }
 

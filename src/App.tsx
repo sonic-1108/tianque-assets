@@ -5,7 +5,7 @@ import { usePlayground, usePlaygroundGameLifecycle } from './utils/usePlayground
 import { MenuOverlay, gameAudio, useIsMobile } from './utils/helper';
 import { BackgroundMusic } from './utils/BackgroundMusic';
 import { useGameInput } from './input';
-import { Game } from './Game';
+import { Game, RoundEvent } from './Game';
 import {
   GameState,
   CombatantState,
@@ -99,6 +99,34 @@ export default function App() {
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
+
+  // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
+  const aiEnabledRef = useRef(true);
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const [score, setScore] = useState({ player: 0, enemy: 0 });
+  const [roundBanner, setRoundBanner] = useState<null | 'player' | 'enemy'>(null);
+  const [hurtFlash, setHurtFlash] = useState(0);
+  const toggleAI = useCallback(() => {
+    aiEnabledRef.current = !aiEnabledRef.current;
+    setAiEnabled(aiEnabledRef.current);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'KeyP') toggleAI();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleAI]);
+  const handleRoundEvent = useCallback((e: RoundEvent) => {
+    if (e.type === 'ko') {
+      setRoundBanner(e.winner);
+      setScore((s) => ({ ...s, [e.winner]: s[e.winner] + 1 }));
+    } else if (e.type === 'reset') {
+      setRoundBanner(null);
+    } else if (e.type === 'playerHit') {
+      setHurtFlash((n) => n + 1);
+    }
+  }, []);
 
   // Blood Rage Screen Edge Flash
   const [bloodRageFlash, setBloodRageFlash] = useState(false);
@@ -337,6 +365,28 @@ export default function App() {
         <div className="absolute inset-0 pointer-events-none z-30 ring-[18px] ring-inset ring-red-600/70 shadow-[inset_0_0_100px_rgba(239,68,68,0.7)] animate-pulse" />
       )}
 
+      {/* Player hurt flash */}
+      {hurtFlash > 0 && (
+        <div
+          key={hurtFlash}
+          className="absolute inset-0 pointer-events-none z-30 shadow-[inset_0_0_120px_rgba(220,38,38,0.55)]"
+          style={{ animation: 'tqHurt 0.35s ease-out forwards' }}
+        />
+      )}
+      <style>{`@keyframes tqHurt{from{opacity:1}to{opacity:0}} @keyframes tqBanner{0%{transform:scale(1.6);opacity:0}15%{transform:scale(1);opacity:1}85%{opacity:1}100%{opacity:0}}`}</style>
+
+      {/* Round result banner */}
+      {roundBanner && (
+        <div className="absolute inset-0 pointer-events-none z-40 flex flex-col items-center justify-center gap-2" style={{ animation: 'tqBanner 3.1s ease-out forwards' }}>
+          <span className={`text-6xl font-black italic tracking-widest drop-shadow-[0_4px_20px_rgba(0,0,0,0.9)] ${roundBanner === 'player' ? 'text-amber-300' : 'text-sky-300'}`}>
+            {roundBanner === 'player' ? '胜' : '败'}
+          </span>
+          <span className="text-sm font-bold text-zinc-200 bg-black/60 px-3 py-1 rounded-full">
+            {roundBanner === 'player' ? '霍岩影 被击倒' : '你被霍岩影击倒'} · {score.player} : {score.enemy} · 下一回合即将开始
+          </span>
+        </div>
+      )}
+
       {/* Model Download Loading Overlay */}
       {modelProgress.isLoading && (
         <CanvasLoadingScreen
@@ -379,6 +429,8 @@ export default function App() {
               p1RefState={p1RefState}
               dummyRefState={dummyRefState}
               targetingRefState={targetingRefState}
+              aiEnabledRef={aiEnabledRef}
+              onRoundEvent={handleRoundEvent}
               onVfxCountChange={setVfxCount}
               onDebugUpdate={setDebugData}
               onDummyScreenPosUpdate={setDummyScreenPos}
@@ -399,15 +451,15 @@ export default function App() {
             }}
           >
             <div className="flex items-center gap-1 bg-black/85 px-2.5 py-0.5 rounded-full border border-red-500/50 text-[11px] font-bold text-red-300 shadow-lg">
-              <span>演武木桩 · 霍岩影</span>
+              <span>{aiEnabled ? '霍岩影 · 对手' : '演武木桩 · 霍岩影'}</span>
               {targetingRefState.current.lockedEnemyId && (
                 <span className="text-yellow-400 font-mono text-[10px]">🎯 锁定</span>
               )}
             </div>
-            <div className="w-28 h-2.5 bg-zinc-950 rounded-full border border-red-500/80 overflow-hidden shadow-md">
+            <div className="w-36 h-2.5 bg-zinc-950 rounded-full border border-sky-400/80 overflow-hidden shadow-md">
               <div
-                className="h-full bg-gradient-to-r from-red-600 via-rose-500 to-amber-400 transition-all duration-75"
-                style={{ width: `${(hudMirror.dummyHp / 1600) * 100}%` }}
+                className="h-full bg-gradient-to-r from-sky-600 via-sky-400 to-cyan-300 transition-all duration-75"
+                style={{ width: `${(hudMirror.dummyHp / dummyRefState.current.maxHp) * 100}%` }}
               />
             </div>
           </div>
@@ -507,8 +559,9 @@ export default function App() {
               天阙 · 演武场
             </span>
             <span className="text-sm font-black text-amber-400 tracking-wider">
-              自由试炼
+              {aiEnabled ? `对决 ${score.player} : ${score.enemy}` : '自由试炼'}
             </span>
+            <span className="text-[9px] text-zinc-500">P 切换{aiEnabled ? '木桩' : '对战'}模式</span>
           </div>
         </div>
 
@@ -786,6 +839,8 @@ export default function App() {
                 <p>• Shift 键：翻滚闪避（可在任何技能后摇或普攻前摇时强行取消）</p>
                 <p>• Tab 键：锁定 / 切换最近敌方目标，鼠标中键：清除目标锁定</p>
                 <p>• F3 键：开启 / 关闭实时调试监控面板（查看按键与动作切片）</p>
+                <p>• P 键：切换 对战模式（霍岩影会走位、连招、格挡、闪避）/ 木桩模式（不还手）</p>
+                <p>• 鼠标右键格挡：正面受击减伤60%且不会被打断；天崩无法格挡，只能翻滚躲开</p>
               </div>
 
               <div className="bg-zinc-900/80 p-3.5 rounded-2xl border border-zinc-800">
@@ -874,6 +929,13 @@ export default function App() {
               >
                 <RotateCw className="w-4 h-4" />
                 重置演武位置与状态
+              </button>
+
+              <button
+                onClick={toggleAI}
+                className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-sky-700 text-sky-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2"
+              >
+                {aiEnabled ? '切换为木桩模式（不还手）' : '切换为对战模式（霍岩影会还手）'} · P
               </button>
 
               <button
