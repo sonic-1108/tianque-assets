@@ -6,6 +6,7 @@ import { MenuOverlay, gameAudio, useIsMobile } from './utils/helper';
 import { BackgroundMusic } from './utils/BackgroundMusic';
 import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
+import { MAPS, MAP_ORDER, MapId } from './maps';
 import {
   GameState,
   CombatantState,
@@ -126,6 +127,9 @@ export default function App() {
   const [isPointerLocked, setIsPointerLocked] = useState(false);
 
   const [skillCard, setSkillCard] = useState<string | null>(null);
+  const [mapId, setMapId] = useState<MapId>('temple');
+  const [isMapSelectOpen, setIsMapSelectOpen] = useState(true);
+  const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
   const aiEnabledRef = useRef(true);
@@ -141,6 +145,10 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'KeyP') toggleAI();
+      if (e.code === 'KeyM') {
+        if (document.pointerLockElement) document.exitPointerLock?.();
+        setIsMapSelectOpen((o) => !o);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -153,6 +161,8 @@ export default function App() {
       setRoundBanner(null);
     } else if (e.type === 'playerHit') {
       setHurtFlash((n) => n + 1);
+    } else if (e.type === 'toast') {
+      setToast((t) => ({ n: t.n + 1, text: e.text }));
     } else if (e.type === 'screenFlash') {
       setScreenFlash((f) => ({ n: f.n + 1, color: e.color }));
     }
@@ -214,6 +224,10 @@ export default function App() {
   });
 
   usePlaygroundGameLifecycle(gameState, sdk);
+
+  useEffect(() => {
+    setGameState((g) => ({ ...g, status: isMapSelectOpen ? 'PAUSED' : 'PLAYING' }));
+  }, [isMapSelectOpen]);
 
   // Toggle handlers for input hook
   const handleToggleDebug = useCallback(() => {
@@ -409,6 +423,62 @@ export default function App() {
         <div key={`sf${screenFlash.n}`} className="absolute inset-0 pointer-events-none z-30" style={{ background: screenFlash.color, animation: 'tqHurt 0.45s ease-out forwards' }} />
       )}
 
+      {toast.n > 0 && (
+        <div key={`t${toast.n}`} className="absolute top-32 inset-x-0 flex justify-center pointer-events-none z-40" style={{ animation: 'tqBanner 2.4s ease-out forwards' }}>
+          <span className="text-lg font-black text-orange-300 bg-black/75 border border-orange-500/60 px-5 py-2 rounded-full shadow-xl">{toast.text}</span>
+        </div>
+      )}
+
+      {/* MAP SELECT */}
+      {isMapSelectOpen && !modelProgress.isLoading && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm overflow-y-auto flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl">
+            <div className="text-center mb-5">
+              <h2 className="text-3xl font-black text-amber-300 tracking-widest">选择战场</h2>
+              <p className="text-xs text-zinc-400 mt-1">每张地图都有自己的机制和主场职业，主场职业在该地图伤害 +10%</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {MAP_ORDER.map((id) => {
+                const m = MAPS[id];
+                const selected = id === mapId;
+                return (
+                  <button
+                    key={id}
+                    disabled={!m.available}
+                    onClick={() => {
+                      gameAudio.playCrispClick();
+                      setMapId(id);
+                      setRoundBanner(null);
+                      setIsMapSelectOpen(false);
+                      requestGameFocus();
+                    }}
+                    className={`text-left rounded-2xl border p-4 bg-gradient-to-br ${m.cardGradient} transition-all ${
+                      m.available ? 'hover:scale-[1.02] hover:border-amber-400 cursor-pointer' : 'opacity-50 cursor-not-allowed'
+                    } ${selected ? 'border-amber-400 ring-2 ring-amber-400/60' : 'border-zinc-700'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xl font-black text-white">{m.icon} {m.name}</span>
+                      {!m.available && <span className="text-[10px] bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-full">敬请期待</span>}
+                      {selected && m.available && <span className="text-[10px] bg-amber-500 text-black font-bold px-2 py-0.5 rounded-full">当前</span>}
+                    </div>
+                    <p className="text-xs text-zinc-300 mt-1">{m.subtitle}</p>
+                    <ul className="mt-3 space-y-1">
+                      {m.mechanics.map((x) => (
+                        <li key={x} className="text-[11px] text-zinc-200">• {x}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 pt-2 border-t border-white/10 text-[11px] text-amber-200">
+                      主场职业：<span className="font-bold">{m.homeClassName}</span> · {m.homeBonus}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-center text-[11px] text-zinc-500 mt-4">游戏中按 M 可随时回到这里</p>
+          </div>
+        </div>
+      )}
+
       {/* Round result banner */}
       {roundBanner && (
         <div className="absolute inset-0 pointer-events-none z-40 flex flex-col items-center justify-center gap-2" style={{ animation: 'tqBanner 3.1s ease-out forwards' }}>
@@ -434,7 +504,7 @@ export default function App() {
       <div
         ref={canvasContainerRef}
         onClick={() => {
-          if (!isPointerLocked && !isGameMenuOpen && !isHowToPlayOpen && !modelProgress.isLoading) {
+          if (!isPointerLocked && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading) {
             requestGameFocus();
           }
         }}
@@ -464,6 +534,7 @@ export default function App() {
               dummyRefState={dummyRefState}
               targetingRefState={targetingRefState}
               aiEnabledRef={aiEnabledRef}
+              mapId={mapId}
               onRoundEvent={handleRoundEvent}
               onVfxCountChange={setVfxCount}
               onDebugUpdate={setDebugData}
@@ -590,12 +661,13 @@ export default function App() {
           {/* Top Center Arena Badge */}
           <div className="flex flex-col items-center justify-center bg-zinc-900/85 px-4 py-2 rounded-2xl border border-zinc-700 shadow-md min-w-[120px]">
             <span className="text-[10px] text-zinc-400 font-semibold tracking-wider">
-              天阙 · 演武场
+              {MAPS[mapId].icon} {MAPS[mapId].name}
             </span>
             <span className="text-sm font-black text-amber-400 tracking-wider">
               {aiEnabled ? `对决 ${score.player} : ${score.enemy}` : '自由试炼'}
             </span>
-            <span className="text-[9px] text-zinc-500">P 切换{aiEnabled ? '木桩' : '对战'}模式</span>
+            <span className="text-[9px] text-amber-200/80">主场：{MAPS[mapId].homeClassName} · {MAPS[mapId].homeBonus.split('（')[0]}</span>
+            <span className="text-[9px] text-zinc-500">P 切换{aiEnabled ? '木桩' : '对战'}模式 · M 换地图</span>
           </div>
         </div>
 
@@ -980,6 +1052,16 @@ export default function App() {
               >
                 <RotateCw className="w-4 h-4" />
                 重置演武位置与状态
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsGameMenuOpen(false);
+                  setIsMapSelectOpen(true);
+                }}
+                className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-amber-700 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2"
+              >
+                选择地图 · M
               </button>
 
               <button

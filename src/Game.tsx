@@ -9,7 +9,8 @@ import { CombatantState, GameState, TargetingState, CharacterActionState } from 
 import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
-import { Arenas3D } from './components/Arenas3D';
+import { Maps3D } from './components/Maps3D';
+import { MAPS, MapId, HOME_BONUS, forgeStage, FORGE_STAGE_RADII, FORGE_STAGE_TIMES, inForgeLava, mapRuntime } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { CameraController } from './CameraController';
 
@@ -17,7 +18,8 @@ export type RoundEvent =
   | { type: 'ko'; winner: 'player' | 'enemy' }
   | { type: 'reset' }
   | { type: 'playerHit'; heavy: boolean }
-  | { type: 'screenFlash'; color: string };
+  | { type: 'screenFlash'; color: string }
+  | { type: 'toast'; text: string };
 
 interface GameSceneProps {
   gameState: GameState;
@@ -28,6 +30,7 @@ interface GameSceneProps {
   targetingRefState: React.MutableRefObject<TargetingState>;
   /** true = 霍岩影 fights back; false = passive training dummy */
   aiEnabledRef: React.MutableRefObject<boolean>;
+  mapId: MapId;
   showBoneAxes?: boolean;
   onRoundEvent?: (e: RoundEvent) => void;
   onVfxCountChange?: (count: number) => void;
@@ -88,6 +91,7 @@ export function Game({
   dummyRefState,
   targetingRefState,
   aiEnabledRef,
+  mapId,
   showBoneAxes,
   onRoundEvent,
   onVfxCountChange,
@@ -109,6 +113,17 @@ export function Game({
 
   const slowMoTimerRef = useRef(0);
   const gameTimeRef = useRef(0);
+  const map = MAPS[mapId];
+  const pendingResetRef = useRef(true);
+  const mapTimeRef = useRef(0);
+  const lavaRRef = useRef(99);
+  const forgeWarnedRef = useRef(-1);
+  const burnAccRef = useRef([0, 0]);
+  const wallCdRef = useRef([0, 0]);
+  const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
+  useEffect(() => {
+    pendingResetRef.current = true;
+  }, [mapId]);
   const auraTimers = useRef([0, 0]);
   const footTimers = useRef([0, 0]);
   const wasGrounded = useRef([true, true]);
@@ -134,15 +149,15 @@ export function Game({
     const env = pmrem.fromScene(new (RoomEnvironment as any)(), 0.04).texture;
     scene.environment = env;
     (scene as any).environmentIntensity = 0.55;
-    scene.background = new THREE.Color('#1a1f2b');
-    scene.fog = new THREE.Fog('#1a1f2b', 28, 70);
-    gl.toneMappingExposure = 1.15;
+    scene.background = new THREE.Color(map.background);
+    scene.fog = new THREE.Fog(map.background, map.fog[0], map.fog[1]);
+    gl.toneMappingExposure = map.exposure;
     return () => {
       env.dispose();
       pmrem.dispose();
       scene.environment = null;
     };
-  }, [gl, scene]);
+  }, [gl, scene, map]);
 
   useEffect(() => {
     const controller = new CameraController(camera as THREE.PerspectiveCamera, gl.domElement);
@@ -169,7 +184,7 @@ export function Game({
     gameTimeRef.current += dt;
     const gt = gameTimeRef.current;
 
-    const arenaRadius = getConfig('arenaRadius') || 22;
+    void getConfig;
     const gravity = getConfig('gravity') || 26;
     const baseSpeed = (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS.Berserker.speedRatio || 0.75);
     const jumpVel = getConfig('jumpVelocity') || 11;
@@ -209,31 +224,17 @@ export function Game({
     }
 
     // ---------- round flow ----------
+    if (pendingResetRef.current) {
+      pendingResetRef.current = false;
+      resetRound(false);
+    }
     if (round.over) {
       round.timer -= rawDt;
-      if (round.timer <= 0) {
-        round.over = false;
-        for (const c of fighters) {
-          c.hp = c.maxHp;
-          c.mp = c.maxMp;
-          c.vel = [0, 0, 0];
-          c.actionState = 'idle';
-          c.stateTimer = 0;
-          c.stateDuration = 0;
-          c.buffs = [];
-          c.comboCount = 0;
-          c.comboDamage = 0;
-          c.dodgeIframeTimer = 0.6;
-          for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
-        }
-        p1.pos = [0, 0, 0];
-        p1.rotY = p1.targetRotY = 0;
-        en.pos = [0, 0, -6];
-        en.rotY = en.targetRotY = Math.PI;
-        aiRef.current.think = 1.2;
-        onRoundEvent?.({ type: 'reset' });
-      }
+      if (round.timer <= 0) resetRound(true);
     }
+
+    // ---------- map hazards ----------
+    updateMap();
 
     // ---------- targeting ----------
     if (just.lockEnemy) {
@@ -322,7 +323,7 @@ export function Game({
       if (!c.isGrounded && c.actionState !== 'buried') {
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
-        if (c.pos[1] <= 0) {
+        if (c.pos[1] <= 0 && c.pos[1] > -0.6 && overGround(c)) {
           c.pos[1] = 0;
           const impact = -c.vel[1];
           c.vel[1] = 0;
@@ -345,13 +346,7 @@ export function Game({
         c.vel[0] *= k;
         c.vel[2] *= k;
       }
-      const d = Math.hypot(c.pos[0], c.pos[2]);
-      if (d > arenaRadius) {
-        c.pos[0] *= arenaRadius / d;
-        c.pos[2] *= arenaRadius / d;
-        c.vel[0] = 0;
-        c.vel[2] = 0;
-      }
+      applyBounds(i, c);
       let diff = c.targetRotY - c.rotY;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -764,7 +759,7 @@ export function Game({
       if (def.actionState === 'knockdown' && def.isGrounded && !o.unblockable) return;
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
-      let dmg = base * (rage ? 1.35 : 1);
+      let dmg = base * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1);
       if ((att.counterTimer ?? 0) > 0) {
         dmg *= 1.5;
         att.counterTimer = 0;
@@ -872,22 +867,7 @@ export function Game({
         onRoundEvent?.({ type: 'playerHit', heavy: !!o.heavy });
       }
 
-      // KO
-      if (def.hp <= 0 && aiOn && !round.over) {
-        round.over = true;
-        round.timer = 3.2;
-        slowMoTimerRef.current = 0.7;
-        def.actionState = def.isGrounded ? 'knockdown' : 'launched';
-        def.stateTimer = 0;
-        def.stateDuration = 99;
-        if (def.isGrounded) {
-          def.vel[1] = 6;
-          def.isGrounded = false;
-          def.actionState = 'launched';
-        }
-        vfx.ring(vA.set(def.pos[0], 0, def.pos[2]), 3, color, 0.7, 0.12, 0.5);
-        onRoundEvent?.({ type: 'ko', winner: attackerIsPlayer ? 'player' : 'enemy' });
-      }
+      koCheck(def === p1 ? 0 : 1, color);
     }
 
     function resolveAttacks(slot: number, c: CombatantState, foe: CombatantState) {
@@ -1056,6 +1036,293 @@ export function Game({
       }
     }
 
+    // ======================================================
+    // MAP SYSTEM
+    // ======================================================
+    function resetRound(fromKO: boolean) {
+      round.over = false;
+      for (const c of fighters) {
+        c.hp = c.maxHp;
+        c.mp = c.maxMp;
+        c.vel = [0, 0, 0];
+        c.actionState = 'idle';
+        c.stateTimer = 0;
+        c.stateDuration = 0;
+        c.buffs = [];
+        c.comboCount = 0;
+        c.comboDamage = 0;
+        c.isGrounded = true;
+        c.juggleCount = 0;
+        c.dodgeIframeTimer = 0.6;
+        for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
+      }
+      p1.pos = [map.spawnPlayer[0], 0, map.spawnPlayer[1]];
+      en.pos = [map.spawnEnemy[0], 0, map.spawnEnemy[1]];
+      p1.rotY = p1.targetRotY = yawTo(p1.pos, en.pos);
+      en.rotY = en.targetRotY = yawTo(en.pos, p1.pos);
+      if (controller) controller.yaw = p1.rotY;
+      aiRef.current.think = 1.2;
+      mapTimeRef.current = 0;
+      lavaRRef.current = 99;
+      mapRuntime.lavaR = 99;
+      forgeWarnedRef.current = -1;
+      ventRef.current = { timer: 3, warn: (map.vents || []).map(() => 0) };
+      mapRuntime.ventHeat = (map.vents || []).map(() => 0);
+      if (fromKO) onRoundEvent?.({ type: 'reset' });
+    }
+
+    function overGround(c: CombatantState) {
+      if (map.id === 'lavacliff') return Math.hypot(c.pos[0], c.pos[2]) <= map.radius + 0.35;
+      return true;
+    }
+
+    function danger(x: number, z: number, margin: number) {
+      if (map.id === 'lavacliff') return Math.hypot(x, z) > map.radius - 1.8 - margin;
+      if (map.id === 'forge') {
+        // be cautious about the next flood as well
+        const nextIdx = Math.min(FORGE_STAGE_RADII.length - 1, forgeStage(mapTimeRef.current + 2.5));
+        const r = Math.min(lavaRRef.current, FORGE_STAGE_RADII[nextIdx]);
+        return inForgeLava(x, z, r - 0.4, (map.islands || []).map((i) => ({ ...i, r: i.r - 0.5 })));
+      }
+      return false;
+    }
+
+    function safeSpot(x: number, z: number): [number, number] {
+      if (map.id === 'forge') {
+        const cands: [number, number][] = [[0, 0], ...(map.islands || []).map((i) => [i.x, i.z] as [number, number])];
+        cands.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z));
+        return cands[0];
+      }
+      return [0, 0];
+    }
+
+    function koCheck(defSlot: number, color: string) {
+      const def = fighters[defSlot];
+      if (def.hp > 0 || !aiOn || round.over) return;
+      round.over = true;
+      round.timer = 3.2;
+      slowMoTimerRef.current = 0.7;
+      def.stateTimer = 0;
+      def.stateDuration = 99;
+      def.actionState = 'launched';
+      if (def.isGrounded && def.pos[1] >= -0.1) {
+        def.vel[1] = 6;
+        def.isGrounded = false;
+      }
+      vfx.ring(vA.set(def.pos[0], 0, def.pos[2]), 3, color, 0.7, 0.12, 0.5);
+      onRoundEvent?.({ type: 'ko', winner: defSlot === 1 ? 'player' : 'enemy' });
+    }
+
+    /** Environmental damage (vents, lava, ring-out) */
+    function envHit(i: number, dmg: number, launch: number, label?: string) {
+      const c = fighters[i];
+      if (c.hp <= 0) return;
+      if (launch > 0 && c.dodgeIframeTimer > 0) return;
+      c.hp = Math.max(0, c.hp - dmg);
+      c.whiteFlashTimer = 0.06;
+      vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), label ? `${label} ${dmg}` : dmg, false, '#ffb15a');
+      if (launch > 0) {
+        c.vel[1] = launch;
+        c.isGrounded = false;
+        c.actionState = 'launched';
+        c.stateTimer = 0;
+        c.stateDuration = 0.9;
+        c.airSlam = c.airSlash = c.dodgeSlash = false;
+      }
+      if (i === 0) {
+        controller?.addShake(launch > 0 ? 0.4 : 0.06);
+        if (launch > 0) onRoundEvent?.({ type: 'playerHit', heavy: true });
+      }
+      if (c.hp <= 0) {
+        if (aiOn) koCheck(i, '#ff6a1a');
+        else c.hp = c.maxHp;
+      }
+    }
+
+    function applyBounds(i: number, c: CombatantState) {
+      const d = Math.hypot(c.pos[0], c.pos[2]);
+      const speed = Math.hypot(c.vel[0], c.vel[2]);
+      const knocked = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown';
+      if (wallCdRef.current[i] > 0) wallCdRef.current[i] -= dt;
+
+      if (map.id === 'lavacliff') {
+        const R = map.radius;
+        const falling = c.pos[1] < -0.05;
+        // walking can't take you off the edge; knockback (and charges/rolls) can
+        const canLeave = knocked || falling || c.actionState === 'skill_3' || c.hp <= 0;
+        if (!canLeave && d > R - 0.25) {
+          c.pos[0] *= (R - 0.25) / d;
+          c.pos[2] *= (R - 0.25) / d;
+          const nx = c.pos[0] / d;
+          const nz = c.pos[2] / d;
+          const out = c.vel[0] * nx + c.vel[2] * nz;
+          if (out > 0) {
+            c.vel[0] -= nx * out;
+            c.vel[2] -= nz * out;
+          }
+        }
+        if (c.isGrounded && !overGround(c)) {
+          c.isGrounded = false;
+          c.vel[1] = Math.min(c.vel[1], 0);
+          c.actionState = 'launched';
+          c.stateTimer = 0;
+          c.stateDuration = 99;
+        }
+        if (c.pos[1] < -6.5) ringOut(i);
+        return;
+      }
+
+      const R = map.radius;
+      if (d > R) {
+        c.pos[0] *= R / d;
+        c.pos[2] *= R / d;
+        if (map.id === 'temple') wallSplat(i, c, speed, c.pos[0], c.pos[2]);
+        c.vel[0] = 0;
+        c.vel[2] = 0;
+      }
+      for (const pl of map.pillars || []) {
+        const dx = c.pos[0] - pl.x;
+        const dz = c.pos[2] - pl.z;
+        const dd = Math.hypot(dx, dz);
+        const minD = pl.r + 0.45;
+        if (dd < minD && dd > 0.0001) {
+          c.pos[0] = pl.x + (dx / dd) * minD;
+          c.pos[2] = pl.z + (dz / dd) * minD;
+          wallSplat(i, c, speed, pl.x + (dx / dd) * pl.r, pl.z + (dz / dd) * pl.r);
+          const nx = dx / dd;
+          const nz = dz / dd;
+          const into = c.vel[0] * nx + c.vel[2] * nz;
+          if (into < 0) {
+            c.vel[0] -= nx * into;
+            c.vel[2] -= nz * into;
+          }
+        }
+      }
+      void knocked;
+    }
+
+    function wallSplat(i: number, c: CombatantState, speed: number, wx: number, wz: number) {
+      const knocked = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown';
+      if (!knocked || speed < 6 || wallCdRef.current[i] > 0 || c.hp <= 0) return;
+      wallCdRef.current[i] = 0.8;
+      const other = 1 - i;
+      const att = fighters[other];
+      const pt = new THREE.Vector3(wx, c.pos[1] + 1.1, wz);
+      vfx.rocks(pt, 8, 4.5, 0.09);
+      vfx.dustPuff(pt, 12, 0.4, 2.2, 0.7, '#8a7f72');
+      vfx.sparkBurst(pt, 16, '#ffd9a8', 6, 0.08);
+      vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), '撞墙!', true, '#fde68a');
+      gameAudio.playGeneralExplosion();
+      applyHit(other, att, c, 70, { heavy: true, knock: 0, state: 'hitstun', dur: 0.9, unblockable: true, noMark: true, shake: 0.3 });
+    }
+
+    function ringOut(i: number) {
+      const c = fighters[i];
+      vfx.sparkBurst(vA.set(c.pos[0], -6.5, c.pos[2]), 40, '#ff6a1a', 10, 0.14, new THREE.Vector3(0, 1, 0), 0.6);
+      vfx.flash(vA.set(c.pos[0], -5, c.pos[2]), '#ff6a1a', 60, 0.5, 14);
+      if (aiOn && !round.over && c.hp > 0) {
+        c.hp = 0;
+        onRoundEvent?.({ type: 'toast', text: i === 0 ? '你坠入了岩浆！' : '霍岩影 坠入岩浆！' });
+        koCheck(i, '#ff6a1a');
+      }
+      // respawn above the platform (practice mode, or after the KO is decided)
+      c.pos = [0, 4, 0];
+      c.vel = [0, 0, 0];
+      c.isGrounded = false;
+      c.actionState = 'launched';
+      c.stateTimer = 0;
+      c.stateDuration = 0.9;
+      if (!aiOn) {
+        c.hp = Math.max(1, c.hp - 200);
+        if (c === en) c.hp = c.maxHp;
+      }
+    }
+
+    function updateMap() {
+      if (!round.over) mapTimeRef.current += dt;
+      const skip = (globalThis as any).__TQ_SKIPTIME;
+      if (skip) {
+        mapTimeRef.current += skip;
+        (globalThis as any).__TQ_SKIPTIME = 0;
+      }
+      const t = mapTimeRef.current;
+
+      // ambient embers
+      if (map.id !== 'temple' && Math.random() < 0.5) {
+        const a = Math.random() * Math.PI * 2;
+        const r = map.id === 'lavacliff' ? map.radius + 1 + Math.random() * 6 : Math.max(lavaRRef.current, 3) + Math.random() * 5;
+        vfx.embers(vB.set(Math.cos(a) * r, map.id === 'lavacliff' ? -2 : 0.1, Math.sin(a) * r), 1, '#ff7a2a', 0.3, 2.5, 0.06);
+      }
+
+      if (map.id === 'lavacliff' && map.vents) {
+        const vs = ventRef.current;
+        if (!round.over) vs.timer -= dt;
+        if (vs.timer <= 0) {
+          vs.timer = 3 + Math.random() * 2;
+          // usually target a vent near one of the fighters
+          let idx = Math.floor(Math.random() * map.vents.length);
+          if (Math.random() < 0.6) {
+            const f = fighters[Math.random() < 0.5 ? 0 : 1];
+            let best = 1e9;
+            map.vents.forEach((v, k) => {
+              const dd = Math.hypot(v.x - f.pos[0], v.z - f.pos[2]);
+              if (dd < best) {
+                best = dd;
+                idx = k;
+              }
+            });
+          }
+          if (!(vs.warn[idx] > 0)) vs.warn[idx] = 1.3;
+        }
+        map.vents.forEach((v, k) => {
+          if (vs.warn[k] > 0) {
+            vs.warn[k] -= dt;
+            const prog = 1 - vs.warn[k] / 1.3;
+            mapRuntime.ventHeat[k] = 0.25 + 0.75 * prog * (0.7 + 0.3 * Math.sin(gt * 30));
+            if (Math.random() < 0.35) vfx.embers(vB.set(v.x, 0.1, v.z), 1, '#ff5a1a', v.r * 0.5, 2, 0.07);
+            if (vs.warn[k] <= 0) {
+              vs.warn[k] = 0;
+              const pos = new THREE.Vector3(v.x, 0, v.z);
+              vfx.fireColumn(pos, 3.2);
+              vfx.later(0.08, () => vfx.fireColumn(pos, 2.6));
+              vfx.later(0.16, () => vfx.fireColumn(pos, 2.2));
+              vfx.ring(pos, v.r + 0.6, '#ff6a1a', 0.45, 0.14, 0.6);
+              vfx.flash(vB.set(v.x, 1.5, v.z), '#ff7a2a', 45, 0.35, 10);
+              controller?.addShake(Math.max(0, 0.35 - Math.hypot(v.x - p1.pos[0], v.z - p1.pos[2]) * 0.03));
+              gameAudio.playGeneralExplosion();
+              fighters.forEach((c, i) => {
+                if (Math.hypot(c.pos[0] - v.x, c.pos[2] - v.z) < v.r && c.pos[1] < 1.5) envHit(i, 90, 10, '火柱');
+              });
+            }
+          } else {
+            mapRuntime.ventHeat[k] = Math.max(0, (mapRuntime.ventHeat[k] ?? 0) - dt * 2);
+          }
+        });
+      }
+
+      if (map.id === 'forge') {
+        const stage = forgeStage(t);
+        const next = FORGE_STAGE_TIMES[stage];
+        if (next !== undefined && t > next - 3 && forgeWarnedRef.current < stage) {
+          forgeWarnedRef.current = stage;
+          onRoundEvent?.({ type: 'toast', text: '岩浆即将上涨！快到中央或石台上' });
+        }
+        lavaRRef.current = THREE.MathUtils.damp(lavaRRef.current > 50 ? FORGE_STAGE_RADII[1] + 6 : lavaRRef.current, FORGE_STAGE_RADII[stage], 0.9, dt);
+        if (stage === 0) lavaRRef.current = 99;
+        mapRuntime.lavaR = lavaRRef.current;
+        fighters.forEach((c, i) => {
+          if (c.hp > 0 && c.isGrounded && inForgeLava(c.pos[0], c.pos[2], lavaRRef.current, map.islands || [])) {
+            burnAccRef.current[i] += dt;
+            if (Math.random() < 0.4) vfx.embers(vB.set(c.pos[0], 0.1, c.pos[2]), 1, '#ff6a1a', 0.4, 2.5, 0.08);
+            if (burnAccRef.current[i] >= 0.5) {
+              burnAccRef.current[i] = 0;
+              envHit(i, 25, 0, '灼烧');
+            }
+          } else burnAccRef.current[i] = 0;
+        });
+      }
+    }
+
     // ------------------------------------------------------
     // AI: 霍岩影. Thinks a few times per second, reacts to the
     // player's attacks, keeps spacing, combos, uses skills.
@@ -1167,6 +1434,17 @@ export function Game({
           if (dist > 2.2) out.move.copy(toFoe);
       }
       if (ai.request === 'dodge') out.move.copy(side).multiplyScalar(ai.dodgeDir);
+      // Hazard awareness: never walk into lava or off the cliff
+      {
+        const px = me.pos[0] + out.move.x * 2.2;
+        const pz = me.pos[2] + out.move.z * 2.2;
+        if (danger(me.pos[0], me.pos[2], 0) || danger(px, pz, 0)) {
+          const t = safeSpot(me.pos[0], me.pos[2]);
+          out.move.set(t[0] - me.pos[0], 0, t[1] - me.pos[2]);
+          if (out.move.lengthSq() > 0.01) out.move.normalize();
+          if (ai.request === 'dodge' || ai.request === 'jump') ai.request = null;
+        }
+      }
       if (out.move.lengthSq() > 1) out.move.normalize();
       out.request = ai.request;
     }
@@ -1174,11 +1452,11 @@ export function Game({
 
   return (
     <group>
-      <hemisphereLight args={['#cfe3ff', '#3a2f28', 0.9]} />
+      <hemisphereLight args={[map.hemi[0], map.hemi[1], map.hemi[2]]} />
       <directionalLight
         ref={keyLightRef}
-        color="#ffe2c4"
-        intensity={2.6}
+        color={map.keyColor}
+        intensity={map.keyIntensity}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
@@ -1193,7 +1471,7 @@ export function Game({
       <directionalLight ref={rimLightRef} color="#bcd7ff" intensity={2.4} />
       <directionalLight position={[-10, 6, 10]} color="#7f9cc9" intensity={0.5} />
 
-      <Arenas3D />
+      <Maps3D mapId={mapId} />
 
       <group ref={playerGroupRef}>
         <CharacterRig3D

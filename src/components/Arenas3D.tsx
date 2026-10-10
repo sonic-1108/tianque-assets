@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 
-export function Arenas3D() {
+export function Arenas3D({ radius = 22, showObelisks = true }: { radius?: number; showObelisks?: boolean }) {
   const ambientCloudsRef = useRef<THREE.Group>(null);
 
   // Procedural stone arena ground canvas texture
@@ -89,7 +89,7 @@ export function Arenas3D() {
         Top face is placed directly at Y = 0.
       */}
       <mesh receiveShadow position={[0, -0.25, 0]}>
-        <cylinderGeometry args={[22, 22, 0.5, 64]} />
+        <cylinderGeometry args={[radius + 1.2, radius + 1.2, 0.5, 64]} />
         <meshStandardMaterial
           map={floorTexture}
           roughness={0.88}
@@ -99,7 +99,7 @@ export function Arenas3D() {
 
       {/* Arena Outer Golden Perimeter Ring */}
       <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[21.5, 0.35, 12, 64]} />
+        <torusGeometry args={[radius + 0.8, 0.25, 12, 64]} />
         <meshStandardMaterial
           color="#d97706"
           emissive="#f59e0b"
@@ -110,11 +110,11 @@ export function Arenas3D() {
       </mesh>
 
       {/* Floating Celestial Dust & Cloud Particles */}
-      <group ref={ambientCloudsRef}>
+      <group ref={ambientCloudsRef} visible={showObelisks}>
         {[-3, -2, -1, 0, 1, 2, 3].map((idx) => {
           const angle = (idx / 7) * Math.PI * 2;
-          const x = Math.sin(angle) * 26.0;
-          const z = Math.cos(angle) * 26.0;
+          const x = Math.sin(angle) * (radius + 9);
+          const z = Math.cos(angle) * (radius + 9);
           return (
             <group key={idx} position={[x, 0, z]}>
               {/* Training Arena Guardian Obelisk (Outer Boundary) */}
