@@ -33,7 +33,7 @@ import {
   Film,
 } from 'lucide-react';
 
-const STATIC_CANVAS_CAMERA = { fov: 55, near: 0.1, far: 200 };
+const STATIC_CANVAS_CAMERA = { fov: 55, near: 0.1, far: 1200 };
 
 const SKILLS = CLASS_CONFIGS.Berserker.skills;
 const skillMeta = (i: number) => [`MP ${SKILLS[i].mpCost}`, `冷却 ${SKILLS[i].cooldown}s`];
