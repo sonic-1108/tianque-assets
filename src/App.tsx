@@ -39,12 +39,12 @@ const HOTBAR_INFO: {
   id: string; key: string; name: string; icon: string; short: string; desc: string; tip?: string;
   meta: string[]; cdKey?: string; basic?: boolean; super?: boolean;
 }[] = [
-  { id: 'attack', key: '左键', name: '斩击', icon: '⚔️', short: '三段连斩', basic: true, meta: ['无消耗', '可连按'],
-    desc: '双刀三段连斩：第一段单刀横斩，第二段双刀交错，第三段跃起重劈并把对手击倒。在前一段的收招阶段再按左键即可接下一段。',
-    tip: '普攻收招时可以直接按技能或 Shift 取消硬直，例如：斩击×2 → 1 裂地斩。' },
+  { id: 'attack', key: '左键', name: '斩击', icon: '⚔️', short: '三段连斩', basic: true, meta: ['命中回蓝', '可连按'],
+    desc: '双刀三段连斩：第一段单刀横斩，第二段双刀交错，第三段重劈把对手击倒。出招会自动吸附前方4米内的对手。对手被击飞在空中时，每一下普攻都会把他再挑高一点，最多空中追打4下，伤害逐次递减。',
+    tip: '经典连招：斩击×2 → 1 裂地斩击飞 → 斩击空中追打 ×3。' },
   { id: 'block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'],
-    desc: '按住右键交叉双刀格挡。正面受到的伤害减少60%，而且不会被打断或击飞。背后和天崩挡不住。',
-    tip: '看到霍岩影抬刀就按住，挡完马上反击。' },
+    desc: '按住右键交叉双刀格挡。正面受到的伤害减少60%，而且不会被打断或击飞。背后和天崩挡不住。在被打中前0.2秒内按下格挡会触发「完美格挡」：完全免伤，对手被弹开硬直，你的下一击伤害+50%。',
+    tip: '不要一直按着，看准对手出刀的瞬间再按，才能打出完美格挡。' },
   { id: 'earth_cleave', key: '1', name: '裂地斩', icon: '💥', short: '跳劈击飞', cdKey: 'skill1', meta: skillMeta(0),
     desc: SKILLS[0].description, tip: '击飞后对手在空中无法反击，可以接普攻追打。' },
   { id: 'whirlwind_blade', key: '2', name: '旋风刃', icon: '🌪️', short: '旋转多段', cdKey: 'skill2', meta: skillMeta(1),
@@ -132,6 +132,7 @@ export default function App() {
   const [score, setScore] = useState({ player: 0, enemy: 0 });
   const [roundBanner, setRoundBanner] = useState<null | 'player' | 'enemy'>(null);
   const [hurtFlash, setHurtFlash] = useState(0);
+  const [screenFlash, setScreenFlash] = useState<{ n: number; color: string }>({ n: 0, color: '' });
   const toggleAI = useCallback(() => {
     aiEnabledRef.current = !aiEnabledRef.current;
     setAiEnabled(aiEnabledRef.current);
@@ -151,6 +152,8 @@ export default function App() {
       setRoundBanner(null);
     } else if (e.type === 'playerHit') {
       setHurtFlash((n) => n + 1);
+    } else if (e.type === 'screenFlash') {
+      setScreenFlash((f) => ({ n: f.n + 1, color: e.color }));
     }
   }, []);
 
@@ -294,7 +297,7 @@ export default function App() {
   const p1RefState = useRef<CombatantState>(createCombatant('p1', true));
   const dummyRefState = useRef<CombatantState>(createCombatant('dummy', false));
   // Debug handle (used by automated visual tests; harmless in production)
-  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef };
+  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef };
   const targetingRefState = useRef<TargetingState>({
     lockedEnemyId: null,
     friendlyTargetId: null,
@@ -400,6 +403,10 @@ export default function App() {
         />
       )}
       <style>{`@keyframes tqHurt{from{opacity:1}to{opacity:0}} @keyframes tqBanner{0%{transform:scale(1.6);opacity:0}15%{transform:scale(1);opacity:1}85%{opacity:1}100%{opacity:0}}`}</style>
+
+      {screenFlash.n > 0 && (
+        <div key={`sf${screenFlash.n}`} className="absolute inset-0 pointer-events-none z-30" style={{ background: screenFlash.color, animation: 'tqHurt 0.45s ease-out forwards' }} />
+      )}
 
       {/* Round result banner */}
       {roundBanner && (
@@ -877,6 +884,8 @@ export default function App() {
                 <p>• F3 键：开启 / 关闭实时调试监控面板（查看按键与动作切片）</p>
                 <p>• P 键：切换 对战模式（霍岩影会走位、连招、格挡、闪避）/ 木桩模式（不还手）</p>
                 <p>• 鼠标右键格挡：正面受击减伤60%且不会被打断；天崩无法格挡，只能翻滚躲开</p>
+                <p>• 完美格挡：被打中前0.2秒内按右键，免伤并弹开对手；极限闪避：贴着攻击翻滚触发慢动作。两者之后下一击伤害+50%</p>
+                <p>• 浮空追击：对手被击飞时用普攻可以在空中继续追打，最多4下</p>
               </div>
 
               <div className="bg-zinc-900/80 p-3.5 rounded-2xl border border-zinc-800">

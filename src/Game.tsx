@@ -16,7 +16,8 @@ import { CameraController } from './CameraController';
 export type RoundEvent =
   | { type: 'ko'; winner: 'player' | 'enemy' }
   | { type: 'reset' }
-  | { type: 'playerHit'; heavy: boolean };
+  | { type: 'playerHit'; heavy: boolean }
+  | { type: 'screenFlash'; color: string };
 
 interface GameSceneProps {
   gameState: GameState;
@@ -106,6 +107,7 @@ export function Game({
   const enemySockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null });
 
   const slowMoTimerRef = useRef(0);
+  const gameTimeRef = useRef(0);
   const auraTimers = useRef([0, 0]);
   const footTimers = useRef([0, 0]);
   const wasGrounded = useRef([true, true]);
@@ -163,6 +165,8 @@ export function Game({
     }
     const rawDt = Math.min(delta, 0.04);
     const dt = rawDt * timeScale;
+    gameTimeRef.current += dt;
+    const gt = gameTimeRef.current;
 
     const arenaRadius = getConfig('arenaRadius') || 22;
     const gravity = getConfig('gravity') || 26;
@@ -199,7 +203,8 @@ export function Game({
           c.comboDamage = 0;
         }
       }
-      c.mp = Math.min(c.maxMp, c.mp + dt * 6);
+      c.mp = Math.min(c.maxMp, c.mp + dt * 8);
+      if ((c.counterTimer ?? 0) > 0) c.counterTimer = (c.counterTimer ?? 0) - dt;
     }
 
     // ---------- round flow ----------
@@ -301,6 +306,7 @@ export function Game({
           const impact = -c.vel[1];
           c.vel[1] = 0;
           c.isGrounded = true;
+          c.juggleCount = 0;
           if (c.actionState === 'jump') c.actionState = 'idle';
           if (c.actionState === 'launched') {
             c.actionState = 'knockdown';
@@ -479,6 +485,17 @@ export function Game({
       const req = intent.request;
       if (!req) return false;
 
+      // Soft lock: attacks snap toward a nearby opponent that is roughly in front
+      {
+        const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+        if (fd < 4.2 && foe.hp > 0) {
+          const ty = yawTo(c.pos, foe.pos);
+          let dd = ty - intent.faceYaw;
+          while (dd > Math.PI) dd -= Math.PI * 2;
+          while (dd < -Math.PI) dd += Math.PI * 2;
+          if (Math.abs(dd) < 1.25) intent.faceYaw = ty;
+        }
+      }
       const start = (next: CharacterActionState, push = 0) => {
         const cfg = ACTION_PHASE_CONFIGS[next]!;
         c.actionState = next;
@@ -530,6 +547,7 @@ export function Game({
           c.vel[2] = dir.z * 15;
           c.dodgeIframeTimer = 0.35;
           c.dodgeCooldownTimer = 0.9;
+          c.perfectDodgeUsed = false;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.55);
           if (isPlayer) gameAudio.playRetroJump();
           report('闪避', '成功施放 (Cast)');
@@ -624,6 +642,7 @@ export function Game({
       const charge = st === 'skill_3';
       const dodging = st === 'dodge';
       const blocking = intent.block && c.isGrounded && c.hp > 0 && (st === 'idle' || st === 'run' || st === 'block');
+      if (blocking && !c.isBlocking) c.blockStart = gt;
       c.isBlocking = blocking;
       if (blocking) {
         c.actionState = 'block';
@@ -667,9 +686,10 @@ export function Game({
       att: CombatantState,
       def: CombatantState,
       base: number,
-      o: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean }
+      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean }
     ) {
       if (def.hp <= 0) return;
+      const o = { ...oIn };
       const attackerIsPlayer = slot === 0;
       const hitDir = vC.set(def.pos[0] - att.pos[0], 0, def.pos[2] - att.pos[2]).normalize();
       const chest = vB.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]).addScaledVector(hitDir, -0.35);
@@ -677,18 +697,72 @@ export function Game({
 
       // dodge i-frames / wake-up invulnerability
       if (def.dodgeIframeTimer > 0) {
-        vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.0, def.pos[2]), '闪避', false, '#a7f3d0');
+        if (def.actionState === 'dodge' && !def.perfectDodgeUsed && def.stateTimer < 0.24) {
+          // Perfect dodge: slow motion + counter bonus
+          def.perfectDodgeUsed = true;
+          def.counterTimer = 1.6;
+          slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.45);
+          vfx.ring(vA.set(def.pos[0], 0.05, def.pos[2]), 2.4, '#7dd3fc', 0.5, 0.1, 0.3);
+          vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '极限闪避', true, '#a5f3fc');
+          if (slot === 1) onRoundEvent?.({ type: 'screenFlash', color: 'rgba(125,211,252,0.35)' });
+        } else {
+          vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.0, def.pos[2]), '闪避', false, '#a7f3d0');
+        }
         return;
       }
       // no hitting a grounded, knocked-down fighter (prevents infinite locks)
       if (def.actionState === 'knockdown' && def.isGrounded && !o.unblockable) return;
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
-      let dmg = Math.round(base * (rage ? 1.35 : 1));
+      let dmg = base * (rage ? 1.35 : 1);
+      if ((att.counterTimer ?? 0) > 0) {
+        dmg *= 1.5;
+        att.counterTimer = 0;
+        o.crit = true;
+        o.heavy = true;
+      }
+      // Juggle: airborne targets stay in the air for a few hits, with damage decay
+      const airborne = !def.isGrounded && (def.actionState === 'launched' || def.actionState === 'knockdown' || def.actionState === 'hitstun');
+      if (airborne && !o.unblockable) {
+        const jc = def.juggleCount ?? 0;
+        dmg *= Math.pow(0.85, jc);
+        if (jc < 4) {
+          o.launch = Math.max(o.launch ?? 0, Math.max(2.5, 6 - jc * 0.9));
+          o.state = 'launched';
+          o.dur = 0.9;
+          o.knock = Math.min(o.knock ?? 1.5, 2);
+        }
+        def.juggleCount = jc + 1;
+      }
+      dmg = Math.round(dmg);
 
       // frontal block: 60% reduction, no stagger
       const facing = fwdOf(def.rotY);
       const frontal = facing.x * -hitDir.x + facing.z * -hitDir.z > 0.2;
+      if (def.isBlocking && frontal && !o.unblockable && gt - (def.blockStart ?? -9) < 0.22) {
+        // Perfect block: attacker is knocked off balance, defender gets a counter window
+        if (!att.hasSuperArmor) {
+          att.actionState = 'hitstun';
+          att.stateTimer = 0;
+          att.stateDuration = 0.65;
+          att.vel[0] = -hitDir.x * 5;
+          att.vel[2] = -hitDir.z * 5;
+        }
+        att.whiteFlashTimer = 0.08;
+        def.counterTimer = 1.6;
+        att.hitStopTimer = 0.15;
+        def.hitStopTimer = 0.15;
+        slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.25);
+        vfx.sparkBurst(chest, 40, '#ffffff', 10, 0.1, vA.copy(hitDir).multiplyScalar(-1), 1.6);
+        vfx.slashMark(chest, '#e0f2fe', 1.3);
+        vfx.ring(vA.set(def.pos[0], 0.05, def.pos[2]), 2.0, '#e0f2fe', 0.35, 0.16, 0.4);
+        vfx.flash(chest, '#ffffff', 30, 0.15, 6);
+        vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '完美格挡', true, '#e0f2fe');
+        controller?.kick(-3);
+        gameAudio.playSwordClash();
+        gameAudio.playSwordClash();
+        return;
+      }
       if (def.isBlocking && frontal && !o.unblockable) {
         dmg = Math.round(dmg * 0.4);
         def.hp = Math.max(1, def.hp - dmg);
@@ -727,8 +801,11 @@ export function Game({
         def.rotY = def.targetRotY = yawTo(def.pos, att.pos);
         def.isBlocking = false;
       }
+      att.mp = Math.min(att.maxMp, att.mp + (o.heavy ? 6 : 3));
       def.whiteFlashTimer = o.heavy ? 0.1 : 0.06;
-      const stop = o.heavy ? 0.09 : 0.05;
+      const stop = o.heavy ? 0.11 : 0.055;
+      if (!o.noMark) vfx.slashMark(chest, color, o.heavy ? 1.3 : 0.9);
+      controller?.kick(o.heavy ? -4.5 : -1.2);
       att.hitStopTimer = stop;
       def.hitStopTimer = stop;
       vfx.hitImpact(chest, hitDir, !!o.heavy, color);
@@ -781,6 +858,22 @@ export function Game({
         const ix = c.pos[0] + fwd.x * 1.5;
         const iz = c.pos[2] + fwd.z * 1.5;
         vfx.groundSlam(vB.set(ix, 0, iz), 1, color);
+        for (let k = 0; k < 4; k++) {
+          const px = c.pos[0] + fwd.x * (0.6 + k * 0.75);
+          const pz = c.pos[2] + fwd.z * (0.6 + k * 0.75);
+          vfx.later(k * 0.05, () => vfx.fireColumn(new THREE.Vector3(px, 0, pz), 1.4 + k * 0.2, color));
+        }
+        if (rage) {
+          // Blood rage: the fissure keeps burning
+          for (let k = 1; k <= 4; k++) {
+            vfx.later(k * 0.4, () => {
+              vfx.fireColumn(new THREE.Vector3(ix, 0, iz), 1.2, color);
+              if (foe.hp > 0 && c.hp > 0 && Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.3) {
+                applyHit(slot, c, foe, 25, { knock: 0, state: foe.isGrounded ? 'hitstun' : 'launched', dur: 0.15, noMark: true });
+              }
+            });
+          }
+        }
         if (slot === 0) controller?.addShake(0.6);
         else controller?.addShake(Math.max(0, 0.5 - dist * 0.05));
         gameAudio.playGeneralExplosion();
@@ -789,11 +882,17 @@ export function Game({
 
       if (c.actionState === 'skill_2') {
         if (Math.random() < 0.2) vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 1, 1, 2.5, 0.45);
-        if (Math.random() < 0.5) vfx.sparkBurst(vB.set(c.pos[0], 1, c.pos[2]), 2, color, 6, 0.07);
+        vfx.spiral(vB.set(c.pos[0], c.pos[1], c.pos[2]), 1.3, gt * 15, color);
+        if (rage && dist < 4.5 && dist > 1.2 && foe.hp > 0) {
+          // Blood rage: the vortex drags the opponent in
+          foe.vel[0] += ((c.pos[0] - foe.pos[0]) / dist) * 18 * dt;
+          foe.vel[2] += ((c.pos[2] - foe.pos[2]) / dist) * 18 * dt;
+        }
         const t = performance.now();
-        if (t - c.lastHitTick > 200 && dist < 2.9) {
+        if (t - c.lastHitTick > 200) {
           c.lastHitTick = t;
-          applyHit(slot, c, foe, 45, { knock: 1.5, dur: 0.25 });
+          vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 1.9, color, 0.25, 0.1);
+          if (dist < 2.9) applyHit(slot, c, foe, 40, { knock: 1.5, dur: 0.25 });
         }
       }
 
@@ -803,13 +902,17 @@ export function Game({
           c.vel[0] = fwd.x * 20;
           c.vel[2] = fwd.z * 20;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 2, 0.3, 1.5, 0.55);
+          vfx.chargeWave(vB.set(c.pos[0], 0, c.pos[2]), fwd, color);
         } else {
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 9, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 9, dt);
         }
         if (go && dist < 1.8 && !c.hasHitCurrentMove) {
           c.hasHitCurrentMove = true;
-          applyHit(slot, c, foe, 185, { heavy: true, crit: true, knock: 15, launch: 7, state: 'knockdown', dur: 1, shake: 0.55 });
+          applyHit(slot, c, foe, 170, { heavy: true, crit: true, knock: 15, launch: 7, state: 'knockdown', dur: 1, shake: 0.55 });
+          // Charge connects: jump straight to recovery so a skill can be chained immediately
+          const c3 = ACTION_PHASE_CONFIGS.skill_3!;
+          c.stateTimer = Math.max(c.stateTimer, c3.startup + c3.active);
           vfx.ring(vB.set(foe.pos[0], 0, foe.pos[2]), 2.2, color, 0.4, 0.14, 0.4);
           c.vel[0] *= 0.2;
           c.vel[2] *= 0.2;
@@ -823,7 +926,10 @@ export function Game({
           c.vel[0] = fwd.x * 6;
           c.vel[2] = fwd.z * 6;
         }
-        if (!c.isGrounded) vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), c.ultSlamStarted ? 6 : 2, slot === 0 ? '#ff7a2a' : '#5ab0ff', 0.35, -1, 0.1);
+        if (!c.isGrounded) {
+          vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), c.ultSlamStarted ? 14 : 3, slot === 0 ? '#ff7a2a' : '#5ab0ff', 0.4, c.ultSlamStarted ? 6 : -1, c.ultSlamStarted ? 0.14 : 0.1);
+          if (c.ultSlamStarted) vfx.flash(vB.set(c.pos[0], c.pos[1] + 1, c.pos[2]), slot === 0 ? '#ff8a3a' : '#5ab0ff', 18, 0.06, 6);
+        }
         if (c.ultSlamStarted && c.isGrounded && !c.hasHitCurrentMove) {
           c.hasHitCurrentMove = true;
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.3);
@@ -831,7 +937,8 @@ export function Game({
           vfx.ultimateImpact(vB.set(c.pos[0] + fwd.x * 0.8, 0, c.pos[2] + fwd.z * 0.8));
           gameAudio.playGeneralExplosion();
           gameAudio.playChiptuneExplosion();
-          if (dist < 7) applyHit(slot, c, foe, 520, { heavy: true, crit: true, launch: 15, knock: 10, state: 'knockdown', dur: 1.2, unblockable: true });
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,240,220,0.75)' });
+          if (dist < 7) applyHit(slot, c, foe, 420, { heavy: true, crit: true, launch: 15, knock: 10, state: 'knockdown', dur: 1.2, unblockable: true });
           c.vel[0] = 0;
           c.vel[2] = 0;
         }

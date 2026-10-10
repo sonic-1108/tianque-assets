@@ -30,6 +30,13 @@ export class CameraController {
     this.canvas.addEventListener('wheel', this.onWheel, { passive: true });
   }
 
+  private fovKick = 0;
+  private baseFov = -1;
+  /** Brief zoom punch on heavy impacts (degrees, negative = zoom in) */
+  kick(deg: number) {
+    this.fovKick = deg;
+  }
+
   // Add screen shake trauma (0.0 to 1.0)
   addShake(amount: number) {
     this.shakeTrauma = Math.min(1.0, this.shakeTrauma + amount);
@@ -81,6 +88,13 @@ export class CameraController {
     }
 
     this.camera.lookAt(target);
+
+    if (this.baseFov < 0) this.baseFov = this.camera.fov;
+    if (Math.abs(this.fovKick) > 0.01 || this.camera.fov !== this.baseFov) {
+      this.fovKick = THREE.MathUtils.damp(this.fovKick, 0, 9, dt);
+      this.camera.fov = this.baseFov + this.fovKick;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   // forward/right vectors on the ground plane for WASD movement

@@ -546,8 +546,43 @@ interface FlashLight {
   peak: number;
 }
 
+function makeStreakTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createLinearGradient(0, 0, 256, 0);
+  grd.addColorStop(0, 'rgba(255,255,255,0)');
+  grd.addColorStop(0.5, 'rgba(255,255,255,1)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.beginPath();
+  g.moveTo(0, 32);
+  g.quadraticCurveTo(128, 18, 256, 32);
+  g.quadraticCurveTo(128, 40, 0, 32);
+  g.fill();
+  const v = g.createRadialGradient(128, 32, 0, 128, 32, 120);
+  v.addColorStop(0, 'rgba(255,255,255,0.5)');
+  v.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = v;
+  g.fillRect(0, 0, 256, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+interface MarkFx {
+  sprite: THREE.Sprite;
+  life: number;
+  maxLife: number;
+  scale: number;
+  active: boolean;
+}
+
 export class VFXSystem {
   root = new THREE.Group();
+  private marks: MarkFx[] = [];
+  private timers: { t: number; fn: () => void }[] = [];
   private sparks = new PointPool(900, true);
   private dust = new PointPool(400, false);
   private debris = new DebrisPool(90);
@@ -608,6 +643,16 @@ export class VFXSystem {
       this.dmg.push({ sprite, canvas, tex, life: 0, maxLife: 1, vel: new THREE.Vector3(), baseScale: 1, active: false });
     }
 
+    const streak = makeStreakTexture();
+    for (let i = 0; i < 10; i++) {
+      const mat = new THREE.SpriteMaterial({ map: streak, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
+      const sprite = new THREE.Sprite(mat);
+      sprite.visible = false;
+      sprite.renderOrder = 30;
+      this.root.add(sprite);
+      this.marks.push({ sprite, life: 0, maxLife: 1, scale: 1, active: false });
+    }
+
     for (let i = 0; i < 4; i++) {
       const light = new THREE.PointLight('#ffb070', 0, 9, 2);
       this.root.add(light);
@@ -627,7 +672,64 @@ export class VFXSystem {
     this.dust.setScale(px * 0.9);
   }
 
+  // ---------------- scheduling ----------------
+  later(delay: number, fn: () => void) {
+    this.timers.push({ t: delay, fn });
+  }
+
   // ---------------- primitives ----------------
+  /** Bright crossing blade streak at the point of impact */
+  slashMark(pos: THREE.Vector3, color: THREE.ColorRepresentation, scale = 1, life = 0.16) {
+    for (let k = 0; k < 2; k++) {
+      const m = this.marks.find((x) => !x.active) || this.marks.reduce((a, b) => (a.life < b.life ? a : b));
+      m.active = true;
+      m.life = life;
+      m.maxLife = life;
+      m.scale = scale * (k === 0 ? 1 : 0.7);
+      m.sprite.visible = true;
+      m.sprite.position.copy(pos);
+      const mat = m.sprite.material as THREE.SpriteMaterial;
+      mat.color.set(k === 0 ? '#ffffff' : color);
+      mat.rotation = Math.random() * Math.PI + (k === 1 ? 1.2 : 0);
+    }
+  }
+
+  /** Upward eruption of fire at a point (used along fissures and around the ultimate crater) */
+  fireColumn(posIn: THREE.Vector3, height = 1.6, color: THREE.ColorRepresentation = '#ff5a1a') {
+    const pos = posIn.clone();
+    for (let i = 0; i < 14; i++) {
+      tmpV.set((Math.random() - 0.5) * 1.2, height * (3 + Math.random() * 4), (Math.random() - 0.5) * 1.2);
+      tmpV2.set(pos.x + (Math.random() - 0.5) * 0.4, 0.1, pos.z + (Math.random() - 0.5) * 0.4);
+      this.sparks.emit(tmpV2, tmpV, Math.random() < 0.3 ? '#fff1c9' : color, 0.12 + Math.random() * 0.12, 0.35 + Math.random() * 0.25, { drag: 2.5, gravity: 6 });
+    }
+    this.dustPuff(pos, 3, 0.3, 1.5, 0.6, '#5a4a40');
+    this.flash(new THREE.Vector3(pos.x, 0.8, pos.z), color, 10, 0.2, 5);
+  }
+
+  /** Spiral of sparks thrown off a spinning body */
+  spiral(posIn: THREE.Vector3, radius: number, phase: number, color: THREE.ColorRepresentation) {
+    const pos = posIn.clone();
+    for (let k = 0; k < 3; k++) {
+      const a = phase + (k / 3) * Math.PI * 2;
+      tmpV2.set(pos.x + Math.cos(a) * radius, pos.y + 0.9 + (Math.random() - 0.5) * 0.4, pos.z + Math.sin(a) * radius);
+      tmpV.set(-Math.sin(a) * 7 + Math.cos(a) * 2, 0.6 + Math.random(), Math.cos(a) * 7 + Math.sin(a) * 2);
+      this.sparks.emit(tmpV2, tmpV, Math.random() < 0.3 ? '#fff1c9' : color, 0.09, 0.3, { drag: 3, gravity: 4 });
+    }
+  }
+
+  /** Cone of air being shoved forward during a charge */
+  chargeWave(posIn: THREE.Vector3, dir: THREE.Vector3, color: THREE.ColorRepresentation) {
+    const pos = posIn.clone();
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);
+    for (let i = 0; i < 4; i++) {
+      const s = (Math.random() - 0.5) * 1.6;
+      tmpV2.copy(pos).addScaledVector(dir, 0.9).addScaledVector(side, s);
+      tmpV2.y = 0.4 + Math.random() * 1.3;
+      tmpV.copy(dir).multiplyScalar(4 + Math.random() * 3).addScaledVector(side, s * 4);
+      this.sparks.emit(tmpV2, tmpV, i % 2 ? '#ffe0b8' : color, 0.07, 0.22, { drag: 5, gravity: 0 });
+    }
+  }
+
   ring(pos: THREE.Vector3, radius: number, color: THREE.ColorRepresentation, life = 0.45, width = 0.14, fill = 0) {
     const r = this.rings.find((x) => !x.active) || this.rings.reduce((a, b) => (a.life < b.life ? a : b));
     r.active = true;
@@ -795,11 +897,43 @@ export class VFXSystem {
     this.embers(pos, 50, '#ff8c3a', 2.5, 4, 0.08);
     this.flash(tmpV.set(pos.x, 2, pos.z), '#ffd2a0', 120, 0.45, 18);
     this.flash(tmpV.set(pos.x, 0.5, pos.z), '#ff5a1a', 60, 0.8, 14);
+    this.later(0.14, () => this.ring(pos, 9.5, '#ffd08a', 0.8, 0.05));
+    this.later(0.22, () => {
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        this.fireColumn(new THREE.Vector3(pos.x + Math.cos(a) * 3.6, 0, pos.z + Math.sin(a) * 3.6), 2.0);
+      }
+    });
   }
 
   // ---------------- tick ----------------
   update(dt: number) {
     this.time += dt;
+    if (this.timers.length) {
+      const due: (() => void)[] = [];
+      this.timers = this.timers.filter((x) => {
+        x.t -= dt;
+        if (x.t <= 0) {
+          due.push(x.fn);
+          return false;
+        }
+        return true;
+      });
+      due.forEach((f) => f());
+    }
+    for (const m of this.marks) {
+      if (!m.active) continue;
+      m.life -= dt;
+      if (m.life <= 0) {
+        m.active = false;
+        m.sprite.visible = false;
+        continue;
+      }
+      const t = 1 - m.life / m.maxLife;
+      const w = m.scale * (1.2 + 1.4 * easeOutCubic(Math.min(1, t * 3)));
+      m.sprite.scale.set(w * 1.6, w * 0.32 * (1 - t * 0.6), 1);
+      (m.sprite.material as THREE.SpriteMaterial).opacity = 1 - t * t;
+    }
     this.sparks.update(dt);
     this.dust.update(dt);
     this.debris.update(dt);
@@ -892,6 +1026,7 @@ export class VFXSystem {
     for (const r of this.rings) if (r.active) n++;
     for (const d of this.decals) if (d.active) n++;
     for (const d of this.dmg) if (d.active) n++;
+    for (const m of this.marks) if (m.active) n++;
     for (const t of this.trails) n += t.count > 0 ? 1 : 0;
     for (const sl of this.slots) n += (sl.vLife > 0 ? 1 : 0) + (sl.pLife > 0 ? 1 : 0);
     return n;

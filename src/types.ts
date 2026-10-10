@@ -161,6 +161,14 @@ export interface CombatantState {
   localMove?: [number, number];
   /** Ultimate: whether the downward slam has started */
   ultSlamStarted?: boolean;
+  /** air hits taken since last landing (juggle decay) */
+  juggleCount?: number;
+  /** game time when the current block started (perfect-block window) */
+  blockStart?: number;
+  /** seconds left of the +50% counter-attack bonus after a perfect block / dodge */
+  counterTimer?: number;
+  /** whether the current dodge already triggered a perfect dodge */
+  perfectDodgeUsed?: boolean;
   buffs: CombatantBuff[];
   totalDamageDealt: number;
   totalHealingDone: number;
