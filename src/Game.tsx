@@ -10,7 +10,7 @@ import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
-import { MAPS, MapId, HOME_BONUS, forgeStage, FORGE_STAGE_RADII, FORGE_STAGE_TIMES, inForgeLava, mapRuntime } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { CameraController } from './CameraController';
 
@@ -116,9 +116,12 @@ export function Game({
   const map = MAPS[mapId];
   const pendingResetRef = useRef(true);
   const mapTimeRef = useRef(0);
-  const lavaRRef = useRef(99);
-  const forgeWarnedRef = useRef(-1);
-  const burnAccRef = useRef([0, 0]);
+  const eruptRef = useRef({ timer: 9 });
+  const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
+  const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
+  const lightningRef = useRef({ timer: 5 });
+  const bgBase = useMemo(() => new THREE.Color(), []);
+  const bgTmp = useMemo(() => new THREE.Color(), []);
   const wallCdRef = useRef([0, 0]);
   const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
   useEffect(() => {
@@ -1063,9 +1066,14 @@ export function Game({
       if (controller) controller.yaw = p1.rotY;
       aiRef.current.think = 1.2;
       mapTimeRef.current = 0;
-      lavaRRef.current = 99;
-      mapRuntime.lavaR = 99;
-      forgeWarnedRef.current = -1;
+      eruptRef.current = { timer: 9 };
+      bombZonesRef.current = [];
+      waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
+      lightningRef.current = { timer: 5 };
+      mapRuntime.eruption = 0;
+      mapRuntime.waveSide = 0;
+      mapRuntime.waveRise = 0;
+      mapRuntime.lightning = 0;
       ventRef.current = { timer: 3, warn: (map.vents || []).map(() => 0) };
       mapRuntime.ventHeat = (map.vents || []).map(() => 0);
       if (fromKO) onRoundEvent?.({ type: 'reset' });
@@ -1077,23 +1085,18 @@ export function Game({
     }
 
     function danger(x: number, z: number, margin: number) {
+      for (const zn of bombZonesRef.current) if (Math.hypot(x - zn.x, z - zn.z) < zn.r + 0.6) return true;
       if (map.id === 'lavacliff') return Math.hypot(x, z) > map.radius - 1.8 - margin;
-      if (map.id === 'forge') {
-        // be cautious about the next flood as well
-        const nextIdx = Math.min(FORGE_STAGE_RADII.length - 1, forgeStage(mapTimeRef.current + 2.5));
-        const r = Math.min(lavaRRef.current, FORGE_STAGE_RADII[nextIdx]);
-        return inForgeLava(x, z, r - 0.4, (map.islands || []).map((i) => ({ ...i, r: i.r - 0.5 })));
-      }
       return false;
     }
 
     function safeSpot(x: number, z: number): [number, number] {
-      if (map.id === 'forge') {
-        const cands: [number, number][] = [[0, 0], ...(map.islands || []).map((i) => [i.x, i.z] as [number, number])];
-        cands.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z));
-        return cands[0];
-      }
-      return [0, 0];
+      const cands: [number, number][] = [[0, 0]];
+      for (let k = 0; k < 6; k++) cands.push([Math.cos((k / 6) * Math.PI * 2) * 5, Math.sin((k / 6) * Math.PI * 2) * 5]);
+      const ok = cands.filter((c) => !danger(c[0], c[1], 0));
+      const pool = ok.length ? ok : cands;
+      pool.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z));
+      return pool[0];
     }
 
     function koCheck(defSlot: number, color: string) {
@@ -1172,13 +1175,29 @@ export function Game({
         return;
       }
 
-      const R = map.radius;
-      if (d > R) {
-        c.pos[0] *= R / d;
-        c.pos[2] *= R / d;
-        if (map.id === 'temple') wallSplat(i, c, speed, c.pos[0], c.pos[2]);
-        c.vel[0] = 0;
-        c.vel[2] = 0;
+      if (map.rect) {
+        const { hx, hz } = map.rect;
+        if (Math.abs(c.pos[0]) > hx) {
+          const sx = Math.sign(c.pos[0]);
+          c.pos[0] = sx * hx;
+          wallSplat(i, c, speed, sx * (hx + 0.3), c.pos[2]);
+          c.vel[0] = 0;
+        }
+        if (Math.abs(c.pos[2]) > hz) {
+          const sz = Math.sign(c.pos[2]);
+          c.pos[2] = sz * hz;
+          wallSplat(i, c, speed, c.pos[0], sz * (hz + 0.3));
+          c.vel[2] = 0;
+        }
+      } else {
+        const R = map.radius;
+        if (d > R) {
+          c.pos[0] *= R / d;
+          c.pos[2] *= R / d;
+          if (map.id === 'temple') wallSplat(i, c, speed, c.pos[0], c.pos[2]);
+          c.vel[0] = 0;
+          c.vel[2] = 0;
+        }
       }
       for (const pl of map.pillars || []) {
         const dx = c.pos[0] - pl.x;
@@ -1248,17 +1267,37 @@ export function Game({
       const t = mapTimeRef.current;
 
       // ambient embers
-      if (map.id !== 'temple' && Math.random() < 0.5) {
+      if (map.id === 'lavacliff' && Math.random() < 0.5) {
         const a = Math.random() * Math.PI * 2;
-        const r = map.id === 'lavacliff' ? map.radius + 1 + Math.random() * 6 : Math.max(lavaRRef.current, 3) + Math.random() * 5;
-        vfx.embers(vB.set(Math.cos(a) * r, map.id === 'lavacliff' ? -2 : 0.1, Math.sin(a) * r), 1, '#ff7a2a', 0.3, 2.5, 0.06);
+        const r = map.radius + 1 + Math.random() * 6;
+        vfx.embers(vB.set(Math.cos(a) * r, -2, Math.sin(a) * r), 1, '#ff7a2a', 0.3, 2.5, 0.06);
       }
+
+      // sky tint: volcano glow / lightning
+      bgBase.set(map.background);
+      bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
+      bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
+      if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
+      if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
+      mapRuntime.eruption = Math.max(0, mapRuntime.eruption - dt / 5);
+      mapRuntime.lightning = Math.max(0, mapRuntime.lightning - dt * 3);
+
+      if (map.id === 'lavacliff' && !round.over) {
+        const er = eruptRef.current;
+        er.timer -= dt;
+        if (er.timer <= 0) {
+          er.timer = 15 + Math.random() * 5;
+          eruptVolcano();
+        }
+      }
+
+      if (map.id === 'sea') updateSea();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
         if (!round.over) vs.timer -= dt;
         if (vs.timer <= 0) {
-          vs.timer = 3 + Math.random() * 2;
+          vs.timer = 5 + Math.random() * 3;
           // usually target a vent near one of the fighters
           let idx = Math.floor(Math.random() * map.vents.length);
           if (Math.random() < 0.6) {
@@ -1300,27 +1339,125 @@ export function Game({
         });
       }
 
-      if (map.id === 'forge') {
-        const stage = forgeStage(t);
-        const next = FORGE_STAGE_TIMES[stage];
-        if (next !== undefined && t > next - 3 && forgeWarnedRef.current < stage) {
-          forgeWarnedRef.current = stage;
-          onRoundEvent?.({ type: 'toast', text: '岩浆即将上涨！快到中央或石台上' });
-        }
-        lavaRRef.current = THREE.MathUtils.damp(lavaRRef.current > 50 ? FORGE_STAGE_RADII[1] + 6 : lavaRRef.current, FORGE_STAGE_RADII[stage], 0.9, dt);
-        if (stage === 0) lavaRRef.current = 99;
-        mapRuntime.lavaR = lavaRRef.current;
-        fighters.forEach((c, i) => {
-          if (c.hp > 0 && c.isGrounded && inForgeLava(c.pos[0], c.pos[2], lavaRRef.current, map.islands || [])) {
-            burnAccRef.current[i] += dt;
-            if (Math.random() < 0.4) vfx.embers(vB.set(c.pos[0], 0.1, c.pos[2]), 1, '#ff6a1a', 0.4, 2.5, 0.08);
-            if (burnAccRef.current[i] >= 0.5) {
-              burnAccRef.current[i] = 0;
-              envHit(i, 25, 0, '灼烧');
-            }
-          } else burnAccRef.current[i] = 0;
+      void t;
+    }
+
+    function eruptVolcano() {
+      const crater = new THREE.Vector3(...VOLCANO_CRATER);
+      mapRuntime.eruption = 1;
+      onRoundEvent?.({ type: 'toast', text: '火山喷发！注意地上的红圈' });
+      onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,80,20,0.35)' });
+      controller?.addShake(0.55);
+      controller?.kick(-3);
+      gameAudio.playGeneralExplosion();
+      gameAudio.playChiptuneExplosion();
+      vfx.sparkBurst(crater, 90, '#ff6a1a', 26, 1.1, new THREE.Vector3(0, 1, 0), 0.5);
+      vfx.dustPuff(crater, 20, 4, 6, 6, '#2a1a14');
+      vfx.flash(crater, '#ff6a1a', 900, 2.5, 220);
+      for (let k = 0; k < 7; k++) {
+        vfx.later(0.7 + k * 0.38, () => {
+          if (round.over || map.id !== 'lavacliff') return;
+          let tx: number;
+          let tz: number;
+          const near = k % 3 === 0 ? p1 : k % 3 === 1 ? en : null;
+          if (near) {
+            tx = near.pos[0] + (Math.random() - 0.5) * 3;
+            tz = near.pos[2] + (Math.random() - 0.5) * 3;
+          } else {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.random() * (map.radius - 1.5);
+            tx = Math.cos(a) * r;
+            tz = Math.sin(a) * r;
+          }
+          const dr = Math.hypot(tx, tz);
+          if (dr > map.radius - 1) {
+            tx *= (map.radius - 1) / dr;
+            tz *= (map.radius - 1) / dr;
+          }
+          const zone = { x: tx, z: tz, r: 2.2 };
+          bombZonesRef.current.push(zone);
+          const target = new THREE.Vector3(tx, 0.4, tz);
+          const fall = 1.5;
+          vfx.ring(new THREE.Vector3(tx, 0.04, tz), 2.2, '#ff2a10', fall, 0.3, 0.7);
+          vfx.meteor(crater, target, fall, 18, () => {
+            bombZonesRef.current = bombZonesRef.current.filter((z) => z !== zone);
+            const g = new THREE.Vector3(tx, 0, tz);
+            vfx.groundSlam(g, 0.8, '#ff5a1a');
+            vfx.fireColumn(g, 2.4);
+            const dp = Math.hypot(tx - p1.pos[0], tz - p1.pos[2]);
+            controller?.addShake(Math.max(0.05, 0.45 - dp * 0.04));
+            gameAudio.playGeneralExplosion();
+            fighters.forEach((c, i) => {
+              if (Math.hypot(c.pos[0] - tx, c.pos[2] - tz) < zone.r && c.pos[1] < 2) envHit(i, 110, 9, '火山弹');
+            });
+          }, 1.3);
         });
       }
+    }
+
+    function updateSea() {
+      const w = waveRef.current;
+      const lt = lightningRef.current;
+      if (!round.over) {
+        lt.timer -= dt;
+        if (lt.timer <= 0) {
+          lt.timer = 6 + Math.random() * 8;
+          mapRuntime.lightning = 1;
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(225,235,255,0.45)' });
+          vfx.later(0.35 + Math.random() * 0.4, () => {
+            gameAudio.playGeneralExplosion();
+            controller?.addShake(0.12);
+          });
+        }
+      }
+      const hx = map.rect!.hx;
+      if (w.warn > 0) {
+        w.warn -= dt;
+        mapRuntime.waveRise = Math.min(1, 1 - w.warn / 2.2);
+        if (Math.random() < 0.5) {
+          vB.set(w.side * (hx + 0.6), 0.6, (Math.random() - 0.5) * 24);
+          vfx.sparkBurst(vB, 2, '#cfe8ff', 4, 0.1, vC.set(-w.side * 0.3, 1, 0), 0.4);
+        }
+        if (w.warn <= 0) {
+          // crash over the deck
+          w.warn = 0;
+          mapRuntime.waveRise = 1.15;
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(170,215,255,0.4)' });
+          controller?.addShake(0.4);
+          gameAudio.playGeneralExplosion();
+          for (let k = 0; k < 14; k++) {
+            const z = -12 + (k / 13) * 24;
+            vB.set(w.side * hx, 0.5, z);
+            vfx.sparkBurst(vB, 6, '#e0f2ff', 9, 0.16, vC.set(-w.side, 0.6, 0), 0.5);
+            vfx.dustPuff(vB, 2, 0.5, 6, 1.1, '#cfe3f5');
+          }
+          fighters.forEach((c) => {
+            if (c.hp <= 0 || c.pos[1] > 1.5) return;
+            const push = c.isBlocking ? 4 : 16;
+            c.vel[0] = -w.side * push;
+            c.vel[2] *= 0.3;
+            if (!c.isBlocking && !c.hasSuperArmor) {
+              c.actionState = 'hitstun';
+              c.stateTimer = 0;
+              c.stateDuration = 0.55;
+              c.airSlam = c.airSlash = c.dodgeSlash = false;
+            }
+            vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), c.isBlocking ? '站稳!' : '被浪冲走!', false, '#bae6fd');
+          });
+          w.timer = 9 + Math.random() * 4;
+          w.side = 0;
+        }
+      } else {
+        mapRuntime.waveRise = Math.max(0, mapRuntime.waveRise - dt * 0.8);
+        if (!round.over) w.timer -= dt;
+        if (w.timer <= 0 && !round.over) {
+          w.side = Math.random() < 0.5 ? -1 : 1;
+          w.warn = 2.2;
+          w.aiBlocks = Math.random() < 0.6;
+          onRoundEvent?.({ type: 'toast', text: '巨浪来袭！按住右键格挡站稳' });
+        }
+      }
+      mapRuntime.waveSide = w.side || mapRuntime.waveSide;
     }
 
     // ------------------------------------------------------
@@ -1434,6 +1571,11 @@ export function Game({
           if (dist > 2.2) out.move.copy(toFoe);
       }
       if (ai.request === 'dodge') out.move.copy(side).multiplyScalar(ai.dodgeDir);
+      // Brace for the incoming wave
+      if (map.id === 'sea' && waveRef.current.warn > 0 && waveRef.current.warn < 0.6 && waveRef.current.aiBlocks && free) {
+        out.block = true;
+        out.move.set(0, 0, 0);
+      }
       // Hazard awareness: never walk into lava or off the cliff
       {
         const px = me.pos[0] + out.move.x * 2.2;

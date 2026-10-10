@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'forge' | 'bamboo' | 'rooftop' | 'summit';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'bamboo' | 'rooftop' | 'summit';
 
 export interface Circle {
   x: number;
@@ -30,8 +30,12 @@ export interface MapDef {
   cardGradient: string;
   pillars?: Circle[];
   vents?: Circle[];
-  islands?: Circle[];
+  /** rectangular play area (half extents) instead of a circle */
+  rect?: { hx: number; hz: number };
 }
+
+/** Distant volcano for 熔岩断崖 (crater position) */
+export const VOLCANO_CRATER: [number, number, number] = [-55, 34, -80];
 
 /** Damage multiplier when the fighter's class matches the map's home class */
 export const HOME_BONUS = 1.1;
@@ -70,7 +74,7 @@ export const MAPS: Record<MapId, MapDef> = {
     name: '熔岩断崖',
     subtitle: '悬在岩浆海上的玄武岩台',
     icon: '🌋',
-    mechanics: ['平台边缘没有护栏，被打下悬崖直接判负', '地面火口会先亮红光，随后喷发火柱', '击退技能在这里就是杀招'],
+    mechanics: ['远处火山每隔十几秒爆发，火山弹从天而降，落点先出现红圈', '平台边缘没有护栏，被打下悬崖直接判负', '地面火口偶尔喷发火柱'],
     homeClass: 'Berserker',
     homeClassName: '狂刃',
     homeBonus: '伤害 +10%',
@@ -87,27 +91,34 @@ export const MAPS: Record<MapId, MapDef> = {
     cardGradient: 'from-red-900/80 via-orange-900/70 to-zinc-950/90',
     vents: [{ x: 0, z: 0, r: 1.7 }, ...ring(4, 6.5, 1.7, Math.PI / 4)],
   },
-  forge: {
-    id: 'forge',
-    name: '熔炉地心',
-    subtitle: '地底巨炉，岩浆正在上涨',
-    icon: '🔥',
-    mechanics: ['每 18 秒岩浆上涨一圈，最后只剩中央和三块石台', '站在岩浆里每秒掉血', '越打越挤，把对手逼进岩浆'],
-    homeClass: 'HeavyHealer',
-    homeClassName: '慈航',
-    homeBonus: '治疗量 +10%（职业开发中）',
+  sea: {
+    id: 'sea',
+    name: '怒海战船',
+    subtitle: '风暴夜里，大海上的古战船甲板',
+    icon: '🌊',
+    mechanics: ['长条甲板，两侧是船舷，有桅杆和货箱挡路', '巨浪会从一侧拍上甲板，把所有人冲向另一边', '被冲到船舷上会撞伤眩晕，格挡可以站稳'],
+    homeClass: 'LightHealer',
+    homeClassName: '灵雀',
+    homeBonus: '移速 +10%（职业开发中）',
     available: true,
-    radius: 14.5,
-    spawnPlayer: [0, 3],
-    spawnEnemy: [0, -3],
-    background: '#160803',
-    fog: [16, 55],
-    hemi: ['#ffc48a', '#2a0c03', 0.7],
-    keyColor: '#ffbf80',
-    keyIntensity: 2.0,
-    exposure: 1.1,
-    cardGradient: 'from-orange-800/80 via-red-950/80 to-black/90',
-    islands: ring(3, 9.5, 2.3, Math.PI / 2),
+    radius: 13,
+    rect: { hx: 4.4, hz: 12.2 },
+    spawnPlayer: [0, 6],
+    spawnEnemy: [0, -6],
+    background: '#0b1622',
+    fog: [14, 70],
+    hemi: ['#8fb3d9', '#10202c', 0.85],
+    keyColor: '#bcd4ff',
+    keyIntensity: 1.8,
+    exposure: 1.15,
+    cardGradient: 'from-sky-900/80 via-cyan-950/80 to-slate-950/90',
+    pillars: [
+      { x: 0, z: -4.8, r: 0.42 },
+      { x: 0, z: 3.8, r: 0.42 },
+      { x: 2.7, z: -9.2, r: 0.75 },
+      { x: -2.8, z: 8.6, r: 0.75 },
+      { x: -2.9, z: -0.6, r: 0.7 },
+    ],
   },
   bamboo: {
     id: 'bamboo',
@@ -174,26 +185,13 @@ export const MAPS: Record<MapId, MapDef> = {
   },
 };
 
-export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'forge', 'bamboo', 'rooftop', 'summit'];
-
-/** Forge: radius beyond which the floor is lava, per stage */
-export const FORGE_STAGE_TIMES = [18, 36, 54];
-export const FORGE_STAGE_RADII = [99, 11.5, 7.5, 4.2];
-
-export function forgeStage(t: number) {
-  let s = 0;
-  for (const st of FORGE_STAGE_TIMES) if (t >= st) s++;
-  return s;
-}
-
-export function inForgeLava(x: number, z: number, lavaR: number, islands: Circle[]) {
-  if (Math.hypot(x, z) <= lavaR) return false;
-  for (const i of islands) if (Math.hypot(x - i.x, z - i.z) <= i.r) return false;
-  return true;
-}
+export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'bamboo', 'rooftop', 'summit'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {
-  lavaR: 99,
   ventHeat: [] as number[], // 0..1 warning glow per vent
+  eruption: 0, // 0..1 volcano eruption intensity (sky tint, crater glow)
+  waveSide: 0, // -1 / +1 side the big wave comes from, 0 = none
+  waveRise: 0, // 0..1 how high the incoming wave is
+  lightning: 0, // 0..1 lightning flash
 };

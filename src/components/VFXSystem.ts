@@ -579,8 +579,20 @@ interface MarkFx {
   active: boolean;
 }
 
+interface MeteorFx {
+  mesh: THREE.Mesh;
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  t: number;
+  dur: number;
+  arc: number;
+  active: boolean;
+  onImpact?: () => void;
+}
+
 export class VFXSystem {
   root = new THREE.Group();
+  private meteors: MeteorFx[] = [];
   private marks: MarkFx[] = [];
   private timers: { t: number; fn: () => void }[] = [];
   private sparks = new PointPool(900, true);
@@ -643,6 +655,14 @@ export class VFXSystem {
       this.dmg.push({ sprite, canvas, tex, life: 0, maxLife: 1, vel: new THREE.Vector3(), baseScale: 1, active: false });
     }
 
+    const meteorGeo = new THREE.IcosahedronGeometry(0.55, 1);
+    for (let i = 0; i < 10; i++) {
+      const mesh = new THREE.Mesh(meteorGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 1.2, 0.25), toneMapped: false }));
+      mesh.visible = false;
+      this.root.add(mesh);
+      this.meteors.push({ mesh, from: new THREE.Vector3(), to: new THREE.Vector3(), t: 0, dur: 1, arc: 0, active: false });
+    }
+
     const streak = makeStreakTexture();
     for (let i = 0; i < 10; i++) {
       const mat = new THREE.SpriteMaterial({ map: streak, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
@@ -675,6 +695,24 @@ export class VFXSystem {
   // ---------------- scheduling ----------------
   later(delay: number, fn: () => void) {
     this.timers.push({ t: delay, fn });
+  }
+
+  /** Burning boulder flying on an arc from `from` to `to`, calling onImpact when it lands */
+  meteor(from: THREE.Vector3, to: THREE.Vector3, dur: number, arc: number, onImpact?: () => void, scale = 1) {
+    const m = this.meteors.find((x) => !x.active);
+    if (!m) {
+      onImpact?.();
+      return;
+    }
+    m.active = true;
+    m.from.copy(from);
+    m.to.copy(to);
+    m.t = 0;
+    m.dur = dur;
+    m.arc = arc;
+    m.onImpact = onImpact;
+    m.mesh.scale.setScalar(scale);
+    m.mesh.visible = true;
   }
 
   // ---------------- primitives ----------------
@@ -921,6 +959,24 @@ export class VFXSystem {
       });
       due.forEach((f) => f());
     }
+    for (const m of this.meteors) {
+      if (!m.active) continue;
+      m.t += dt;
+      const k = Math.min(1, m.t / m.dur);
+      m.mesh.position.lerpVectors(m.from, m.to, k);
+      m.mesh.position.y += Math.sin(k * Math.PI) * m.arc;
+      m.mesh.rotation.x += dt * 7;
+      m.mesh.rotation.z += dt * 5;
+      // fiery trail
+      tmpV.set((Math.random() - 0.5) * 1.5, Math.random() * 1.5, (Math.random() - 0.5) * 1.5);
+      this.sparks.emit(m.mesh.position, tmpV, Math.random() < 0.4 ? '#ffe2a8' : '#ff5a14', 0.45 * m.mesh.scale.x, 0.5, { drag: 1.5, gravity: -1 });
+      this.dust.emit(m.mesh.position, tmpV.set(0, 0.5, 0), '#2b1f1a', 1.4 * m.mesh.scale.x, 1.2, { drag: 1, gravity: -0.5, grow: 2 });
+      if (k >= 1) {
+        m.active = false;
+        m.mesh.visible = false;
+        m.onImpact?.();
+      }
+    }
     for (const m of this.marks) {
       if (!m.active) continue;
       m.life -= dt;
@@ -1027,6 +1083,7 @@ export class VFXSystem {
     for (const d of this.decals) if (d.active) n++;
     for (const d of this.dmg) if (d.active) n++;
     for (const m of this.marks) if (m.active) n++;
+    for (const m of this.meteors) if (m.active) n++;
     for (const t of this.trails) n += t.count > 0 ? 1 : 0;
     for (const sl of this.slots) n += (sl.vLife > 0 ? 1 : 0) + (sl.pLife > 0 ? 1 : 0);
     return n;

@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Arenas3D } from './Arenas3D';
-import { MAPS, MapId, mapRuntime } from '../maps';
+import { MAPS, MapId, mapRuntime, VOLCANO_CRATER } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -226,6 +226,7 @@ function LavaCliffMap() {
         <primitive object={lava} attach="material" />
       </mesh>
       <pointLight position={[0, -4, 0]} color="#ff5a1a" intensity={60} distance={30} />
+      <Volcano emissive={tex.em} />
       {spires.map((s, i) => (
         <mesh key={i} position={[s.x, -7 + s.h / 2, s.z]} castShadow>
           <coneGeometry args={[s.w, s.h, 7]} />
@@ -237,89 +238,320 @@ function LavaCliffMap() {
 }
 
 // ------------------------------------------------------------------
-// 熔炉地心
+// Volcano (熔岩断崖 backdrop): glows and erupts with mapRuntime.eruption
 // ------------------------------------------------------------------
-function ForgeMap() {
-  const def = MAPS.forge;
-  const lava = useMemo(() => {
-    const m = makeLavaMaterial({ forgeMask: true });
-    def.islands!.forEach((is, i) => m.uniforms.uIslands.value[i].set(is.x, is.z, is.r));
-    return m;
-  }, [def.islands]);
-  const tex = useMemo(() => {
-    const t = rockTexture('#46403a', false);
-    t.map.repeat.set(4, 4);
+function Volcano({ emissive }: { emissive: THREE.Texture }) {
+  const [cx, cy, cz] = VOLCANO_CRATER;
+  const base = -7;
+  const h = cy - base;
+  const glowMat = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(2, 0.5, 0.08), toneMapped: false }), []);
+  const lightRef = useRef<THREE.PointLight>(null);
+  const smokeRef = useRef<THREE.Group>(null);
+  const em = useMemo(() => {
+    const t = emissive.clone();
+    t.repeat.set(4, 2);
+    t.needsUpdate = true;
     return t;
-  }, []);
-  useFrame((st) => {
-    lava.uniforms.uTime.value = st.clock.elapsedTime;
-    lava.uniforms.uLavaR.value = mapRuntime.lavaR;
+  }, [emissive]);
+  useFrame((st, dt) => {
+    const e = mapRuntime.eruption;
+    const flicker = 0.85 + 0.15 * Math.sin(st.clock.elapsedTime * 7);
+    glowMat.color.setRGB((2 + e * 6) * flicker, (0.5 + e * 2) * flicker, 0.08 + e * 0.4);
+    if (lightRef.current) lightRef.current.intensity = (300 + e * 4000) * flicker;
+    if (smokeRef.current) {
+      smokeRef.current.rotation.y += dt * 0.05;
+      smokeRef.current.scale.setScalar(1 + e * 0.6);
+    }
   });
   return (
+    <group position={[cx, 0, cz]}>
+      <mesh position={[0, base + h / 2, 0]}>
+        <cylinderGeometry args={[9, 48, h, 40, 6, true]} />
+        <meshStandardMaterial color="#2b221e" roughness={1} emissiveMap={em} emissive="#ffffff" emissiveIntensity={0.9} />
+      </mesh>
+      <mesh position={[0, cy - 0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[8.6, 32]} />
+        <primitive object={glowMat} attach="material" />
+      </mesh>
+      <pointLight ref={lightRef} position={[0, cy + 6, 0]} color="#ff6a1a" intensity={300} distance={260} decay={1.4} />
+      <group ref={smokeRef} position={[0, cy + 10, 0]}>
+        {[0, 1, 2, 3, 4].map((k) => (
+          <mesh key={k} position={[Math.sin(k * 1.7) * 4, k * 9, Math.cos(k * 2.3) * 4]}>
+            <sphereGeometry args={[8 + k * 3, 16, 12]} />
+            <meshStandardMaterial color="#1b1412" transparent opacity={0.55 - k * 0.08} depthWrite={false} roughness={1} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+// ------------------------------------------------------------------
+// 怒海战船: storm ocean, rocking warship, rain, lightning, big waves
+// ------------------------------------------------------------------
+function makeOceanMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uWaveSide: { value: 0 },
+      uWaveRise: { value: 0 },
+      uFog: { value: new THREE.Color('#0b1622') },
+      uLightning: { value: 0 },
+    },
+    vertexShader: /* glsl */ `
+      uniform float uTime; uniform float uWaveSide; uniform float uWaveRise;
+      varying float vH; varying vec3 vWorld; varying vec3 vN;
+      float waves(vec2 p){
+        float h = 0.0;
+        h += sin(p.x * 0.12 + uTime * 0.9) * 0.9;
+        h += sin(p.y * 0.17 - uTime * 1.1 + p.x * 0.05) * 0.7;
+        h += sin((p.x + p.y) * 0.31 + uTime * 1.7) * 0.35;
+        h += sin((p.x - p.y) * 0.57 - uTime * 2.3) * 0.18;
+        // rogue wave ridge rising beside the ship, then crashing inward
+        float x0 = uWaveSide * (9.0 - max(0.0, uWaveRise - 1.0) * 30.0);
+        float ridge = exp(-pow(p.x - x0, 2.0) / 14.0) * exp(-pow(p.y / 30.0, 2.0));
+        h += ridge * min(uWaveRise, 1.0) * 6.5 * step(0.5, abs(uWaveSide));
+        return h;
+      }
+      void main(){
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        float h = waves(w.xz);
+        float e = 0.6;
+        float hx = waves(w.xz + vec2(e, 0.0)) - h;
+        float hz = waves(w.xz + vec2(0.0, e)) - h;
+        vN = normalize(vec3(-hx / e, 1.0, -hz / e));
+        w.y += h;
+        vH = h; vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uFog; uniform float uLightning; uniform float uTime;
+      varying float vH; varying vec3 vWorld; varying vec3 vN;
+      void main(){
+        vec3 deep = vec3(0.01, 0.05, 0.08);
+        vec3 shallow = vec3(0.03, 0.16, 0.2);
+        vec3 V = normalize(cameraPosition - vWorld);
+        float fres = pow(1.0 - max(dot(vN, V), 0.0), 3.0);
+        vec3 col = mix(deep, shallow, smoothstep(-1.0, 2.0, vH));
+        col = mix(col, vec3(0.35, 0.45, 0.55) + uLightning * 0.8, fres * 0.6);
+        vec3 L = normalize(vec3(0.3, 0.8, -0.5));
+        float spec = pow(max(dot(reflect(-L, vN), V), 0.0), 60.0);
+        col += spec * (0.25 + uLightning * 2.0);
+        float foam = smoothstep(1.3, 2.6, vH) + smoothstep(3.0, 5.0, vH);
+        col = mix(col, vec3(0.85, 0.92, 0.95), clamp(foam, 0.0, 1.0) * 0.8);
+        float d = length(cameraPosition - vWorld);
+        col = mix(col, uFog, smoothstep(25.0, 140.0, d));
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
+}
+
+function plankTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 1024;
+  const g = c.getContext('2d')!;
+  for (let i = 0; i < 16; i++) {
+    const l = 22 + Math.random() * 10;
+    g.fillStyle = `hsl(28, 35%, ${l}%)`;
+    g.fillRect(i * 32, 0, 32, 1024);
+    g.fillStyle = 'rgba(0,0,0,0.5)';
+    g.fillRect(i * 32, 0, 2, 1024);
+    for (let k = 0; k < 4; k++) {
+      const y = Math.random() * 1024;
+      g.fillRect(i * 32, y, 32, 2);
+    }
+    for (let k = 0; k < 30; k++) {
+      g.fillStyle = `rgba(${Math.random() < 0.5 ? '0,0,0' : '255,220,180'},0.05)`;
+      g.fillRect(i * 32 + Math.random() * 30, Math.random() * 1024, 1, 40 + Math.random() * 80);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  return t;
+}
+
+function Rain() {
+  const { geo, mat } = useMemo(() => {
+    const n = 2600;
+    const pos = new Float32Array(n * 6);
+    for (let i = 0; i < n; i++) {
+      const x = (Math.random() - 0.5) * 60;
+      const y = Math.random() * 30;
+      const z = (Math.random() - 0.5) * 60;
+      pos.set([x, y, z, x + 0.15, y + 0.9, z], i * 6);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
+    const m = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { uTime: { value: 0 }, uLightning: { value: 0 } },
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        void main(){
+          vec3 p = position;
+          p.y = mod(p.y - uTime * 26.0, 30.0) - 4.0;
+          p.x -= (30.0 - p.y) * 0.08;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: /* glsl */ `uniform float uLightning; void main(){ gl_FragColor = vec4(vec3(0.7, 0.8, 0.95) + uLightning, 0.35 + uLightning * 0.4); }`,
+    });
+    return { geo: g, mat: m };
+  }, []);
+  useFrame((st) => {
+    mat.uniforms.uTime.value = st.clock.elapsedTime;
+    mat.uniforms.uLightning.value = mapRuntime.lightning;
+  });
+  return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
+}
+
+function SeaMap() {
+  const def = MAPS.sea;
+  const { hx, hz } = def.rect!;
+  const ocean = useMemo(() => makeOceanMaterial(), []);
+  const planks = useMemo(() => {
+    const t = plankTexture();
+    t.repeat.set(1, 2);
+    return t;
+  }, []);
+  const shipRef = useRef<THREE.Group>(null);
+  const boltRef = useRef<THREE.DirectionalLight>(null);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    ocean.uniforms.uTime.value = t;
+    ocean.uniforms.uWaveSide.value = mapRuntime.waveSide;
+    ocean.uniforms.uWaveRise.value = mapRuntime.waveRise;
+    ocean.uniforms.uLightning.value = mapRuntime.lightning;
+    if (st.scene.background instanceof THREE.Color) ocean.uniforms.uFog.value.copy(st.scene.background);
+    if (shipRef.current) {
+      shipRef.current.rotation.z = Math.sin(t * 0.7) * 0.012 + mapRuntime.waveSide * Math.min(1, mapRuntime.waveRise) * 0.035;
+      shipRef.current.rotation.x = Math.sin(t * 0.45 + 1) * 0.008;
+    }
+    if (boltRef.current) boltRef.current.intensity = mapRuntime.lightning * 7;
+  });
+  const wood = '#4a3020';
+  const dark = '#2a1a10';
+  const railPosts: [number, number][] = [];
+  for (let z = -hz - 0.6; z <= hz + 0.6; z += 1.3) {
+    railPosts.push([-(hx + 0.35), z], [hx + 0.35, z]);
+  }
+  return (
     <group>
-      <mesh position={[0, -0.25, 0]} receiveShadow>
-        <cylinderGeometry args={[def.radius + 0.6, def.radius + 0.6, 0.5, 64]} />
-        <meshStandardMaterial map={tex.map} roughness={0.9} />
+      <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.6, 0]}>
+        <planeGeometry args={[420, 420, 200, 200]} />
+        <primitive object={ocean} attach="material" />
       </mesh>
-      {/* center dais rings */}
-      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[3.9, 4.2, 64]} />
-        <meshStandardMaterial color="#7a5a3a" metalness={0.6} roughness={0.4} />
-      </mesh>
-      {/* safe islands (raised slabs) */}
-      {def.islands!.map((is, i) => (
-        <group key={i} position={[is.x, 0, is.z]}>
-          <mesh position={[0, 0.03, 0]} receiveShadow castShadow>
-            <cylinderGeometry args={[is.r, is.r + 0.15, 0.12, 32]} />
-            <meshStandardMaterial color="#5c544c" roughness={0.85} />
+      <group ref={shipRef}>
+        {/* deck */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+          <planeGeometry args={[hx * 2 + 1.1, hz * 2 + 1.6]} />
+          <meshStandardMaterial map={planks} roughness={0.75} metalness={0.05} />
+        </mesh>
+        {/* hull */}
+        <mesh position={[0, -1.45, 0]} castShadow receiveShadow>
+          <boxGeometry args={[hx * 2 + 1.2, 2.9, hz * 2 + 1.6]} />
+          <meshStandardMaterial color={dark} roughness={0.85} />
+        </mesh>
+        {/* bow (pointed) */}
+        <mesh position={[0, -1.1, -(hz + 0.8)]} rotation={[0, Math.PI, 0]} scale={[1, 1, 1.9]} castShadow>
+          <cylinderGeometry args={[hx + 0.62, hx * 0.3, 3.6, 3, 1]} />
+          <meshStandardMaterial color={dark} roughness={0.85} />
+        </mesh>
+        <mesh position={[0, 0.25, -(hz + 5.8)]} rotation={[-0.5, 0, 0]}>
+          <cylinderGeometry args={[0.12, 0.2, 6, 8]} />
+          <meshStandardMaterial color={wood} roughness={0.8} />
+        </mesh>
+        {/* stern castle */}
+        <mesh position={[0, 1.3, hz + 2.2]} castShadow receiveShadow>
+          <boxGeometry args={[hx * 2 + 1.2, 2.6, 3.2]} />
+          <meshStandardMaterial color={wood} roughness={0.85} />
+        </mesh>
+        {[-2.2, 0, 2.2].map((x) => (
+          <mesh key={x} position={[x, 1.6, hz + 0.58]}>
+            <planeGeometry args={[0.9, 0.7]} />
+            <meshBasicMaterial color={new THREE.Color(2.4, 1.3, 0.4)} toneMapped={false} />
           </mesh>
-          <mesh position={[0, 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[is.r - 0.2, is.r, 32]} />
-            <meshStandardMaterial color="#8a6a40" metalness={0.7} roughness={0.35} />
+        ))}
+        <pointLight position={[0, 2, hz + 0.2]} color="#ffb060" intensity={14} distance={12} />
+        {/* railings */}
+        {railPosts.map(([x, z], i) => (
+          <mesh key={i} position={[x, 0.5, z]} castShadow>
+            <boxGeometry args={[0.16, 1.0, 0.16]} />
+            <meshStandardMaterial color={wood} roughness={0.8} />
           </mesh>
-        </group>
-      ))}
-      {/* lava overlay (masked by current lava radius & islands) */}
-      <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={3}>
-        <circleGeometry args={[def.radius + 0.6, 96]} />
-        <primitive object={lava} attach="material" />
-      </mesh>
-      {/* forge walls & giant furnaces */}
-      <mesh position={[0, 6, 0]}>
-        <cylinderGeometry args={[def.radius + 9, def.radius + 6, 14, 48, 1, true]} />
-        <meshStandardMaterial color="#2a2420" roughness={1} side={THREE.BackSide} />
-      </mesh>
-      {Array.from({ length: 6 }, (_, i) => {
-        const a = (i / 6) * Math.PI * 2 + 0.3;
-        const r = def.radius + 6.5;
-        return (
-          <group key={i} position={[Math.cos(a) * r, 0, Math.sin(a) * r]} rotation={[0, -a - Math.PI / 2, 0]}>
-            <mesh position={[0, 4, 0]} castShadow>
-              <boxGeometry args={[4, 8, 2.5]} />
-              <meshStandardMaterial color="#3a332e" roughness={0.8} metalness={0.3} />
+        ))}
+        {[-1, 1].map((sd) => (
+          <mesh key={sd} position={[sd * (hx + 0.35), 1.02, 0]} castShadow>
+            <boxGeometry args={[0.22, 0.12, hz * 2 + 1.6]} />
+            <meshStandardMaterial color="#5a3a26" roughness={0.7} />
+          </mesh>
+        ))}
+        <mesh position={[0, 1.02, -(hz + 0.75)]}>
+          <boxGeometry args={[hx * 2 + 0.9, 0.12, 0.22]} />
+          <meshStandardMaterial color="#5a3a26" roughness={0.7} />
+        </mesh>
+        {/* masts, yards & sails */}
+        {def.pillars!.slice(0, 2).map((p, i) => (
+          <group key={i} position={[p.x, 0, p.z]}>
+            <mesh position={[0, 7, 0]} castShadow>
+              <cylinderGeometry args={[p.r * 0.6, p.r, 14, 14]} />
+              <meshStandardMaterial color={wood} roughness={0.8} />
             </mesh>
-            <mesh position={[0, 2.2, 1.3]}>
-              <planeGeometry args={[2.2, 2.4]} />
-              <meshBasicMaterial color={new THREE.Color(3, 1.1, 0.2)} toneMapped={false} />
-            </mesh>
-            <pointLight position={[0, 2.5, 2.5]} color="#ff8a3a" intensity={12} distance={14} />
-            {/* hanging chains */}
-            {[-1.4, 1.4].map((x) => (
-              <mesh key={x} position={[x, 11, 0.5]}>
-                <cylinderGeometry args={[0.08, 0.08, 6, 6]} />
-                <meshStandardMaterial color="#1c1916" metalness={0.8} roughness={0.5} />
-              </mesh>
+            {[6, 11].map((y) => (
+              <group key={y}>
+                <mesh position={[0, y, 0]} rotation={[0, 0, Math.PI / 2]}>
+                  <cylinderGeometry args={[0.12, 0.12, 8, 8]} />
+                  <meshStandardMaterial color={wood} roughness={0.8} />
+                </mesh>
+                <mesh position={[0, y - 2.1, 0.35]} rotation={[0.08, 0, 0]}>
+                  <planeGeometry args={[7.4, 3.9, 8, 4]} />
+                  <meshStandardMaterial color="#6e2a22" roughness={0.95} side={THREE.DoubleSide} />
+                </mesh>
+              </group>
             ))}
+            <mesh position={[0, 14.4, 0]}>
+              <boxGeometry args={[0.25, 0.25, 0.25]} />
+              <meshBasicMaterial color={new THREE.Color(2.5, 1.4, 0.5)} toneMapped={false} />
+            </mesh>
           </group>
-        );
-      })}
+        ))}
+        {/* cargo crates */}
+        {def.pillars!.slice(2).map((p, i) => (
+          <group key={i} position={[p.x, 0, p.z]} rotation={[0, i * 0.7, 0]}>
+            <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
+              <boxGeometry args={[p.r * 1.7, 1.1, p.r * 1.7]} />
+              <meshStandardMaterial color="#6b4a2c" roughness={0.85} />
+            </mesh>
+            <mesh position={[0.1, 1.35, -0.05]} rotation={[0, 0.4, 0]} castShadow>
+              <boxGeometry args={[p.r * 1.1, 0.5, p.r * 1.1]} />
+              <meshStandardMaterial color="#7a5634" roughness={0.85} />
+            </mesh>
+          </group>
+        ))}
+        {/* hanging lanterns */}
+        {[-hz + 2, hz - 3].map((z) => (
+          <group key={z} position={[0, 3.3, z]}>
+            <mesh>
+              <boxGeometry args={[0.35, 0.5, 0.35]} />
+              <meshBasicMaterial color={new THREE.Color(2.6, 1.5, 0.5)} toneMapped={false} />
+            </mesh>
+            <pointLight color="#ffb060" intensity={10} distance={11} />
+          </group>
+        ))}
+      </group>
+      <Rain />
     </group>
   );
 }
 
 export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'lavacliff') return <LavaCliffMap />;
-  if (mapId === 'forge') return <ForgeMap />;
+  if (mapId === 'sea') return <SeaMap />;
   return <TempleMap />;
 }
 
