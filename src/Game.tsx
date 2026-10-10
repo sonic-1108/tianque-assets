@@ -1572,7 +1572,7 @@ export function Game({
           p.obj.lookAt(vC.copy(p.pos).sub(p.vel));
           p.obj.rotateZ(gt * 30); // spinning blade glints
         }
-        if (Math.random() < (p.pierce ? 0.9 : 0.35)) vfx.dartTrail(p.pos, p.color);
+        if (Math.random() < (p.pierce ? 0.7 : 0.15)) vfx.dartTrail(p.pos, p.color);
       }
     }
 

@@ -669,10 +669,10 @@ export class VFXSystem {
     const steel = new THREE.MeshStandardMaterial({ color: '#eef3f8', metalness: 0.9, roughness: 0.15, emissive: new THREE.Color('#5b6b7a'), emissiveIntensity: 0.4 });
     const leaf = new THREE.Shape();
     leaf.moveTo(0, -0.3);
-    leaf.quadraticCurveTo(0.07, -0.08, 0.035, 0.08);
+    leaf.quadraticCurveTo(0.1, -0.1, 0.04, 0.08);
     leaf.lineTo(0, 0.12);
     leaf.lineTo(-0.035, 0.08);
-    leaf.quadraticCurveTo(-0.07, -0.08, 0, -0.3);
+    leaf.quadraticCurveTo(-0.1, -0.1, 0, -0.3);
     const leafGeo = new THREE.ExtrudeGeometry(leaf, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 1 });
     leafGeo.translate(0, 0, -0.006);
     leafGeo.rotateX(Math.PI / 2); // tip (shape -Y) now points -Z, blade lies flat
@@ -690,44 +690,78 @@ export class VFXSystem {
       const t = new THREE.CanvasTexture(c);
       return t;
     })();
-    const tailGeo = new THREE.PlaneGeometry(0.12, 1.3);
+    const tailGeo = new THREE.PlaneGeometry(0.05, 0.9);
     tailGeo.rotateX(-Math.PI / 2);
-    tailGeo.translate(0, 0, 0.62); // trails behind the tip
-    const coreGeo = new THREE.SphereGeometry(0.06, 8, 6);
+    tailGeo.translate(0, 0, 0.62); // thin speed streak behind the dart
+    // glow outline: the same leaf, slightly larger, drawn additively behind the steel
+    const edgeGeo = leafGeo.clone();
+    edgeGeo.scale(1.6, 2.2, 1.1);
+    const ringGeo = new THREE.TorusGeometry(0.045, 0.011, 6, 16); // 镖环 at the tail
+    ringGeo.translate(0, 0, 0.17);
+    const tasselGeo = new THREE.ConeGeometry(0.028, 0.2, 5, 1, true); // 红缨 (team-coloured silk)
+    tasselGeo.rotateX(-Math.PI / 2);
+    tasselGeo.translate(0, 0, 0.3);
     const makeDart = (scale: number) => {
       const g = new THREE.Group();
-      const body = new THREE.Mesh(leafGeo, steel);
-      const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), toneMapped: false });
-      const core = new THREE.Mesh(coreGeo, glowMat);
-      core.position.z = 0.02;
-      const tailMat = new THREE.MeshBasicMaterial({ map: tailTex, color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const blade = new THREE.MeshStandardMaterial({ color: '#f1f5f9', metalness: 0.85, roughness: 0.18, emissive: new THREE.Color('#2dd4bf'), emissiveIntensity: 0.35 });
+      const body = new THREE.Mesh(leafGeo, blade);
+      const edgeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const edge = new THREE.Mesh(edgeGeo, edgeMat);
+      edge.renderOrder = -1;
+      const ring = new THREE.Mesh(ringGeo, steel);
+      const tasselMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), side: THREE.DoubleSide, toneMapped: false });
+      const tassel = new THREE.Mesh(tasselGeo, tasselMat);
+      const tailMat = new THREE.MeshBasicMaterial({ map: tailTex, color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
       const t1 = new THREE.Mesh(tailGeo, tailMat);
       const t2 = new THREE.Mesh(tailGeo, tailMat);
-      t2.rotation.z = Math.PI / 2; // crossed planes: visible from any angle
-      g.add(body, core, t1, t2);
-      g.userData.glow = [glowMat, tailMat];
+      t2.rotation.z = Math.PI / 2;
+      void edge;
+      g.add(body, ring, tassel, t1, t2);
+      g.userData.glow = [tasselMat, tailMat];
+      g.userData.emissive = blade;
       g.userData.baseScale = scale;
       g.scale.setScalar(scale);
       g.visible = false;
       this.root.add(g);
       return g;
     };
-    this.projPools.dart = Array.from({ length: 80 }, () => makeDart(1.5));
-    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(2.6));
-    const boomGeo = new THREE.TorusGeometry(0.55, 0.07, 6, 28, Math.PI * 1.35);
+    this.projPools.dart = Array.from({ length: 80 }, () => makeDart(2.0));
+    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(3.2));
+    // 回旋镖: flat crescent blade (outer arc minus an offset inner arc)
+    const cres = new THREE.Shape();
+    cres.moveTo(-0.62, -0.2);
+    cres.quadraticCurveTo(-0.3, 0.12, 0, 0.26);
+    cres.quadraticCurveTo(0.3, 0.12, 0.62, -0.2);
+    cres.lineTo(0.52, -0.27);
+    cres.quadraticCurveTo(0.26, 0.0, 0, 0.1);
+    cres.quadraticCurveTo(-0.26, 0.0, -0.52, -0.27);
+    cres.closePath();
+    const boomGeo = new THREE.ExtrudeGeometry(cres, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2, curveSegments: 24 });
+    boomGeo.translate(0, -0.02, -0.015);
+    boomGeo.rotateX(Math.PI / 2);
+    const boomEdgeGeo = boomGeo.clone();
+    boomEdgeGeo.scale(1.08, 1.5, 1.25);
     this.projPools.boomerang = Array.from({ length: 3 }, () => {
       const g = new THREE.Group();
       const spin = new THREE.Group();
       spin.name = 'spin';
-      const m = new THREE.Mesh(boomGeo, steel);
-      m.rotation.x = Math.PI / 2;
-      const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), toneMapped: false });
-      const e = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.03, 4, 28, Math.PI * 1.35), glowMat);
-      e.rotation.x = Math.PI / 2;
-      const haloMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
-      const halo = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.68, 32), haloMat);
+      const bm = new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.9, roughness: 0.2, emissive: new THREE.Color('#2dd4bf'), emissiveIntensity: 0.3 });
+      const m = new THREE.Mesh(boomGeo, bm);
+      const m2 = new THREE.Mesh(boomGeo, bm);
+      m2.rotation.y = Math.PI; // two crescents back to back: a spinning four-point star when it flies
+      const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const e = new THREE.Mesh(boomEdgeGeo, glowMat);
+      e.renderOrder = -1;
+      const e2 = new THREE.Mesh(boomEdgeGeo, glowMat);
+      e2.rotation.y = Math.PI;
+      e2.renderOrder = -1;
+      const haloMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
+      const halo = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.72, 40), haloMat);
       halo.rotation.x = -Math.PI / 2;
+      void m2;
+      void e2;
       spin.add(m, e, halo);
+      g.userData.emissive = bm;
       g.add(spin);
       g.userData.glow = [glowMat, haloMat];
       g.visible = false;
@@ -775,6 +809,7 @@ export class VFXSystem {
       // HDR tint so the glow blooms
       const c = new THREE.Color(color).multiplyScalar(2.4);
       for (const m of (o.userData.glow || []) as THREE.MeshBasicMaterial[]) m.color.copy(c);
+      if (o.userData.emissive) (o.userData.emissive as THREE.MeshStandardMaterial).emissive.set(color);
     }
     if (o.userData.baseScale) o.scale.setScalar(o.userData.baseScale);
     return o;
@@ -787,7 +822,7 @@ export class VFXSystem {
   /** Small sparkle trail behind a flying dart */
   dartTrail(pos: THREE.Vector3, color: THREE.ColorRepresentation) {
     tmpV.set((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3);
-    this.sparks.emit(pos, tmpV, color, 0.07, 0.18, { drag: 6, gravity: 0 });
+    this.sparks.emit(pos, tmpV, color, 0.035, 0.12, { drag: 6, gravity: 0 });
   }
 
   // ---------------- scheduling ----------------
