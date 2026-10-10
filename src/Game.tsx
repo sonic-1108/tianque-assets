@@ -1317,7 +1317,7 @@ export function Game({
         color = GOLD;
       }
       const poisoned = (c.poisonBuff ?? 0) > 0 && c.actionState.startsWith('attack_');
-      const obj = vfx.takeProjectile(kind, poisoned && !pierce ? '#4ade80' : color);
+      const obj = vfx.takeProjectile(kind, colorFor(slot, c), pierce ? 'gold' : poisoned ? 'poison' : 'normal');
       if (!obj) return;
       if (pierce) {
         c.pierceNext = false;
