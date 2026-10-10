@@ -87,21 +87,28 @@ const CLIP_PLAN: Record<string, ClipSpec> = {
   hit_b: { match: ['hit_to_side', 'hit_to_body_02', 'hit', 'hurt'], start: 0.0, end: 0.75, fit: true },
   launched: { match: ['hit_to_stomach', 'hit', 'fall'], start: 0.0, end: 0.6, fit: true },
   knockdown: { match: ['fall', 'death', 'die', 'defeat'], start: 0.36, end: 0.75, fit: true },
+  getup: { match: ['fall'], start: 0.4, end: 0.75, speed: -2.2 },
+  cheer: { match: ['cheer', 'victory'], start: 0.0, end: 0.45, loop: true },
 };
 
 /** 暗器 overrides: throws, flips, light footwork */
 const RANGER_CLIP_PLAN: Record<string, ClipSpec> = {
   ...CLIP_PLAN,
-  attack_1: { match: ['throw', 'box_01', 'punch'], start: 0.1, end: 0.45, fit: true },
-  attack_2: { match: ['throw_02', 'chop', 'box_01'], start: 0.2, end: 0.55, fit: true },
-  attack_3: { match: ['slash', 'kick', 'chop'], start: 0.25, end: 0.52, fit: true },
-  skill_1: { match: ['slash', 'chop'], start: 0.22, end: 0.55, fit: true },
-  skill_2: { match: ['chop', 'volleyball', 'box_01'], start: 0.2, end: 0.55, fit: true },
+  // throws: quick jab flick, hook flick, then a full overhand pitch for the 3-dart fan
+  attack_1: { match: ['box_01', 'throw', 'punch'], start: 0.08, end: 0.32, fit: true },
+  attack_2: { match: ['box_03', 'box_02', 'throw'], start: 0.12, end: 0.4, fit: true },
+  attack_3: { match: ['pitch_baseball', 'throw', 'slash'], start: 0.3, end: 0.54, fit: true },
+  r_kick: { match: ['front_kick_02', 'front_kick_01', 'kick', 'slash'], start: 0.05, end: 0.9, fit: true },
+  skill_1: { match: ['slash', 'chop'], start: 0.22, end: 0.42, fit: true },
+  skill_2: { match: ['pitch_baseball', 'chop', 'box_01'], start: 0.3, end: 0.54, fit: true },
   skill_3: { match: ['backflip', 'jump', 'dive'], start: 0.0, end: 0.3, fit: true },
-  skill_4: { match: ['agree', 'angry_02', 'idle'], start: 0.0, end: 0.4, fit: true },
-  r_rain: { match: ['box_01', 'chop', 'punch'], start: 0.1, end: 0.45, loop: true, speed: 2.2 },
+  skill_4: { match: ['angry_02', 'agree', 'idle'], start: 0.0, end: 0.6, fit: true },
+  r_rain: { match: ['box_01', 'box_03', 'punch'], start: 0.08, end: 0.32, loop: true, speed: 2.2 },
+  r_flip: { match: ['flip', 'front_flip'], start: 0.33, end: 0.7, fit: true },
   dodge: { match: ['roll', 'dodge', 'dive', 'flip'], start: 0.36, end: 0.92, fit: true },
-  knockdown: { match: ['fall', 'death', 'die', 'hit_to_stomach'], start: 0.3, end: 0.9, fit: true },
+  knockdown: { match: ['fall', 'death', 'die', 'hit_to_stomach'], start: 0.35, end: 0.75, fit: true },
+  getup: { match: ['fall'], start: 0.4, end: 0.75, speed: -2.2 },
+  cheer: { match: ['cheer', 'victory', 'agree'], start: 0.0, end: 0.45, loop: true },
 };
 const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : CLIP_PLAN);
 
@@ -306,7 +313,7 @@ function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallba
 
 const normBone = (n: string) => n.toLowerCase().replace(/^mixamorig[:_]?/, '').replace(/[^a-z0-9]/g, '');
 
-const ONE_SHOT = new Set<string>(['attack_1', 'attack_2', 'attack_3', 'skill_1', 'skill_4', 'dodge', 'hit_a', 'hit_b', 'launched', 'knockdown', 'ult_air', 'ult_slam', 'jump']);
+const ONE_SHOT = new Set<string>(['r_kick', 'r_flip', 'getup', 'attack_1', 'attack_2', 'attack_3', 'skill_1', 'skill_4', 'dodge', 'hit_a', 'hit_b', 'launched', 'knockdown', 'ult_air', 'ult_slam', 'jump']);
 
 export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, socketsRef, showBoneAxes, onAnimationDebug, onLoadProgress }: CharacterRigProps) {
   const [rawAsset, setRawAsset] = useState<LoadedAsset | null>(null);
@@ -325,6 +332,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const currentKeyRef = useRef('');
   const lastStateRef = useRef<CharacterActionState>('idle');
   const lastTimerRef = useRef(0);
+  const getupRef = useRef(0);
   const hitVariantRef = useRef(0);
   const strafeYawRef = useRef(0);
   const spinRef = useRef(0);
@@ -470,6 +478,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const prev = actions[currentKeyRef.current];
     if (prev && prev !== next) prev.fadeOut(fade);
     next.reset();
+    if (timeScale < 0) next.time = next.getClip().duration; // reversed clip (getting up from a fall)
     next.setEffectiveWeight(1);
     next.setEffectiveTimeScale(timeScale);
     next.fadeIn(fade).play();
@@ -516,6 +525,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const st = c.actionState;
     const speed = Math.hypot(c.vel[0], c.vel[2]);
     const restarted = st !== lastStateRef.current || c.stateTimer < lastTimerRef.current - 0.001;
+    if (lastStateRef.current === 'knockdown' && (st === 'idle' || st === 'run') && c.hp > 0) getupRef.current = 0.45;
+    if (getupRef.current > 0) getupRef.current -= delta;
     lastStateRef.current = st;
     lastTimerRef.current = c.stateTimer;
 
@@ -523,7 +534,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     let key = 'idle';
     const lm = c.localMove || [0, 0];
     let backward = false;
-    if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
+    if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
+      key = 'r_kick';
+    } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
     } else if (st === 'ultimate' && classId === 'Ranger') {
       key = c.stateTimer < 0.45 ? 'jump' : 'r_rain';
@@ -536,12 +549,16 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       key = 'launched';
     } else if (st === 'knockdown' || st === 'dead') {
       key = 'knockdown';
+    } else if (!c.isGrounded && (c.doubleJumpTimer ?? 0) > 0 && actionsRef.current.r_flip) {
+      key = 'r_flip';
     } else if (!c.isGrounded || st === 'jump') {
       key = 'jump';
     } else if (speed > 0.6) {
       backward = lm[1] < -0.35;
       key = backward ? 'walk' : 'run';
     }
+    if (getupRef.current > 0 && (key === 'idle' || key === 'run' || key === 'walk') && actionsRef.current.getup) key = 'getup';
+    else if (c.celebrate && key === 'idle' && actionsRef.current.cheer) key = 'cheer';
     if (!actionsRef.current[key]) key = actionsRef.current.idle ? 'idle' : Object.keys(actionsRef.current)[0];
 
     const isOneShot = ONE_SHOT.has(key);
@@ -583,7 +600,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     // Ultimate: forward somersault on the way up
     if (st === 'ultimate' && key === 'ult_air') flipRef.current = THREE.MathUtils.clamp(c.stateTimer / 0.55, 0, 1) * Math.PI * 2;
-    else if ((c.doubleJumpTimer ?? 0) > 0 && !c.isGrounded) flipRef.current = (1 - (c.doubleJumpTimer ?? 0) / 0.45) * Math.PI * 2;
+    else if ((c.doubleJumpTimer ?? 0) > 0 && !c.isGrounded && !actionsRef.current.r_flip) flipRef.current = (1 - (c.doubleJumpTimer ?? 0) / 0.45) * Math.PI * 2;
     else flipRef.current = 0;
 
     let leanX = 0;

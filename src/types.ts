@@ -186,7 +186,8 @@ export interface CombatantState {
   pierceNext?: boolean;
   volleyShots?: number; // darts already thrown in the current action
   backSlash?: boolean;
-  doubleJumped?: boolean; // 暗器: second jump used
+  doubleJumped?: boolean;
+  celebrate?: boolean; // won the round: victory pose // 暗器: second jump used
   doubleJumpTimer?: number; // >0 while the double-jump somersault plays // 暗器 right-click: backhand knife slash + backstep
   rainCenter?: [number, number]; // 暴雨梨花 target area
   buffs: CombatantBuff[];

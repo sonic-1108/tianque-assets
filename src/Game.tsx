@@ -498,7 +498,7 @@ export function Game({
           c.actionState === 'skill_3' ||
           (c.actionState === 'ultimate' ? !!c.ultSlamStarted && c.stateTimer < 1.0 : !!cfg && c.stateTimer >= cfg.startup * 0.4 && c.stateTimer <= cfg.startup + cfg.active + 0.05));
       const rangerC = c.classId === 'Ranger';
-      t.right.emitting = rangerC ? c.actionState === 'attack_3' && !!c.backSlash && c.stateTimer < 0.3 : swinging;
+      t.right.emitting = rangerC ? c.actionState === 'attack_3' && !!c.backSlash && c.stateTimer > 0.18 && c.stateTimer < 0.42 : swinging;
       t.left.emitting = !rangerC && swinging && c.actionState !== 'attack_1';
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
       const col = rangerC ? colorFor(i, c) : i === 0 ? (rage ? '#ff1030' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
@@ -643,6 +643,7 @@ export function Game({
             if (!canSkill && !canDodge) return report('右键: 撩刀后撤', `被 [${cur} ${phase}] 占用`), false;
             c.cooldowns.special = 2.5;
             start('attack_3', rooted ? 0 : 4);
+            c.stateDuration = 0.6; // spinning kick + knife, longer than the dart fan
             c.backSlash = true;
             c.volleyShots = 0;
             gameAudio.playSwordClash();
@@ -1308,7 +1309,7 @@ export function Game({
         for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 34, { dmg: 36, knock: 3, dur: 0.3 });
         gameAudio.playArcadeLaser();
       }
-      if (st === 'attack_3' && c.backSlash && active && !c.hasHitCurrentMove) {
+      if (st === 'attack_3' && c.backSlash && t >= 0.28 && !c.hasHitCurrentMove) {
         // 撩刀后撤: backhand slash, then spring away
         c.hasHitCurrentMove = true;
         vfx.slashMark(vB.set(c.pos[0] + fwd.x * 0.9, c.pos[1] + 1.1, c.pos[2] + fwd.z * 0.9), color, 1.0);
@@ -1584,6 +1585,7 @@ export function Game({
         c.dartHits = 0;
         c.pierceNext = false;
         c.backSlash = false;
+        c.celebrate = false;
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
@@ -1633,6 +1635,7 @@ export function Game({
       if (def.hp > 0 || !aiOn || round.over) return;
       round.over = true;
       round.timer = 3.2;
+      fighters[1 - defSlot].celebrate = true;
       slowMoTimerRef.current = 0.7;
       def.stateTimer = 0;
       def.stateDuration = 99;
