@@ -7,6 +7,7 @@ import { BackgroundMusic } from './utils/BackgroundMusic';
 import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId } from './maps';
+import type { CharacterClassId } from './types';
 import {
   GameState,
   CombatantState,
@@ -36,10 +37,11 @@ const STATIC_CANVAS_CAMERA = { fov: 55, near: 0.1, far: 200 };
 
 const SKILLS = CLASS_CONFIGS.Berserker.skills;
 const skillMeta = (i: number) => [`MP ${SKILLS[i].mpCost}`, `冷却 ${SKILLS[i].cooldown}s`];
-const HOTBAR_INFO: {
+type HotbarEntry = {
   id: string; key: string; name: string; icon: string; short: string; desc: string; tip?: string;
   meta: string[]; cdKey?: string; basic?: boolean; super?: boolean;
-}[] = [
+};
+const BERSERKER_HOTBAR: HotbarEntry[] = [
   { id: 'attack', key: '左键', name: '斩击', icon: '⚔️', short: '三段连斩', basic: true, meta: ['命中回蓝', '可连按'],
     desc: '双刀三段连斩：第一段单刀横斩，第二段双刀交错，第三段重劈把对手击倒。出招会自动吸附前方4米内的对手。对手被击飞在空中时，每一下普攻都会把他再挑高一点，最多空中追打4下，伤害逐次递减。',
     tip: '跳起按左键是「下劈」；翻滚刚结束时按左键是「回身斩」。经典连招：斩击×2 → 1 裂地斩 → 空中追打 ×3。' },
@@ -58,6 +60,29 @@ const HOTBAR_INFO: {
   { id: 'heaven_collapse', key: 'R', name: '天崩', icon: '🌋', short: '空翻砸地', cdKey: 'ultimate', super: true, meta: skillMeta(4),
     desc: SKILLS[4].description, tip: '对手倒地起身时放最稳；看到对手跳起来要马上 Shift 翻滚。' },
 ];
+
+const RS = CLASS_CONFIGS.Ranger.skills;
+const rMeta = (i: number) => [`MP ${RS[i].mpCost}`, `冷却 ${RS[i].cooldown}s`];
+const RANGER_HOTBAR: HotbarEntry[] = [
+  { id: 'r_attack', key: '左键', name: '飞镖', icon: '🗡️', short: '远程连射', basic: true, meta: ['射程约20米', '可边走边丢'],
+    desc: '朝准星方向甩出飞镖，对手在前方时会自动瞄准胸口。第一、二段各一枚，第三段一次甩出三枚扇形镖。丢镖时可以慢速移动，空中也能丢。被动「袖里乾坤」：飞镖每命中5次，下一枚变成金色穿透镖，伤害翻倍并且无视格挡。',
+    tip: '保持 6 到 9 米的距离绕圈丢镖，对手冲过来就右键或 3 拉开。' },
+  { id: 'r_special', key: '右键', name: '撩刀后撤', icon: '🌙', short: '近身反手一刀', basic: true, cdKey: 'special', meta: ['冷却 2.5s', '不耗蓝'],
+    desc: '暗器没有格挡。右键用手里的短刀反手撩一刀（55伤害，把人推开），同时向后弹开一大步，用来摆脱贴身的对手。',
+    tip: '被狂刃贴脸时先右键拉开，再接飞镖。' },
+  { id: 'boomerang', key: '1', name: RS[0].name, icon: RS[0].icon, short: '去回两段', cdKey: 'skill1', meta: rMeta(0), desc: RS[0].description,
+    tip: '扔出去以后往侧面走，回程会从另一个角度再打一次。' },
+  { id: 'pin_dart', key: '2', name: RS[1].name, icon: RS[1].icon, short: '定住1.5秒', cdKey: 'skill2', meta: rMeta(1), desc: RS[1].description,
+    tip: '定住以后对手跑不掉也翻不了滚，正好接 1 和三连镖。' },
+  { id: 'swallow_flip', key: '3', name: RS[2].name, icon: RS[2].icon, short: '后空翻七镖', cdKey: 'skill3', meta: rMeta(2), desc: RS[2].description,
+    tip: '看到对手冲过来或起手大招时用，翻身那一下是无敌的。' },
+  { id: 'poison', key: '4', name: RS[3].name, icon: RS[3].icon, short: '飞镖带毒', cdKey: 'skill4', meta: rMeta(3), desc: RS[3].description,
+    tip: '先开淬毒再丢一串飞镖，五层毒每秒掉七十血。' },
+  { id: 'rain_of_darts', key: 'R', name: RS[4].name, icon: RS[4].icon, short: '悬空洒镖', cdKey: 'ultimate', super: true, meta: rMeta(4), desc: RS[4].description,
+    tip: '先用 2 定身镖钉住对手，再开暴雨梨花，几乎全中。' },
+];
+const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR };
+const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger'];
 
 interface CanvasLoadingScreenProps {
   progress: number;
@@ -129,6 +154,10 @@ export default function App() {
   const [skillCard, setSkillCard] = useState<string | null>(null);
   const [mapId, setMapId] = useState<MapId>('temple');
   const [isMapSelectOpen, setIsMapSelectOpen] = useState(true);
+  const [playerClass, setPlayerClass] = useState<CharacterClassId>('Berserker');
+  const [enemyClass, setEnemyClass] = useState<CharacterClassId>('Berserker');
+  const HOTBAR_INFO = HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
+  const enemyShadow = `${CLASS_CONFIGS[enemyClass].defaultCharacter}影`;
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
@@ -334,6 +363,9 @@ export default function App() {
     cdSkill3: 0,
     cdSkill4: 0,
     cdUlt: 0,
+    cdSpecial: 0,
+    poisonBuff: 0,
+    pierceNext: false,
     isBloodRage: false,
     dummyHp: 1600,
   });
@@ -368,6 +400,9 @@ export default function App() {
         cdSkill3: p1.cooldowns.skill3 || 0,
         cdSkill4: p1.cooldowns.skill4 || 0,
         cdUlt: p1.cooldowns.ultimate || 0,
+        cdSpecial: p1.cooldowns.special || 0,
+        poisonBuff: p1.poisonBuff || 0,
+        pierceNext: !!p1.pierceNext,
         isBloodRage: p1.buffs.some((b) => b.type === 'blood_rage'),
         dummyHp: dummy.hp,
       });
@@ -393,7 +428,7 @@ export default function App() {
     gameAudio.playCrispClick();
   };
 
-  const berserkerConfig = CLASS_CONFIGS.Berserker;
+  const berserkerConfig = CLASS_CONFIGS[playerClass];
 
   return (
     <div className="fixed inset-0 overflow-hidden touch-none flex flex-col bg-zinc-950 text-white font-sans select-none">
@@ -437,6 +472,37 @@ export default function App() {
               <h2 className="text-3xl font-black text-amber-300 tracking-widest">选择战场</h2>
               <p className="text-xs text-zinc-400 mt-1">每张地图都有自己的机制和主场职业，主场职业在该地图伤害 +10%</p>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+              {([['你的职业', playerClass, setPlayerClass], ['对手职业', enemyClass, setEnemyClass]] as const).map(([label, cur, set]) => (
+                <div key={label} className="bg-zinc-900/80 border border-zinc-700 rounded-2xl p-3">
+                  <div className="text-xs font-bold text-zinc-300 mb-2">{label}</div>
+                  <div className="flex gap-2">
+                    {PLAYABLE.map((cid) => {
+                      const cc = CLASS_CONFIGS[cid];
+                      const on = cur === cid;
+                      return (
+                        <button
+                          key={cid}
+                          onClick={() => {
+                            gameAudio.playCrispClick();
+                            set(cid);
+                            setScore({ player: 0, enemy: 0 });
+                          }}
+                          className={`flex-1 text-left rounded-xl border px-3 py-2 transition-all ${
+                            on ? (cid === 'Ranger' ? 'border-teal-400 bg-teal-900/40 ring-2 ring-teal-400/50' : 'border-amber-400 bg-amber-900/40 ring-2 ring-amber-400/50') : 'border-zinc-700 hover:border-zinc-500'
+                          }`}
+                        >
+                          <div className="text-sm font-black text-white">{cc.name} · {cc.defaultCharacter}</div>
+                          <div className="text-[10px] text-zinc-400 leading-snug mt-0.5">{cc.role}</div>
+                          <div className="text-[10px] text-zinc-500 mt-0.5">生命 {cc.hp} · 移速 {Math.round((cc.speedRatio || 1) * 100)}%</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-center text-[11px] text-zinc-500 -mt-2 mb-4">选好职业后点一张地图开打</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {MAP_ORDER.map((id) => {
                 const m = MAPS[id];
@@ -486,7 +552,7 @@ export default function App() {
             {roundBanner === 'player' ? '胜' : '败'}
           </span>
           <span className="text-sm font-bold text-zinc-200 bg-black/60 px-3 py-1 rounded-full">
-            {roundBanner === 'player' ? '霍岩影 被击倒' : '你被霍岩影击倒'} · {score.player} : {score.enemy} · 下一回合即将开始
+            {roundBanner === 'player' ? `${enemyShadow} 被击倒` : `你被${enemyShadow}击倒`} · {score.player} : {score.enemy} · 下一回合即将开始
           </span>
         </div>
       )}
@@ -535,6 +601,8 @@ export default function App() {
               targetingRefState={targetingRefState}
               aiEnabledRef={aiEnabledRef}
               mapId={mapId}
+              playerClass={playerClass}
+              enemyClass={enemyClass}
               onRoundEvent={handleRoundEvent}
               onVfxCountChange={setVfxCount}
               onDebugUpdate={setDebugData}
@@ -556,7 +624,7 @@ export default function App() {
             }}
           >
             <div className="flex items-center gap-1 bg-black/85 px-2.5 py-0.5 rounded-full border border-red-500/50 text-[11px] font-bold text-red-300 shadow-lg">
-              <span>{aiEnabled ? '霍岩影 · 对手' : '演武木桩 · 霍岩影'}</span>
+              <span>{aiEnabled ? `${enemyShadow} · 对手` : `演武木桩 · ${enemyShadow}`}</span>
               {targetingRefState.current.lockedEnemyId && (
                 <span className="text-yellow-400 font-mono text-[10px]">🎯 锁定</span>
               )}
@@ -612,6 +680,16 @@ export default function App() {
                 {hudMirror.hasSuperArmor && !hudMirror.isBloodRage && (
                   <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/40">
                     霸体
+                  </span>
+                )}
+                {hudMirror.poisonBuff > 0 && (
+                  <span className="text-[10px] bg-green-600/25 text-green-300 px-1.5 py-0.5 rounded border border-green-500/50">
+                    淬毒 {hudMirror.poisonBuff.toFixed(1)}s
+                  </span>
+                )}
+                {hudMirror.pierceNext && (
+                  <span className="text-[10px] bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded border border-amber-400 animate-pulse font-black">
+                    袖里乾坤：下一镖穿透
                   </span>
                 )}
                 {hudMirror.isBlocking && (
@@ -740,7 +818,8 @@ export default function App() {
               h.cdKey === 'skill2' ? hudMirror.cdSkill2 :
               h.cdKey === 'skill3' ? hudMirror.cdSkill3 :
               h.cdKey === 'skill4' ? hudMirror.cdSkill4 :
-              h.cdKey === 'ultimate' ? hudMirror.cdUlt : 0;
+              h.cdKey === 'ultimate' ? hudMirror.cdUlt :
+              h.cdKey === 'special' ? hudMirror.cdSpecial : 0;
             const onCd = cd > 0;
             const active = skillCard === h.id;
             return (
@@ -1068,7 +1147,7 @@ export default function App() {
                 onClick={toggleAI}
                 className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-sky-700 text-sky-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2"
               >
-                {aiEnabled ? '切换为木桩模式（不还手）' : '切换为对战模式（霍岩影会还手）'} · P
+                {aiEnabled ? '切换为木桩模式（不还手）' : `切换为对战模式（${enemyShadow}会还手）`} · P
               </button>
 
               <button

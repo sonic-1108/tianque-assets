@@ -185,6 +185,8 @@ export interface CombatantState {
   dartHits?: number; // passive counter: every 5 hits -> piercing dart
   pierceNext?: boolean;
   volleyShots?: number; // darts already thrown in the current action
+  backSlash?: boolean; // 暗器 right-click: backhand knife slash + backstep
+  rainCenter?: [number, number]; // 暴雨梨花 target area
   buffs: CombatantBuff[];
   totalDamageDealt: number;
   totalHealingDone: number;
