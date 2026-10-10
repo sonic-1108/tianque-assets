@@ -593,6 +593,7 @@ interface MeteorFx {
 export class VFXSystem {
   root = new THREE.Group();
   private meteors: MeteorFx[] = [];
+  private projPools: Record<string, THREE.Object3D[]> = {};
   private marks: MarkFx[] = [];
   private timers: { t: number; fn: () => void }[] = [];
   private sparks = new PointPool(900, true);
@@ -663,6 +664,40 @@ export class VFXSystem {
       this.meteors.push({ mesh, from: new THREE.Vector3(), to: new THREE.Vector3(), t: 0, dur: 1, arc: 0, active: false });
     }
 
+    // ---- projectile meshes (暗器) ----
+    const steel = new THREE.MeshStandardMaterial({ color: '#dfe6ee', metalness: 0.95, roughness: 0.2 });
+    const glowTeal = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.2, 2.0), toneMapped: false });
+    const dartGeo = new THREE.ConeGeometry(0.035, 0.32, 6);
+    dartGeo.rotateX(-Math.PI / 2); // tip points -Z
+    const finGeo = new THREE.PlaneGeometry(0.09, 0.12);
+    const makeDart = (scale: number) => {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(dartGeo, steel);
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), glowTeal);
+      glow.position.z = 0.12;
+      const fin = new THREE.Mesh(finGeo, new THREE.MeshBasicMaterial({ color: '#2dd4bf', side: THREE.DoubleSide, transparent: true, opacity: 0.85 }));
+      fin.position.z = 0.16;
+      g.add(body, glow, fin);
+      g.scale.setScalar(scale);
+      g.visible = false;
+      this.root.add(g);
+      return g;
+    };
+    this.projPools.dart = Array.from({ length: 60 }, () => makeDart(1));
+    this.projPools.pin = Array.from({ length: 3 }, () => makeDart(2.2));
+    const boomGeo = new THREE.TorusGeometry(0.42, 0.06, 6, 24, Math.PI * 1.35);
+    this.projPools.boomerang = Array.from({ length: 3 }, () => {
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(boomGeo, steel);
+      m.rotation.x = Math.PI / 2;
+      const e = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.025, 4, 24, Math.PI * 1.35), glowTeal);
+      e.rotation.x = Math.PI / 2;
+      g.add(m, e);
+      g.visible = false;
+      this.root.add(g);
+      return g;
+    });
+
     const streak = makeStreakTexture();
     for (let i = 0; i < 10; i++) {
       const mat = new THREE.SpriteMaterial({ map: streak, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
@@ -690,6 +725,26 @@ export class VFXSystem {
   setViewportHeight(px: number) {
     this.sparks.setScale(px * 0.9);
     this.dust.setScale(px * 0.9);
+  }
+
+  // ---------------- projectiles ----------------
+  /** Borrow a projectile mesh ('dart' | 'pin' | 'boomerang'); returns null if the pool is empty */
+  takeProjectile(kind: 'dart' | 'pin' | 'boomerang'): THREE.Object3D | null {
+    const pool = this.projPools[kind];
+    const o = pool.find((x) => !x.visible);
+    if (!o) return null;
+    o.visible = true;
+    return o;
+  }
+
+  releaseProjectile(o: THREE.Object3D | null) {
+    if (o) o.visible = false;
+  }
+
+  /** Small sparkle trail behind a flying dart */
+  dartTrail(pos: THREE.Vector3, color: THREE.ColorRepresentation) {
+    tmpV.set((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3);
+    this.sparks.emit(pos, tmpV, color, 0.07, 0.18, { drag: 6, gravity: 0 });
   }
 
   // ---------------- scheduling ----------------

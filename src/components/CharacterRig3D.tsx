@@ -2,9 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
-import { CombatantState, CharacterActionState } from '../types';
+import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
 
 export const BERSERKER_MODEL_URL = `${import.meta.env.BASE_URL}berserker.glb`;
+export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
+  Berserker: BERSERKER_MODEL_URL,
+  Ranger: `${import.meta.env.BASE_URL}ranger.glb`,
+};
 
 /** Tripo / Mixamo models face +Z. Gameplay forward is -Z, so the visual is turned 180°. */
 export const MODEL_YAW_OFFSET = Math.PI;
@@ -37,6 +41,7 @@ export interface RigSockets {
 }
 
 interface CharacterRigProps {
+  classId?: CharacterClassId;
   combatantRef: React.MutableRefObject<CombatantState>;
   isPlayer: boolean;
   socketsRef?: React.MutableRefObject<RigSockets>;
@@ -84,6 +89,21 @@ const CLIP_PLAN: Record<string, ClipSpec> = {
   knockdown: { match: ['fall', 'death', 'die', 'defeat'], start: 0.36, end: 0.75, fit: true },
 };
 
+/** 暗器 overrides: throws, flips, light footwork */
+const RANGER_CLIP_PLAN: Record<string, ClipSpec> = {
+  ...CLIP_PLAN,
+  attack_1: { match: ['throw', 'box_01', 'punch', 'slash'], start: 0.15, end: 0.6, fit: true },
+  attack_2: { match: ['throw_02', 'throw', 'box_03', 'punch'], start: 0.15, end: 0.6, fit: true },
+  attack_3: { match: ['kick', 'slash', 'box_02'], start: 0.25, end: 0.55, fit: true },
+  skill_1: { match: ['throw', 'box_02', 'punch'], start: 0.1, end: 0.6, fit: true },
+  skill_2: { match: ['throw', 'box_01', 'punch'], start: 0.1, end: 0.6, fit: true },
+  skill_3: { match: ['backflip', 'back_flip', 'flip', 'dive'], start: 0.05, end: 0.75, fit: true },
+  skill_4: { match: ['cheer', 'agree', 'idle'], start: 0.0, end: 0.3, fit: true },
+  r_rain: { match: ['throw', 'box_02', 'box_01'], start: 0.15, end: 0.6, loop: true, speed: 2.2 },
+  dodge: { match: ['roll', 'dodge', 'dive', 'flip'], start: 0.36, end: 0.92, fit: true },
+};
+const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : CLIP_PLAN);
+
 interface BuiltClip {
   key: string;
   clip: THREE.AnimationClip;
@@ -107,11 +127,11 @@ function removeRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
   return c;
 }
 
-function buildClips(raw: THREE.AnimationClip[]) {
+function buildClips(raw: THREE.AnimationClip[], plan: Record<string, ClipSpec> = CLIP_PLAN) {
   const cleaned = raw.map(removeRootMotion);
   const built: Record<string, BuiltClip> = {};
   const unmapped: string[] = [];
-  for (const [key, spec] of Object.entries(CLIP_PLAN)) {
+  for (const [key, spec] of Object.entries(plan)) {
     let src: THREE.AnimationClip | undefined;
     for (const m of spec.match) {
       src = cleaned.find((c) => c.name.toLowerCase().replace(/\.\d+$/, '') === m) || cleaned.find((c) => c.name.toLowerCase().includes(m));
@@ -197,6 +217,34 @@ function buildCleaver(glow: THREE.Color) {
   return { group, base, tip, fullerMat, steel };
 }
 
+// Short throwing knife held by 暗器 (blade along +Y)
+function buildKnife(glow: THREE.Color) {
+  const group = new THREE.Group();
+  const blade = new THREE.Shape();
+  blade.moveTo(-0.018, 0);
+  blade.lineTo(0.018, 0);
+  blade.lineTo(0.012, 0.2);
+  blade.lineTo(0, 0.26);
+  blade.lineTo(-0.012, 0.2);
+  blade.closePath();
+  const geo = new THREE.ExtrudeGeometry(blade, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.004, bevelSegments: 2 });
+  geo.translate(0, 0, -0.003);
+  const steel = new THREE.MeshStandardMaterial({ color: '#e3e9ef', metalness: 0.95, roughness: 0.2 });
+  const b = new THREE.Mesh(geo, steel);
+  b.position.y = 0.06;
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.09, 8), new THREE.MeshStandardMaterial({ color: '#1f4d48', roughness: 0.7 }));
+  grip.position.y = 0.01;
+  const tassel = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), new THREE.MeshBasicMaterial({ color: glow }));
+  tassel.position.y = -0.045;
+  const base = new THREE.Object3D();
+  base.position.y = 0.08;
+  const tip = new THREE.Object3D();
+  tip.position.y = 0.33;
+  group.add(b, grip, tassel, base, tip);
+  const fullerMat = new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0 });
+  return { group, base, tip, fullerMat, steel };
+}
+
 // ------------------------------------------------------------------
 // Asset cache
 // ------------------------------------------------------------------
@@ -208,41 +256,66 @@ interface LoadedAsset {
   all: string[];
   scale: number;
   floor: number;
+  url: string;
+  fallback?: boolean;
 }
-let cachedAsset: LoadedAsset | null = null;
-let loadPromise: Promise<LoadedAsset> | null = null;
+const assetCache = new Map<string, LoadedAsset>();
+const assetPromises = new Map<string, Promise<LoadedAsset>>();
 const progressListeners = new Set<(p: ModelLoadProgress) => void>();
 
-function loadAsset(): Promise<LoadedAsset> {
-  if (loadPromise) return loadPromise;
-  loadPromise = new Promise((resolve, reject) => {
+function loadGLB(url: string): Promise<LoadedAsset> {
+  const hit = assetPromises.get(url);
+  if (hit) return hit;
+  const p = new Promise<LoadedAsset>((resolve, reject) => {
     new GLTFLoader().load(
-      BERSERKER_MODEL_URL,
+      url,
       (gltf) => {
         gltf.scene.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(gltf.scene);
         const h = Math.max(0.1, box.max.y - box.min.y);
         const scale = TARGET_HEIGHT / h;
-        const { built, unmapped, all } = buildClips(gltf.animations || []);
-        cachedAsset = { scene: gltf.scene, raw: gltf.animations, built, unmapped, all, scale, floor: -box.min.y * scale };
-        resolve(cachedAsset);
+        const a: LoadedAsset = { scene: gltf.scene, raw: gltf.animations || [], built: {}, unmapped: [], all: (gltf.animations || []).map((c) => c.name), scale, floor: -box.min.y * scale, url };
+        assetCache.set(url, a);
+        resolve(a);
       },
       (xhr) => {
         const pct = xhr.total > 0 ? Math.round((xhr.loaded / xhr.total) * 100) : 50;
         progressListeners.forEach((l) => l({ loaded: xhr.loaded, total: xhr.total, progress: pct, isLoading: true, error: null }));
       },
-      (err) => reject(err instanceof Error ? err : new Error('模型加载失败，请检查网络连接'))
+      (err) => {
+        assetPromises.delete(url);
+        reject(err instanceof Error ? err : new Error('模型加载失败，请检查网络连接'));
+      }
     );
   });
-  return loadPromise;
+  assetPromises.set(url, p);
+  return p;
+}
+
+/** Load the class model; if it is missing (not uploaded yet), fall back to the berserker model */
+function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallback: boolean }> {
+  const url = MODEL_URLS[classId] || BERSERKER_MODEL_URL;
+  return loadGLB(url)
+    .then((a) => ({ ...a, fallback: false }))
+    .catch((e) => {
+      if (url === BERSERKER_MODEL_URL) throw e;
+      return loadGLB(BERSERKER_MODEL_URL).then((a) => ({ ...a, fallback: true }));
+    });
 }
 
 const normBone = (n: string) => n.toLowerCase().replace(/^mixamorig[:_]?/, '').replace(/[^a-z0-9]/g, '');
 
 const ONE_SHOT = new Set<string>(['attack_1', 'attack_2', 'attack_3', 'skill_1', 'skill_4', 'dodge', 'hit_a', 'hit_b', 'launched', 'knockdown', 'ult_air', 'ult_slam', 'jump']);
 
-export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxes, onAnimationDebug, onLoadProgress }: CharacterRigProps) {
-  const [asset, setAsset] = useState<LoadedAsset | null>(cachedAsset);
+export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, socketsRef, showBoneAxes, onAnimationDebug, onLoadProgress }: CharacterRigProps) {
+  const [rawAsset, setRawAsset] = useState<LoadedAsset | null>(null);
+  // clips are built per class (each class maps its own slices)
+  const asset = useMemo(() => {
+    if (!rawAsset) return null;
+    const { built, unmapped } = buildClips(rawAsset.raw, planFor(classId));
+    return { ...rawAsset, built, unmapped } as LoadedAsset;
+  }, [rawAsset, classId]);
+  const restQuats = useRef<{ neck?: THREE.Quaternion; head?: THREE.Quaternion; neckBone?: THREE.Bone; headBone?: THREE.Bone }>({});
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const poseRootRef = useRef<THREE.Group>(null); // procedural whole-body motion (never touches bones)
@@ -258,27 +331,22 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
   const leanRef = useRef(new THREE.Vector2());
   const weaponScaledRef = useRef(false);
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
-  const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver>; left?: ReturnType<typeof buildCleaver> }>({});
+  const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife>; left?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife> }>({});
 
   useEffect(() => {
     let alive = true;
-    if (cachedAsset) {
-      setAsset(cachedAsset);
-      onLoadProgress?.({ loaded: 100, total: 100, progress: 100, isLoading: false, error: null });
-      return;
-    }
     const listener = (p: ModelLoadProgress) => onLoadProgress?.(p);
     progressListeners.add(listener);
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
-    loadAsset()
+    loadAssetFor(classId)
       .then((a) => {
         if (!alive) return;
-        setAsset(a);
+        setRawAsset(a);
         onLoadProgress?.({ loaded: 100, total: 100, progress: 100, isLoading: false, error: null });
       })
       .catch((e) => {
         if (!alive) return;
-        const msg = e?.message || '无法装载霍岩模型 (berserker.glb)';
+        const msg = e?.message || '无法装载角色模型';
         setLoadError(msg);
         onLoadProgress?.({ loaded: 0, total: 100, progress: 0, isLoading: true, error: msg });
       });
@@ -286,7 +354,7 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
       alive = false;
       progressListeners.delete(listener);
     };
-  }, [onLoadProgress]);
+  }, [onLoadProgress, classId]);
 
   // Per-instance clone: own skeleton, own materials (original textures kept intact)
   const model = useMemo(() => {
@@ -299,8 +367,11 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
         o.receiveShadow = true;
         o.frustumCulled = false;
         const m = (o.material as THREE.MeshStandardMaterial).clone();
-        if (!isPlayer) {
-          // Training dummy only: desaturated stone tint, texture kept
+        if (asset.fallback && classId === 'Ranger') {
+          // 沈惊鸿 model not uploaded yet: borrow 霍岩's body with a jade tint
+          m.color = new THREE.Color(isPlayer ? '#9fe0d6' : '#c4b5fd');
+        } else if (!isPlayer) {
+          // opponent: desaturated stone tint, texture kept
           m.color = new THREE.Color('#9aa3ad');
         }
         m.emissive = new THREE.Color('#000000');
@@ -310,7 +381,7 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
     });
     materialsRef.current = mats;
     return cloned;
-  }, [asset, isPlayer]);
+  }, [asset, isPlayer, classId]);
 
   // Mixer, bones, weapons
   useEffect(() => {
@@ -336,9 +407,11 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
       if (o.isBone) bones[normBone(o.name)] = o;
     });
 
-    const glow = new THREE.Color(isPlayer ? '#ff3b1f' : '#7dd3fc');
-    const right = buildCleaver(glow);
-    const left = buildCleaver(glow);
+    const ranger = classId === 'Ranger';
+    const glow = new THREE.Color(ranger ? (isPlayer ? '#2dd4bf' : '#a78bfa') : isPlayer ? '#ff3b1f' : '#7dd3fc');
+    const right = ranger ? buildKnife(glow) : buildCleaver(glow);
+    const left = ranger ? buildKnife(glow) : buildCleaver(glow);
+    if (ranger) left.group.visible = false; // 暗器: one knife in the right hand, the rest fly
     // Hand-local frame (Mixamo): +Y runs along the fingers, the knuckle line is X.
     // The blade leaves the fist on the index-finger side: -X for the right hand, +X for the left.
     right.group.rotation.set(0, 0, Math.PI / 2);
@@ -349,6 +422,17 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
     if (bones.lefthand) bones.lefthand.add(left.group);
     weaponsRef.current = { right, left };
     weaponScaledRef.current = false;
+
+    // Neck / head rest pose: Tripo auto-rigs pull the face out of shape when these
+    // bones rotate a lot, so each frame the animated rotation is eased back toward rest.
+    const neckBone = bones.neck;
+    const headBone = bones.head;
+    restQuats.current = {
+      neckBone,
+      headBone,
+      neck: neckBone?.quaternion.clone(),
+      head: headBone?.quaternion.clone(),
+    };
 
     if (showBoneAxes) {
       bones.righthand?.add(new THREE.AxesHelper(0.25));
@@ -376,7 +460,7 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
       right.group.removeFromParent();
       left.group.removeFromParent();
     };
-  }, [model, asset, isPlayer, socketsRef, onAnimationDebug, showBoneAxes]);
+  }, [model, asset, isPlayer, socketsRef, onAnimationDebug, showBoneAxes, classId]);
 
   const play = (key: string, fade: number, timeScale: number) => {
     const actions = actionsRef.current;
@@ -440,6 +524,8 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
     let backward = false;
     if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
+    } else if (st === 'ultimate' && classId === 'Ranger') {
+      key = c.stateTimer < 0.45 ? 'jump' : 'r_rain';
     } else if (st === 'ultimate') {
       key = c.vel[1] > -1 && !c.isGrounded && c.stateTimer < 0.55 ? 'ult_air' : 'ult_slam';
     } else if (st === 'hitstun') {
@@ -475,6 +561,13 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
 
     mixer.update(delta);
 
+    // Face protection (暗器 model): damp neck / head rotation toward rest
+    const rq = restQuats.current;
+    if (classId === 'Ranger' && !asset.fallback) {
+      if (rq.neckBone && rq.neck) rq.neckBone.quaternion.slerp(rq.neck, 0.6);
+      if (rq.headBone && rq.head) rq.headBone.quaternion.slerp(rq.head, 0.45);
+    }
+
     // ---------- procedural whole-body layer (applied to a parent group, so bones never twist) ----------
     // Strafe: turn the lower body into the move direction while the controller keeps facing the camera.
     let targetYaw = 0;
@@ -484,7 +577,7 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
     }
     strafeYawRef.current = THREE.MathUtils.damp(strafeYawRef.current, targetYaw, 12, delta);
 
-    if (st === 'skill_2') spinRef.current -= delta * 15;
+    if (st === 'skill_2' && classId !== 'Ranger') spinRef.current -= delta * 15;
     else spinRef.current = THREE.MathUtils.damp(spinRef.current, Math.round(spinRef.current / (Math.PI * 2)) * Math.PI * 2, 14, delta);
 
     // Ultimate: forward somersault on the way up
@@ -493,7 +586,8 @@ export function CharacterRig3D({ combatantRef, isPlayer, socketsRef, showBoneAxe
 
     let leanX = 0;
     let leanZ = 0;
-    if (st === 'skill_3') leanX = 0.32;
+    if (st === 'skill_3' && classId !== 'Ranger') leanX = 0.32;
+    else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
     else if (st === 'launched') leanX = -0.45;
     else if (st === 'hitstun') leanX = -0.12;
     else if (key === 'run' && !backward) leanX = 0.08;

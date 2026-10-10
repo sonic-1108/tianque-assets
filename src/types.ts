@@ -5,7 +5,8 @@ export type CharacterClassId =
   | 'Sniper'
   | 'BuddhistMage'
   | 'LightHealer'
-  | 'HeavyHealer';
+  | 'HeavyHealer'
+  | 'Ranger';
 
 export type CharacterActionState =
   | 'idle'
@@ -175,6 +176,15 @@ export interface CombatantState {
   airSlash?: boolean; // left click in the air: 下劈
   dodgeSlash?: boolean; // left click out of a dodge: 回身斩
   dodgeEndAt?: number;
+  /** 暗器 (Ranger) runtime */
+  rootTimer?: number; // pinned in place by 定身镖
+  poisonStacks?: number;
+  poisonTimer?: number;
+  poisonTick?: number;
+  poisonBuff?: number; // 淬毒 active seconds left
+  dartHits?: number; // passive counter: every 5 hits -> piercing dart
+  pierceNext?: boolean;
+  volleyShots?: number; // darts already thrown in the current action
   buffs: CombatantBuff[];
   totalDamageDealt: number;
   totalHealingDone: number;
