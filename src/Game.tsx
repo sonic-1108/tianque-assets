@@ -91,6 +91,7 @@ interface Projectile {
   poison: boolean;
   root: number;
   noStop: boolean;
+  stagger: boolean;
   spent: boolean;
   traveled: number;
   back: boolean;
@@ -641,7 +642,7 @@ export function Game({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch },
         ev: net.events.splice(0),
       });
     }
@@ -1164,7 +1165,7 @@ export function Game({
       att: CombatantState,
       def: CombatantState,
       base: number,
-      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean }
+      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean; flinch?: boolean }
     ) {
       if (def.hp <= 0) return;
       const o = { ...oIn };
@@ -1265,7 +1266,13 @@ export function Game({
       if (rage) att.hp = Math.min(att.maxHp, att.hp + Math.round(dmg * 0.15));
 
       const protectedNow = (def.protectTimer ?? 0) > 0;
-      const armored = protectedNow || (def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried');
+      // light darts only make you flinch: they chip HP but never interrupt, so a ranged fighter can't stun-lock
+      const flinchOnly = !!o.flinch;
+      const armored = protectedNow || flinchOnly || (def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried');
+      if (flinchOnly) {
+        def.vel[0] += hitDir.x * 1.2;
+        def.vel[2] += hitDir.z * 1.2;
+      }
       const stayBuried = def.actionState === 'buried' && o.state !== 'buried';
       if (!armored && !stayBuried) {
         const knock = o.knock ?? 4;
@@ -1515,7 +1522,7 @@ export function Game({
       from: THREE.Vector3,
       dir: THREE.Vector3,
       speed: number,
-      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean; target?: THREE.Vector3 }
+      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean; target?: THREE.Vector3; stagger?: boolean }
     ) {
       let pierce = false;
       let dmg = o.dmg;
@@ -1549,6 +1556,7 @@ export function Game({
         poison: (c.poisonBuff ?? 0) > 0 && c.actionState.startsWith('attack_'),
         root: o.root ?? 0,
         noStop: !!o.noStop,
+        stagger: !!o.stagger,
         spent: false,
         traveled: 0,
         back: false,
@@ -1594,7 +1602,7 @@ export function Game({
       if (st === 'attack_3' && !c.backSlash && ready) {
         c.volleyShots = 1;
         const from = handPos(c, fwd);
-        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 36, { dmg: 42, knock: 3, dur: 0.3 });
+        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 36, { dmg: 42, knock: 3, dur: 0.3, stagger: true });
         gameAudio.playThrowFan();
       }
       if (st === 'attack_3' && c.backSlash && t >= 0.28 && !c.hasHitCurrentMove) {
@@ -1787,7 +1795,7 @@ export function Game({
             const before = def.hp;
             const dodged = def.dodgeIframeTimer > 0;
             const guarding = def.isBlocking;
-            applyHit(p.slot, owner, def, p.dmg, { knock: p.knock, dur: p.dur, noMark: true, noStop: p.noStop, unblockable: p.pierce, crit: p.pierce, heavy: p.kind !== 'dart', ranged: true });
+            applyHit(p.slot, owner, def, p.dmg, { knock: p.knock, dur: p.dur, noMark: true, noStop: p.noStop, unblockable: p.pierce, crit: p.pierce, heavy: p.kind !== 'dart', ranged: true, flinch: p.kind === 'dart' && !p.stagger && !p.pierce });
             if (def.hp < before) {
               if (p.kind === 'dart' && !p.noStop) {
                 owner.dartHits = (owner.dartHits ?? 0) + 1;
@@ -2341,6 +2349,21 @@ export function Game({
     function updateSea() {
       const w = waveRef.current;
       const lt = lightningRef.current;
+      // the ship rolls on the swell (harder while the rogue wave rears up) and fighters slide with it
+      const rise = Math.min(1, mapRuntime.waveRise);
+      mapRuntime.shipRoll = Math.sin(gt * 0.55) * 0.05 + Math.sin(gt * 0.23 + 1) * 0.02 + (w.side || mapRuntime.waveSide) * rise * 0.07;
+      mapRuntime.shipPitch = Math.sin(gt * 0.41 + 0.5) * 0.018;
+      for (const c of fighters) {
+        if (!c.isGrounded || c.hp <= 0 || c.pos[1] > 0.3) continue;
+        const k = c.isBlocking ? 0.3 : 1;
+        c.pos[0] += Math.sin(mapRuntime.shipRoll) * 7 * k * dt;
+      }
+      // spray off the bow as she ploughs into the swell
+      if (Math.random() < dt * 0.8) {
+        vB.set((Math.random() - 0.5) * 3, 0.8, -(map.rect!.hz + 3.5));
+        vfx.dustPuff(vB, 5, 0.8, 4, 1.0, '#cfe3f5');
+        vfx.sparkBurst(vB, 6, '#e0f2ff', 7, 0.08, vC.set(0, 1, 0.4), 0.6);
+      }
       if (!round.over) {
         lt.timer -= dt;
         if (lt.timer <= 0) {

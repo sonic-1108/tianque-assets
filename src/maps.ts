@@ -197,4 +197,6 @@ export const mapRuntime = {
   waveSide: 0, // -1 / +1 side the big wave comes from, 0 = none
   waveRise: 0, // 0..1 how high the incoming wave is
   lightning: 0, // 0..1 lightning flash
+  shipRoll: 0, // radians, 怒海战船 deck roll
+  shipPitch: 0,
 };

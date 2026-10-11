@@ -850,58 +850,83 @@ function Volcano({ emissive }: { emissive: THREE.Texture }) {
 // ------------------------------------------------------------------
 // 怒海战船: storm ocean, rocking warship, rain, lightning, big waves
 // ------------------------------------------------------------------
-function makeOceanMaterial() {
+function makeOceanMaterial(hx: number, hz: number) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
       uWaveSide: { value: 0 },
       uWaveRise: { value: 0 },
-      uFog: { value: new THREE.Color('#0b1622') },
+      uFog: { value: new THREE.Color('#1b2530') },
       uLightning: { value: 0 },
+      uShip: { value: new THREE.Vector2(hx + 0.8, hz + 4.5) },
     },
     vertexShader: /* glsl */ `
-      uniform float uTime; uniform float uWaveSide; uniform float uWaveRise;
-      varying float vH; varying vec3 vWorld; varying vec3 vN;
+      uniform float uTime; uniform float uWaveSide; uniform float uWaveRise; uniform vec2 uShip;
+      varying float vH; varying vec3 vWorld; varying float vCalm;
+      // sum of directional swells, sharpened at the crests
+      float swell(vec2 p, vec2 d, float k, float sp, float a){
+        float ph = dot(p, normalize(d)) * k + uTime * sp;
+        return a * (1.0 - abs(sin(ph))) * 2.0 - a;
+      }
       float waves(vec2 p){
         float h = 0.0;
-        h += sin(p.x * 0.12 + uTime * 0.9) * 0.9;
-        h += sin(p.y * 0.17 - uTime * 1.1 + p.x * 0.05) * 0.7;
-        h += sin((p.x + p.y) * 0.31 + uTime * 1.7) * 0.35;
-        h += sin((p.x - p.y) * 0.57 - uTime * 2.3) * 0.18;
-        // rogue wave ridge rising beside the ship, then crashing inward
-        float x0 = uWaveSide * (9.0 - max(0.0, uWaveRise - 1.0) * 30.0);
-        float ridge = exp(-pow(p.x - x0, 2.0) / 14.0) * exp(-pow(p.y / 30.0, 2.0));
-        h += ridge * min(uWaveRise, 1.0) * 6.5 * step(0.5, abs(uWaveSide));
+        h += swell(p, vec2(1.0, 0.35), 0.11, 0.9, 0.85);
+        h += swell(p, vec2(-0.4, 1.0), 0.16, 1.15, 0.6);
+        h += swell(p, vec2(0.8, -0.6), 0.29, 1.6, 0.32);
+        h += sin(dot(p, vec2(0.45, 0.31)) + uTime * 2.2) * 0.14;
+        h += sin(dot(p, vec2(-0.62, 0.53)) - uTime * 2.7) * 0.09;
+        // calm water in the ship's lee so swells never come up through the hull
+        vec2 q = abs(p) - uShip;
+        float dShip = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+        vCalm = 1.0 - smoothstep(0.0, 7.0, dShip);
+        h *= mix(1.0, 0.18, vCalm);
+        // rogue wave: a wall of water rearing up beside the ship (the crash itself is a separate sheet)
+        float side = step(0.5, abs(uWaveSide));
+        float x0 = uWaveSide * (uShip.x + 4.5);
+        float ridge = exp(-pow(p.x - x0, 2.0) / 10.0) * exp(-pow(p.y / 26.0, 2.0));
+        h += ridge * min(uWaveRise, 1.0) * 5.0 * side;
         return h;
       }
       void main(){
         vec4 w = modelMatrix * vec4(position, 1.0);
         float h = waves(w.xz);
-        float e = 0.6;
-        float hx = waves(w.xz + vec2(e, 0.0)) - h;
-        float hz = waves(w.xz + vec2(0.0, e)) - h;
-        vN = normalize(vec3(-hx / e, 1.0, -hz / e));
         w.y += h;
         vH = h; vWorld = w.xyz;
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uFog; uniform float uLightning; uniform float uTime;
-      varying float vH; varying vec3 vWorld; varying vec3 vN;
+      varying float vH; varying vec3 vWorld; varying float vCalm;
+      ${NOISE}
       void main(){
-        vec3 deep = vec3(0.004, 0.018, 0.03);
-        vec3 shallow = vec3(0.015, 0.07, 0.09);
+        // normal from screen-space derivatives of the displaced surface, plus fine ripples
+        vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+        if (n.y < 0.0) n = -n;
+        vec2 rp = vWorld.xz * 0.9 + vec2(uTime * 0.6, uTime * 0.4);
+        float r1 = fbm(rp), r2 = fbm(rp + vec2(3.1, 1.7));
+        n = normalize(n + vec3(r1 - 0.5, 0.0, r2 - 0.5) * 0.35);
         vec3 V = normalize(cameraPosition - vWorld);
-        float fres = pow(1.0 - max(dot(vN, V), 0.0), 3.0);
-        vec3 col = mix(deep, shallow, smoothstep(-1.0, 2.0, vH));
-        col = mix(col, vec3(0.12, 0.17, 0.22) + uLightning * 0.8, fres * 0.6);
+        float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+        vec3 deep = vec3(0.006, 0.022, 0.035);
+        vec3 body = mix(deep, vec3(0.02, 0.085, 0.1), smoothstep(-0.8, 1.2, vH));
+        // reflected storm sky, brighter toward the horizon
+        vec3 R = reflect(-V, n);
+        vec3 sky = mix(vec3(0.09, 0.12, 0.16), vec3(0.025, 0.035, 0.05), clamp(R.y * 1.6, 0.0, 1.0));
+        sky += uLightning * vec3(0.7, 0.75, 0.9) * (0.5 + 0.5 * R.y);
+        vec3 col = mix(body, sky, clamp(fres, 0.0, 1.0));
+        // glints from the lightning
         vec3 L = normalize(vec3(0.3, 0.8, -0.5));
-        float spec = pow(max(dot(reflect(-L, vN), V), 0.0), 60.0);
-        col += spec * (0.25 + uLightning * 2.0);
-        float foam = smoothstep(1.3, 2.6, vH) + smoothstep(3.0, 5.0, vH);
-        col = mix(col, vec3(0.55, 0.62, 0.66), clamp(foam, 0.0, 1.0) * 0.7);
+        col += pow(max(dot(R, L), 0.0), 80.0) * (0.15 + uLightning * 2.5);
+        // whitecaps on the crests, churn around the hull, foam on the rogue wave
+        float cap = smoothstep(0.75, 1.2, vH + (fbm(vWorld.xz * 0.35 + uTime * 0.2) - 0.5) * 0.9) * (1.0 - smoothstep(1.4, 2.2, vH));
+        float churn = smoothstep(0.55, 1.0, vCalm) * smoothstep(0.35, 0.7, fbm(vWorld.xz * 1.3 + vec2(0.0, uTime * 1.2)));
+        float rogue = smoothstep(3.9, 4.8, vH); // only the curling lip of the rogue wave breaks white
+        // light glows green through the thin, tall water of the rearing wave
+        col = mix(col, vec3(0.02, 0.13, 0.15) + uLightning * 0.2, smoothstep(1.2, 4.2, vH) * 0.65);
+        float foam = clamp(cap * 0.7 + churn * 0.8 + rogue, 0.0, 1.0);
+        col = mix(col, vec3(0.62, 0.68, 0.72) + uLightning * 0.4, foam * 0.75);
         float d = length(cameraPosition - vWorld);
-        col = mix(col, uFog, smoothstep(25.0, 140.0, d));
+        col = mix(col, uFog, smoothstep(30.0, 240.0, d));
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
@@ -1081,7 +1106,18 @@ function Lantern({ position }: { position: [number, number, number] }) {
 function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
-  const ocean = useMemo(() => makeOceanMaterial(), []);
+  const ocean = useMemo(() => makeOceanMaterial(hx, hz), [hx, hz]);
+  const worldRef = useRef<THREE.Group>(null);
+  const sheetRef = useRef<THREE.Mesh>(null);
+  const sheetMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#b9d6e6', roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, emissive: new THREE.Color('#1c3442') }), []);
+  const deckMat = useRef<THREE.MeshStandardMaterial>(null);
+  // a curled half-pipe of water lying along the ship's length
+  const sheetGeo = useMemo(() => {
+    const g = new THREE.CylinderGeometry(2.2, 2.2, hz * 2 + 2, 24, 1, true, 0, Math.PI * 0.9);
+    g.rotateX(Math.PI / 2);
+    return g;
+  }, [hz]);
+  const crash = useRef({ t: -1, side: 1, last: 0, wet: 0 });
   const planks = useMemo(() => {
     const t = plankTexture();
     t.repeat.set(1, 2);
@@ -1095,16 +1131,48 @@ function SeaMap() {
   }, []);
   const shipRef = useRef<THREE.Group>(null);
   const boltRef = useRef<THREE.DirectionalLight>(null);
-  useFrame((st) => {
+  useFrame((st, dtf) => {
     const t = st.clock.elapsedTime;
     ocean.uniforms.uTime.value = t;
     ocean.uniforms.uWaveSide.value = mapRuntime.waveSide;
     ocean.uniforms.uWaveRise.value = mapRuntime.waveRise;
     ocean.uniforms.uLightning.value = mapRuntime.lightning;
     if (st.scene.background instanceof THREE.Color) ocean.uniforms.uFog.value.copy(st.scene.background);
-    if (shipRef.current) {
-      shipRef.current.rotation.z = Math.sin(t * 0.7) * 0.012 + mapRuntime.waveSide * Math.min(1, mapRuntime.waveRise) * 0.035;
-      shipRef.current.rotation.x = Math.sin(t * 0.45 + 1) * 0.008;
+    // The deck is the fighters' frame of reference, so the world rolls around the ship instead:
+    // the horizon, sea and sky tilt, and the ship only bobs.
+    if (worldRef.current) {
+      worldRef.current.rotation.z = -mapRuntime.shipRoll;
+      worldRef.current.rotation.x = -mapRuntime.shipPitch;
+      worldRef.current.position.y = -Math.sin(t * 0.8) * 0.25;
+    }
+    if (shipRef.current) shipRef.current.position.y = Math.sin(t * 0.8) * 0.04;
+    // rogue wave crash: a sheet of water sweeps across the deck, then the planks stay wet for a while
+    const c = crash.current;
+    if (mapRuntime.waveRise > 1.05 && c.last <= 1.05) {
+      c.t = 0;
+      c.side = mapRuntime.waveSide || 1;
+      c.wet = 1;
+    }
+    c.last = mapRuntime.waveRise;
+    const sheet = sheetRef.current;
+    if (sheet) {
+      if (c.t >= 0 && c.t < 1) {
+        c.t += Math.min(0.05, dtf);
+        const k = c.t;
+        sheet.visible = true;
+        sheet.position.set(c.side * (hx + 1.2 - k * (hx * 2 + 2.6)), 2.2 - k * 1.9, 0);
+        sheet.rotation.set(0, 0, c.side * (0.9 - k * 0.6));
+        sheet.scale.set(1, 1 - k * 0.55, 1);
+        sheetMat.opacity = Math.sin(Math.min(1, k * 1.4) * Math.PI) * 0.75;
+      } else {
+        sheet.visible = false;
+        c.t = -1;
+      }
+    }
+    c.wet = Math.max(0, c.wet - dtf / 5);
+    if (deckMat.current) {
+      deckMat.current.roughness = 0.55 - c.wet * 0.45;
+      deckMat.current.color.setRGB(0.6 - c.wet * 0.18, 0.54 - c.wet * 0.16, 0.48 - c.wet * 0.14);
     }
     if (boltRef.current) boltRef.current.intensity = mapRuntime.lightning * 7;
   });
@@ -1131,6 +1199,7 @@ function SeaMap() {
   }, [def.pillars, hx, hz]);
   return (
     <group>
+      <group ref={worldRef}>
       <Sky zenith="#05080d" horizon="#22303c" below="#0d151c" sunDir={[0.2, 0.3, -1]} sunColor="#2a3a4a" sunSize={0} streaks={1} streakColor="#3a4a58" />
       <CloudPuffs count={26} inner={30} outer={140} y={[22, 40]} color="#1a222b" seed={19} />
       <KarstPeaks
@@ -1152,18 +1221,22 @@ function SeaMap() {
       <DistantShip position={[70, -1, 40]} rot={2.4} />
 
       <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.6, 0]}>
-        <planeGeometry args={[420, 420, 200, 200]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.5, 0]}>
+        <planeGeometry args={[520, 520, 320, 320]} />
         <primitive object={ocean} attach="material" />
       </mesh>
+      </group>
+      {/* the crashing wave: a curled sheet of water that sweeps across the deck */}
+      <mesh ref={sheetRef} visible={false} material={sheetMat} geometry={sheetGeo} />
       <group ref={shipRef}>
         {/* deck */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
           <planeGeometry args={[hx * 2 + 1.1, hz * 2 + 1.6]} />
-          <meshStandardMaterial map={planks} roughness={0.55} metalness={0.05} color="#9a8a7a" />
+          <meshStandardMaterial ref={deckMat} map={planks} roughness={0.55} metalness={0.05} color="#9a8a7a" />
         </mesh>
         {/* hull with planking and a gilded wale */}
-        <mesh position={[0, -1.45, 0]} castShadow receiveShadow>
+        {/* hull top sits just under the deck so the two never z-fight */}
+        <mesh position={[0, -1.5, 0]} castShadow receiveShadow>
           <boxGeometry args={[hx * 2 + 1.2, 2.9, hz * 2 + 1.6]} />
           <meshStandardMaterial map={hullTex} color="#6a5040" roughness={0.85} />
         </mesh>
