@@ -2127,15 +2127,15 @@ export function Game({
 
       if (map.rect) {
         const { hx, hz } = map.rect;
-        if (Math.abs(c.pos[0]) > hx) {
+        if (Math.abs(c.pos[0]) > hx - 0.3) {
           const sx = Math.sign(c.pos[0]);
-          c.pos[0] = sx * hx;
+          c.pos[0] = sx * (hx - 0.3);
           wallSplat(i, c, speed, sx * (hx + 0.3), c.pos[2]);
           c.vel[0] = 0;
         }
-        if (Math.abs(c.pos[2]) > hz) {
+        if (Math.abs(c.pos[2]) > hz - 0.3) {
           const sz = Math.sign(c.pos[2]);
-          c.pos[2] = sz * hz;
+          c.pos[2] = sz * (hz - 0.3);
           wallSplat(i, c, speed, c.pos[0], sz * (hz + 0.3));
           c.vel[2] = 0;
         }
@@ -2350,9 +2350,7 @@ export function Game({
       const w = waveRef.current;
       const lt = lightningRef.current;
       // the ship rolls on the swell (harder while the rogue wave rears up) and fighters slide with it
-      const rise = Math.min(1, mapRuntime.waveRise);
-      mapRuntime.shipRoll = Math.sin(gt * 0.55) * 0.05 + Math.sin(gt * 0.23 + 1) * 0.02 + (w.side || mapRuntime.waveSide) * rise * 0.07;
-      mapRuntime.shipPitch = Math.sin(gt * 0.41 + 0.5) * 0.018;
+      // (roll and pitch come from the swell under the hull, computed by the sea itself)
       for (const c of fighters) {
         if (!c.isGrounded || c.hp <= 0 || c.pos[1] > 0.3) continue;
         const k = c.isBlocking ? 0.3 : 1;

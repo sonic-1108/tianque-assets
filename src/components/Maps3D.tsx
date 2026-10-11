@@ -850,6 +850,30 @@ function Volcano({ emissive }: { emissive: THREE.Texture }) {
 // ------------------------------------------------------------------
 // 怒海战船: storm ocean, rocking warship, rain, lightning, big waves
 // ------------------------------------------------------------------
+/**
+ * Long ocean swells. The ship rides these: the same numbers drive the shader and the CPU-side
+ * heave / roll / pitch, so the hull always sits in the water instead of the water passing through it.
+ * [dirX, dirZ, wavelength m, speed rad/s, amplitude m]
+ */
+const SWELLS: [number, number, number, number, number][] = [
+  [1.0, 0.25, 95, 0.55, 1.9],
+  [0.45, 1.0, 70, 0.7, 1.1],
+];
+function swellHeight(x: number, z: number, t: number) {
+  let h = 0;
+  for (const [dx, dz, L, sp, a] of SWELLS) {
+    const n = Math.hypot(dx, dz);
+    h += Math.sin(((x * dx + z * dz) / n) * ((Math.PI * 2) / L) + t * sp) * a;
+  }
+  return h;
+}
+const SWELL_GLSL = `
+  float bigSwell(vec2 p){
+    float h = 0.0;
+    ${SWELLS.map(([dx, dz, L, sp, a]) => `h += sin(dot(p, normalize(vec2(${dx.toFixed(3)}, ${dz.toFixed(3)}))) * ${((Math.PI * 2) / L).toFixed(5)} + uTime * ${sp.toFixed(3)}) * ${a.toFixed(3)};`).join('\n    ')}
+    return h;
+  }`;
+
 function makeOceanMaterial(hx: number, hz: number) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -862,24 +886,27 @@ function makeOceanMaterial(hx: number, hz: number) {
     },
     vertexShader: /* glsl */ `
       uniform float uTime; uniform float uWaveSide; uniform float uWaveRise; uniform vec2 uShip;
-      varying float vH; varying vec3 vWorld; varying float vCalm;
+      varying float vH; varying vec3 vWorld; varying float vCalm; varying vec3 vN; varying float vChop;
       // sum of directional swells, sharpened at the crests
       float swell(vec2 p, vec2 d, float k, float sp, float a){
         float ph = dot(p, normalize(d)) * k + uTime * sp;
         return a * (1.0 - abs(sin(ph))) * 2.0 - a;
       }
+      ${SWELL_GLSL}
       float waves(vec2 p){
-        float h = 0.0;
-        h += swell(p, vec2(1.0, 0.35), 0.11, 0.9, 0.85);
-        h += swell(p, vec2(-0.4, 1.0), 0.16, 1.15, 0.6);
-        h += swell(p, vec2(0.8, -0.6), 0.29, 1.6, 0.32);
-        h += sin(dot(p, vec2(0.45, 0.31)) + uTime * 2.2) * 0.14;
-        h += sin(dot(p, vec2(-0.62, 0.53)) - uTime * 2.7) * 0.09;
-        // calm water in the ship's lee so swells never come up through the hull
+        // wind waves and chop on top of the long swell, sharpened at the crests
+        float c = 0.0;
+        c += swell(p, vec2(1.0, 0.35), 0.21, 1.3, 0.55);
+        c += swell(p, vec2(-0.4, 1.0), 0.29, 1.6, 0.38);
+        c += swell(p, vec2(0.8, -0.6), 0.47, 2.1, 0.22);
+        c += sin(dot(p, vec2(0.85, 0.61)) + uTime * 2.9) * 0.1;
+        c += sin(dot(p, vec2(-1.12, 0.93)) - uTime * 3.3) * 0.07;
+        // the chop calms right beside the hull so it never laps over the deck; the swell does not
         vec2 q = abs(p) - uShip;
         float dShip = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-        vCalm = 1.0 - smoothstep(0.0, 7.0, dShip);
-        h *= mix(1.0, 0.18, vCalm);
+        vCalm = 1.0 - smoothstep(0.0, 6.0, dShip);
+        vChop = c * mix(1.0, 0.2, vCalm);
+        float h = bigSwell(p) + vChop;
         // rogue wave: a wall of water rearing up beside the ship (the crash itself is a separate sheet)
         float side = step(0.5, abs(uWaveSide));
         float x0 = uWaveSide * (uShip.x + 4.5);
@@ -888,27 +915,34 @@ function makeOceanMaterial(hx: number, hz: number) {
         return h;
       }
       void main(){
-        vec4 w = modelMatrix * vec4(position, 1.0);
-        float h = waves(w.xz);
-        w.y += h;
+        // waves are computed in the sea's own frame (the sea group heaves and rolls around the ship)
+        vec2 p = vec2(position.x, -position.y);
+        float h = waves(p);
+        // smooth normal from finite differences (in the sea frame), then into world space
+        float e = 0.5;
+        float hx = waves(p + vec2(e, 0.0)) - h;
+        float hz = waves(p + vec2(0.0, e)) - h;
+        vec3 nLocal = normalize(vec3(-hx / e, 1.0, -hz / e));
+        vN = normalize(mat3(modelMatrix) * vec3(nLocal.x, nLocal.z * -1.0, nLocal.y));
+        vec3 pos = position + vec3(0.0, 0.0, h);
+        vec4 w = modelMatrix * vec4(pos, 1.0);
         vH = h; vWorld = w.xyz;
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uFog; uniform float uLightning; uniform float uTime;
-      varying float vH; varying vec3 vWorld; varying float vCalm;
+      varying float vH; varying vec3 vWorld; varying float vCalm; varying vec3 vN; varying float vChop;
       ${NOISE}
       void main(){
         // normal from screen-space derivatives of the displaced surface, plus fine ripples
-        vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
-        if (n.y < 0.0) n = -n;
+        vec3 n = normalize(vN);
         vec2 rp = vWorld.xz * 0.9 + vec2(uTime * 0.6, uTime * 0.4);
         float r1 = fbm(rp), r2 = fbm(rp + vec2(3.1, 1.7));
         n = normalize(n + vec3(r1 - 0.5, 0.0, r2 - 0.5) * 0.35);
         vec3 V = normalize(cameraPosition - vWorld);
         float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
         vec3 deep = vec3(0.006, 0.022, 0.035);
-        vec3 body = mix(deep, vec3(0.02, 0.085, 0.1), smoothstep(-0.8, 1.2, vH));
+        vec3 body = mix(deep, vec3(0.02, 0.085, 0.1), smoothstep(-2.5, 2.8, vH));
         // reflected storm sky, brighter toward the horizon
         vec3 R = reflect(-V, n);
         vec3 sky = mix(vec3(0.09, 0.12, 0.16), vec3(0.025, 0.035, 0.05), clamp(R.y * 1.6, 0.0, 1.0));
@@ -918,11 +952,12 @@ function makeOceanMaterial(hx: number, hz: number) {
         vec3 L = normalize(vec3(0.3, 0.8, -0.5));
         col += pow(max(dot(R, L), 0.0), 80.0) * (0.15 + uLightning * 2.5);
         // whitecaps on the crests, churn around the hull, foam on the rogue wave
-        float cap = smoothstep(0.75, 1.2, vH + (fbm(vWorld.xz * 0.35 + uTime * 0.2) - 0.5) * 0.9) * (1.0 - smoothstep(1.4, 2.2, vH));
-        float churn = smoothstep(0.55, 1.0, vCalm) * smoothstep(0.35, 0.7, fbm(vWorld.xz * 1.3 + vec2(0.0, uTime * 1.2)));
-        float rogue = smoothstep(3.9, 4.8, vH); // only the curling lip of the rogue wave breaks white
+        // whitecaps where the chop peaks, more of them on top of a swell crest
+        float cap = smoothstep(0.75, 1.15, vChop + max(vH - vChop, 0.0) * 0.12 + (fbm(vWorld.xz * 0.4 + uTime * 0.2) - 0.5) * 0.6);
+        float churn = smoothstep(0.75, 1.0, vCalm) * smoothstep(0.5, 0.8, fbm(vWorld.xz * 1.3 + vec2(0.0, uTime * 1.2))) * 0.6;
+        float rogue = smoothstep(5.6, 6.6, vH); // only the curling lip of the rogue wave breaks white
         // light glows green through the thin, tall water of the rearing wave
-        col = mix(col, vec3(0.02, 0.13, 0.15) + uLightning * 0.2, smoothstep(1.2, 4.2, vH) * 0.65);
+        col = mix(col, vec3(0.02, 0.13, 0.15) + uLightning * 0.2, smoothstep(2.6, 5.8, vH) * 0.55);
         float foam = clamp(cap * 0.7 + churn * 0.8 + rogue, 0.0, 1.0);
         col = mix(col, vec3(0.62, 0.68, 0.72) + uLightning * 0.4, foam * 0.75);
         float d = length(cameraPosition - vWorld);
@@ -1140,12 +1175,18 @@ function SeaMap() {
     if (st.scene.background instanceof THREE.Color) ocean.uniforms.uFog.value.copy(st.scene.background);
     // The deck is the fighters' frame of reference, so the world rolls around the ship instead:
     // the horizon, sea and sky tilt, and the ship only bobs.
+    // sample the swell under the hull: centre for heave, the beams for roll, bow/stern for pitch
+    const h0 = swellHeight(0, 0, t);
+    const roll = Math.atan2(swellHeight(hx + 0.6, 0, t) - swellHeight(-hx - 0.6, 0, t), hx * 2 + 1.2);
+    const pitch = Math.atan2(swellHeight(0, -hz, t) - swellHeight(0, hz, t), hz * 2);
+    const rogue = mapRuntime.waveSide * Math.min(1, mapRuntime.waveRise) * 0.08;
+    mapRuntime.shipRoll = roll * 0.8 + rogue;
+    mapRuntime.shipPitch = pitch * 0.8;
     if (worldRef.current) {
-      worldRef.current.rotation.z = -mapRuntime.shipRoll;
-      worldRef.current.rotation.x = -mapRuntime.shipPitch;
-      worldRef.current.position.y = -Math.sin(t * 0.8) * 0.25;
+      // the ship is our frame of reference: tilt and lift the whole world the other way
+      worldRef.current.rotation.set(-mapRuntime.shipPitch, 0, -mapRuntime.shipRoll);
+      worldRef.current.position.y = -h0 * 0.85;
     }
-    if (shipRef.current) shipRef.current.position.y = Math.sin(t * 0.8) * 0.04;
     // rogue wave crash: a sheet of water sweeps across the deck, then the planks stay wet for a while
     const c = crash.current;
     if (mapRuntime.waveRise > 1.05 && c.last <= 1.05) {
