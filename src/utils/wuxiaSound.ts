@@ -13,8 +13,6 @@ interface Bus {
   now: number;
 }
 
-const PENTA = [0, 3, 5, 7, 10]; // D minor pentatonic: D F G A C
-const D3 = 146.83;
 
 export class WuxiaSound {
   ctx: AudioContext | null = null;
@@ -29,7 +27,6 @@ export class WuxiaSound {
   private musicTimer: number | null = null;
   private musicNext = 0;
   private musicStep = 0;
-  private musicPhrase: number[] = [];
   private drone: { stop: () => void } | null = null;
   private pluckCache = new Map<string, AudioBuffer>();
   musicOn = false;
@@ -524,10 +521,36 @@ export class WuxiaSound {
   }
 
   // ------------------------------------------------------------------
-  // generative score: guzheng plucks over a drone, taiko on the downbeats
+  // Generative score.
+  // An arranger that cycles through sections (引子 intro, 起 calm, 承 build, 转 battle, 合 finale, 散 breakdown),
+  // each eight bars long, with a chord progression, a composed-on-the-fly melody and several
+  // traditional voices: 古筝 guzheng, 笛子 dizi, 琵琶 pipa tremolo, 二胡 erhu, low bass, 大鼓 taiko,
+  // 小鼓, 木鱼 woodblock, 钹 cymbal swells and a gong at the climax. Each map has its own mode and tempo,
+  // and the arrangement leans toward the battle sections when a fight gets close.
   // ------------------------------------------------------------------
-  private pluckBuffer(freq: number) {
-    const key = freq.toFixed(1);
+  private theme: MusicTheme = THEMES.temple;
+  private pendingTheme: MusicTheme | null = null;
+  private intensity = 0.3;
+  private intensityTarget = 0.3;
+  private secIdx = 0;
+  private sec: SectionName = 'intro';
+  private prog: number[] = [];
+  private bar: { lead: NoteEv[]; zheng: number[] } = { lead: [], zheng: [] };
+  private leadDeg = 7;
+  private droneOsc: OscillatorNode[] = [];
+
+  setMusicTheme(id: AmbienceId) {
+    const t = THEMES[id === 'none' ? 'temple' : id] ?? THEMES.temple;
+    if (t === this.theme) return;
+    if (this.musicOn) this.pendingTheme = t;
+    else this.theme = t;
+  }
+  setMusicIntensity(x: number) {
+    this.intensityTarget = Math.max(0, Math.min(1, x));
+  }
+
+  private pluckBuffer(freq: number, bright = 0.5) {
+    const key = freq.toFixed(1) + '|' + bright;
     const hit = this.pluckCache.get(key);
     if (hit) return hit;
     const ctx = this.ctx!;
@@ -535,10 +558,15 @@ export class WuxiaSound {
     const len = Math.floor(sr * 2.4);
     const buf = ctx.createBuffer(1, len, sr);
     const d = buf.getChannelData(0);
-    // Karplus-Strong plucked string
+    // Karplus-Strong plucked string; `bright` shapes the excitation (pipa is brighter than zheng)
     const N = Math.max(2, Math.round(sr / freq));
     const ring = new Float32Array(N);
-    for (let i = 0; i < N; i++) ring[i] = Math.random() * 2 - 1;
+    let prev = 0;
+    for (let i = 0; i < N; i++) {
+      const w = Math.random() * 2 - 1;
+      prev = prev * (1 - bright) + w * bright;
+      ring[i] = prev;
+    }
     let idx = 0;
     for (let i = 0; i < len; i++) {
       const nxt = (idx + 1) % N;
@@ -551,25 +579,135 @@ export class WuxiaSound {
     return buf;
   }
 
-  private note(deg: number, oct: number) {
-    const o = Math.floor(deg / 5);
-    const s = PENTA[((deg % 5) + 5) % 5] + 12 * (o + oct);
-    return D3 * Math.pow(2, s / 12);
+  /** Scale degree (any integer, wraps across octaves) to Hz in the current theme */
+  private hz(deg: number, octave = 0) {
+    const sc = this.theme.scale;
+    const o = Math.floor(deg / sc.length);
+    const semis = sc[((deg % sc.length) + sc.length) % sc.length] + 12 * (o + octave);
+    return this.theme.root * Math.pow(2, semis / 12);
   }
 
-  private pluck(at: number, freq: number, gain: number) {
+  private pluck(at: number, freq: number, gain: number, bright = 0.5, decay = 2.3, pan = 0) {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
-    src.buffer = this.pluckBuffer(freq);
+    src.buffer = this.pluckBuffer(freq, bright);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2400 + bright * 3000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, at);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    src.connect(lp).connect(g).connect(p).connect(this.musicIn);
+    src.start(at);
+    src.stop(at + decay + 0.05);
+  }
+
+  /** 笛子: breathy bamboo flute with delayed vibrato and a scoop into the note */
+  private dizi(at: number, freq: number, dur: number, gain: number) {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    const o2 = ctx.createOscillator();
+    o2.type = 'triangle';
+    o.frequency.setValueAtTime(freq * 0.94, at);
+    o.frequency.exponentialRampToValueAtTime(freq, at + 0.07);
+    o2.frequency.setValueAtTime(freq * 2 * 0.94, at);
+    o2.frequency.exponentialRampToValueAtTime(freq * 2, at + 0.07);
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 5.4;
+    const vd = ctx.createGain();
+    vd.gain.setValueAtTime(0, at);
+    vd.gain.linearRampToValueAtTime(freq * 0.012, at + Math.min(0.4, dur * 0.6));
+    vib.connect(vd);
+    vd.connect(o.frequency);
+    vd.connect(o2.frequency);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(gain, at + 0.06);
+    g.gain.setTargetAtTime(gain * 0.7, at + 0.1, 0.3);
+    g.gain.setTargetAtTime(0.0001, at + dur - 0.05, 0.06);
+    const g2 = ctx.createGain();
+    g2.gain.value = 0.12;
+    o.connect(g);
+    o2.connect(g2).connect(g);
+    // breath
+    const br = ctx.createBufferSource();
+    br.buffer = this.noise;
+    const bf = ctx.createBiquadFilter();
+    bf.type = 'bandpass';
+    bf.frequency.value = freq * 2;
+    bf.Q.value = 2;
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(gain * 0.5, at);
+    bg.gain.exponentialRampToValueAtTime(gain * 0.06, at + 0.12);
+    bg.gain.setTargetAtTime(0.0001, at + dur - 0.05, 0.06);
+    br.connect(bf).connect(bg).connect(g);
+    const p = ctx.createStereoPanner();
+    p.pan.value = 0.15;
+    g.connect(p).connect(this.musicIn);
+    const end = at + dur + 0.4;
+    [o, o2, vib].forEach((n) => {
+      n.start(at);
+      n.stop(end);
+    });
+    br.start(at, Math.random());
+    br.stop(end);
+  }
+
+  /** 二胡: bowed, nasal, with a slide from the previous pitch */
+  private erhu(at: number, freq: number, dur: number, gain: number, from?: number) {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(from ?? freq, at);
+    o.frequency.exponentialRampToValueAtTime(freq, at + (from ? 0.12 : 0.01));
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 6;
+    const vd = ctx.createGain();
+    vd.gain.setValueAtTime(0, at);
+    vd.gain.linearRampToValueAtTime(freq * 0.018, at + Math.min(0.5, dur * 0.7));
+    vib.connect(vd).connect(o.frequency);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1400;
+    bp.Q.value = 0.9;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 3200;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(gain, at);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + 2.3);
-    src.connect(lp).connect(g).connect(this.musicIn);
-    src.start(at);
-    src.stop(at + 2.4);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(gain, at + 0.12);
+    g.gain.setTargetAtTime(0.0001, at + dur - 0.06, 0.08);
+    const p = ctx.createStereoPanner();
+    p.pan.value = -0.2;
+    o.connect(bp).connect(lp).connect(g).connect(p).connect(this.musicIn);
+    o.start(at);
+    vib.start(at);
+    o.stop(at + dur + 0.5);
+    vib.stop(at + dur + 0.5);
+  }
+
+  /** 钹: a cymbal swelling up into the next section */
+  private cymbalSwell(at: number, dur: number, gain: number) {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 5000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(gain, at + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.05);
+    src.connect(hp).connect(g).connect(this.musicIn);
+    src.start(at, Math.random());
+    src.stop(at + dur + 0.1);
+  }
+
+  private mbus(at: number): Bus {
+    return { ctx: this.ctx!, out: this.musicIn, verb: this.verbIn, now: at };
   }
 
   startMusic() {
@@ -577,62 +715,164 @@ export class WuxiaSound {
     this.musicOn = true;
     const ctx = this.ctx;
     this.musicIn.gain.cancelScheduledValues(ctx.currentTime);
-    this.musicIn.gain.setTargetAtTime(0.22, ctx.currentTime, 0.8);
-    // drone: D2 + A2, gently breathing
-    const oscs = [73.42, 110].map((f, i) => {
+    this.musicIn.gain.setTargetAtTime(0.24, ctx.currentTime, 0.8);
+    // drone: tonic + fifth, gently breathing; retuned when the map's theme changes
+    const nodes: AudioScheduledSourceNode[] = [];
+    this.droneOsc = [0, 7].map((semi, i) => {
       const o = ctx.createOscillator();
       o.type = i ? 'triangle' : 'sine';
-      o.frequency.value = f;
+      o.frequency.value = (this.theme.root / 2) * Math.pow(2, semi / 12);
       const g = ctx.createGain();
-      g.gain.value = i ? 0.05 : 0.09;
+      g.gain.value = i ? 0.04 : 0.08;
       const lfo = ctx.createOscillator();
       lfo.frequency.value = 0.08 + i * 0.05;
       const d = ctx.createGain();
-      d.gain.value = 0.03;
+      d.gain.value = 0.025;
       lfo.connect(d).connect(g.gain);
       o.connect(g).connect(this.musicIn);
       o.start();
       lfo.start();
-      return [o, lfo];
+      nodes.push(o, lfo);
+      return o;
     });
-    this.drone = { stop: () => oscs.flat().forEach((o) => o.stop()) };
-    this.musicNext = ctx.currentTime + 0.1;
+    this.drone = { stop: () => nodes.forEach((o) => o.stop()) };
+    this.musicNext = ctx.currentTime + 0.15;
     this.musicStep = 0;
-    const beat = 60 / 84 / 2; // eighth notes at 84 bpm
+    this.secIdx = -1;
     this.musicTimer = window.setInterval(() => {
       if (!this.ctx) return;
-      while (this.musicNext < this.ctx.currentTime + 0.25) this.scheduleStep(this.musicNext, beat), (this.musicNext += beat), this.musicStep++;
-    }, 60);
+      this.intensity += (this.intensityTarget - this.intensity) * 0.05;
+      while (this.musicNext < this.ctx.currentTime + 0.3) {
+        const step = 60 / this.theme.bpm / 2;
+        this.scheduleStep(this.musicNext, step);
+        this.musicNext += step;
+        this.musicStep++;
+      }
+    }, 50);
   }
 
-  private scheduleStep(at: number, beat: number) {
-    const step = this.musicStep % 32;
-    if (step === 0) {
-      // new 4-bar phrase: a gentle random walk on the scale, with rests
-      let deg = 5 + Math.floor(Math.random() * 3);
-      this.musicPhrase = [];
-      for (let i = 0; i < 32; i++) {
-        if (Math.random() < 0.42 || i % 8 === 7) this.musicPhrase.push(-99);
-        else {
-          deg += Math.round((Math.random() - 0.5) * 3);
-          deg = Math.max(2, Math.min(12, deg));
-          this.musicPhrase.push(deg);
-        }
+  private nextSection() {
+    if (this.pendingTheme) {
+      this.theme = this.pendingTheme;
+      this.pendingTheme = null;
+      const t = this.ctx!.currentTime;
+      this.droneOsc.forEach((o, i) => o.frequency.setTargetAtTime((this.theme.root / 2) * Math.pow(2, (i ? 7 : 0) / 12), t, 0.5));
+    }
+    this.secIdx++;
+    const order: SectionName[] = ['intro', 'qi', 'cheng', 'zhuan', 'qi', 'zhuan', 'he', 'san'];
+    let s = order[this.secIdx % order.length];
+    // a tense fight skips the quiet parts
+    if (this.intensity > 0.65 && (s === 'qi' || s === 'san' || s === 'intro')) s = Math.random() < 0.5 ? 'zhuan' : 'he';
+    if (this.intensity < 0.2 && s === 'he') s = 'cheng';
+    this.sec = s;
+    this.prog = PROGS[Math.floor(Math.random() * PROGS.length)];
+  }
+
+  /** Compose one bar: a lead rhythm walking near the chord tones, and a zheng arpeggio */
+  private composeBar(chord: number) {
+    const rh = RHYTHMS[Math.floor(Math.random() * RHYTHMS.length)];
+    const lead: NoteEv[] = [];
+    let t = 0;
+    for (const len of rh) {
+      if (len < 0) {
+        t += -len;
+        continue;
       }
+      // strong beats land on chord tones (root, third, fifth of the pentatonic chord)
+      const strong = t % 4 === 0;
+      if (strong) {
+        const targets = [chord, chord + 2, chord + 3, chord + 5].map((x) => x + 5);
+        targets.sort((a, b) => Math.abs(a - this.leadDeg) - Math.abs(b - this.leadDeg));
+        this.leadDeg = targets[Math.random() < 0.7 ? 0 : 1];
+      } else this.leadDeg += Math.random() < 0.5 ? 1 : -1;
+      this.leadDeg = Math.max(3, Math.min(13, this.leadDeg));
+      lead.push({ at: t, len, deg: this.leadDeg });
+      t += len;
     }
-    const deg = this.musicPhrase[step];
-    if (deg !== undefined && deg > -50) {
-      const f = this.note(deg, 0);
-      this.pluck(at, f, 0.32);
-      // occasional grace note / octave doubling, guzheng style
-      if (Math.random() < 0.15) this.pluck(at + beat * 0.5, this.note(deg + 1, 0), 0.18);
-      if (step % 8 === 0) this.pluck(at, f / 2, 0.22);
+    const pat = ARPS[Math.floor(Math.random() * ARPS.length)];
+    this.bar = { lead, zheng: pat.map((x) => (x < -50 ? -99 : chord + x)) };
+  }
+
+  private scheduleStep(at: number, step: number) {
+    const s = this.musicStep;
+    if (s % 64 === 0) this.nextSection();
+    const barIdx = Math.floor(s / 8) % 8;
+    const pos = s % 8;
+    const chord = this.prog[barIdx] ?? 0;
+    if (pos === 0) this.composeBar(chord);
+    const sec = this.sec;
+    const b = this.mbus(at);
+    const busy = sec === 'zhuan' || sec === 'he';
+    const lastBar = barIdx === 7;
+
+    // section entrances
+    if (s % 64 === 0) {
+      if (busy) this.gongStrike(at, sec === 'he' ? 0.32 : 0.22);
+      // guzheng glissando sweeping up into the section
+      for (let k = 0; k < 7; k++) this.pluck(at + k * 0.035, this.hz(chord + k, 0), 0.12 + k * 0.01, 0.45, 1.6, -0.3);
     }
-    // taiko: downbeat of every bar, a pickup before the phrase repeats
-    const b: Bus = { ctx: this.ctx!, out: this.musicIn, verb: this.verbIn, now: at };
-    if (step % 8 === 0) this.taiko(b, at, 0.55);
-    if (step === 30) this.taiko(b, at, 0.35);
-    if (step === 31) this.taiko(b, at, 0.45);
+    if (lastBar && pos === 4 && this.secIdx >= 0) this.cymbalSwell(at, step * 4, busy ? 0.08 : 0.04);
+
+    // drone / bass: a low plucked root on the chord change
+    if (pos === 0) this.pluck(at, this.hz(chord, -2), sec === 'intro' ? 0.18 : 0.3, 0.25, 2.2);
+    if (busy && (pos === 3 || pos === 6)) this.pluck(at, this.hz(chord, -2), 0.2, 0.25, 0.8);
+    if (busy && pos === 4) this.pluck(at, this.hz(chord + 3, -2), 0.22, 0.25, 1.0);
+
+    // 古筝 arpeggios (everywhere but the battle sections, where the pipa takes over)
+    const z = this.bar.zheng[pos];
+    if (sec !== 'zhuan' && z !== undefined && z > -50) {
+      const g = sec === 'intro' ? 0.2 : 0.26;
+      this.pluck(at, this.hz(z, -1), g, 0.45, 2.3, -0.25);
+      if (sec === 'san' && Math.random() < 0.3) this.pluck(at + step * 0.5, this.hz(z + 1, -1), g * 0.6, 0.45, 2.0, -0.25);
+    }
+
+    // lead voice: dizi in 承/合/散, erhu answers in 转; pipa tremolo doubles in battle
+    for (const n of this.bar.lead) {
+      if (n.at !== pos) continue;
+      const f = this.hz(n.deg, 0);
+      const dur = n.len * step;
+      if (sec === 'cheng' || sec === 'he' || sec === 'san') this.dizi(at, f, dur * 0.95, sec === 'san' ? 0.07 : 0.06);
+      if (sec === 'zhuan' || sec === 'he') {
+        if (sec === 'zhuan') this.erhu(at, f / 2, dur * 0.95, 0.05, n.len >= 3 && Math.random() < 0.5 ? this.hz(n.deg - 1, -1) : undefined);
+        // 琵琶 tremolo: rapid repeated plucks on long notes
+        const reps = Math.max(2, Math.round(n.len * 4));
+        for (let r = 0; r < reps; r++) this.pluck(at + (r * dur) / reps, f, 0.11 * (1 - r / (reps * 1.6)), 0.75, 0.35, 0.3);
+      }
+      if (sec === 'qi' && barIdx % 2 === 1) this.pluck(at, f, 0.16, 0.6, 1.6, 0.25); // sparse melody on zheng
+    }
+
+    // percussion
+    const intense = this.intensity > 0.6;
+    if (sec === 'intro') {
+      if (pos === 0 && barIdx % 2 === 0) this.taiko(b, at, 0.4);
+    } else if (sec === 'qi' || sec === 'san') {
+      if (pos === 0) this.taiko(b, at, 0.4);
+      if (sec === 'qi' && pos === 6 && barIdx % 4 === 3) this.taiko(b, at, 0.25);
+    } else if (sec === 'cheng') {
+      if (pos === 0) this.taiko(b, at, 0.45);
+      if (pos === 3 || pos === 5) this.woodblock(at, pos === 3 ? 0.12 : 0.08);
+      if (pos === 6) this.smallDrum(at, 0.18);
+    } else {
+      // battle groove: 咚 . . 咚 . 咚 . . with small drum fills, harder when intense
+      const groove = [1, 0, 0, 0.7, 0, 0.8, 0, 0];
+      if (groove[pos]) this.taiko(b, at, 0.45 * groove[pos] + (intense ? 0.12 : 0));
+      if (pos === 2 || pos === 6) this.smallDrum(at, 0.16);
+      if (pos % 2 === 1) this.woodblock(at, 0.05);
+      if (lastBar && pos >= 4) this.smallDrum(at + step * 0.5, 0.14);
+      if (intense && pos === 4) this.taiko(b, at, 0.3);
+    }
+  }
+
+  private gongStrike(at: number, gain: number) {
+    this.metal(this.mbus(at), at, this.theme.root / 1.5, gain, 4.5, [1, 1.47, 2.06, 2.83, 3.6, 4.4], 0.8);
+  }
+  private smallDrum(at: number, gain: number) {
+    const b = this.mbus(at);
+    this.thump(b, at, 240, 140, 0.18, gain, 0.2);
+    this.burst(b, at, 0.05, 'bandpass', 1600, gain * 0.4);
+  }
+  private woodblock(at: number, gain: number) {
+    this.thump(this.mbus(at), at, 1250, 1050, 0.05, gain, 0.1);
   }
 
   stopMusic() {
@@ -648,3 +888,52 @@ export class WuxiaSound {
     window.setTimeout(() => d?.stop(), 2000);
   }
 }
+
+// ----------------------------------------------------------------------
+// score data
+// ----------------------------------------------------------------------
+type SectionName = 'intro' | 'qi' | 'cheng' | 'zhuan' | 'he' | 'san';
+interface NoteEv {
+  at: number; // step within the bar (eighths)
+  len: number; // eighths
+  deg: number;
+}
+interface MusicTheme {
+  root: number; // Hz of scale degree 0 (melody octave)
+  bpm: number;
+  scale: number[];
+}
+const THEMES: Record<'temple' | 'lavacliff' | 'sea', MusicTheme> = {
+  // 羽调 on D: open, majestic
+  temple: { root: 293.66, bpm: 84, scale: [0, 3, 5, 7, 10] },
+  // E with a flattened second: dark and driving
+  lavacliff: { root: 329.63, bpm: 104, scale: [0, 1, 5, 7, 8] },
+  // A minor pentatonic, restless
+  sea: { root: 220, bpm: 96, scale: [0, 3, 5, 7, 10] },
+};
+// chord roots per bar, as scale degrees
+const PROGS = [
+  [0, 0, 3, 2, 0, 0, 4, 3],
+  [0, 2, 3, 0, 4, 3, 2, 0],
+  [0, 4, 3, 4, 0, 2, 3, 4],
+  [3, 2, 0, 0, 3, 4, 2, 0],
+];
+// lead rhythms in eighths (negative = rest)
+const RHYTHMS = [
+  [4, 2, 2],
+  [2, 2, 4],
+  [3, 1, 4],
+  [6, 2],
+  [8],
+  [2, 1, 1, 4],
+  [-2, 2, 4],
+  [4, -2, 2],
+  [1, 1, 2, 4],
+];
+// guzheng arpeggio shapes relative to the chord root (-99 = rest)
+const ARPS = [
+  [0, 2, 3, 5, 3, 2, 0, -99],
+  [0, 3, 5, 7, 5, 3, -99, 2],
+  [0, -99, 3, 2, 5, -99, 3, 2],
+  [0, 5, 3, 5, 2, 5, 3, -99],
+];

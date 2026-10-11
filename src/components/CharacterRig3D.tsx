@@ -269,7 +269,8 @@ interface LoadedAsset {
 }
 const assetCache = new Map<string, LoadedAsset>();
 const assetPromises = new Map<string, Promise<LoadedAsset>>();
-const progressListeners = new Set<(p: ModelLoadProgress) => void>();
+/** progress listeners per model url, so one fighter's download never drives the other's loading screen */
+const progressListeners = new Set<{ url: string; fn: (p: ModelLoadProgress) => void }>();
 
 function loadGLB(url: string): Promise<LoadedAsset> {
   const hit = assetPromises.get(url);
@@ -287,8 +288,9 @@ function loadGLB(url: string): Promise<LoadedAsset> {
         resolve(a);
       },
       (xhr) => {
-        const pct = xhr.total > 0 ? Math.round((xhr.loaded / xhr.total) * 100) : 50;
-        progressListeners.forEach((l) => l({ loaded: xhr.loaded, total: xhr.total, progress: pct, isLoading: true, error: null }));
+        // compressed transfers can report loaded > total, so clamp
+        const pct = xhr.total > 0 ? Math.min(99, Math.round((xhr.loaded / xhr.total) * 100)) : 50;
+        progressListeners.forEach((l) => l.url === url && l.fn({ loaded: xhr.loaded, total: xhr.total, progress: pct, isLoading: true, error: null }));
       },
       (err) => {
         assetPromises.delete(url);
@@ -344,7 +346,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
   useEffect(() => {
     let alive = true;
-    const listener = (p: ModelLoadProgress) => onLoadProgress?.(p);
+    const listener = { url: MODEL_URLS[classId] || BERSERKER_MODEL_URL, fn: (p: ModelLoadProgress) => onLoadProgress?.(p) };
     progressListeners.add(listener);
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)

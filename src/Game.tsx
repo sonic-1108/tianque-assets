@@ -605,6 +605,10 @@ export function Game({
     if (nowMs - lastReportRef.current > 150) {
       lastReportRef.current = nowMs;
       onVfxCountChange?.(vfx.activeCount);
+      // music leans into the battle sections when the fight gets close
+      const low = Math.min(p1.hp / Math.max(1, p1.maxHp), en.hp / Math.max(1, en.maxHp));
+      const near = Math.hypot(p1.pos[0] - en.pos[0], p1.pos[2] - en.pos[2]) < 6;
+      gameAudio.setMusicIntensity(roundRef.current.over ? 0.2 : (aiEnabledRef.current ? 0.35 : 0.15) + (near ? 0.15 : 0) + (low < 0.35 ? 0.4 : low < 0.6 ? 0.15 : 0));
       onDebugUpdate?.({
         playerPos: [p1.pos[0], p1.pos[1], p1.pos[2]],
         cameraPos: [camera.position.x, camera.position.y, camera.position.z],
