@@ -919,19 +919,19 @@ export default function App() {
       )}
 
       {/* LEFT UNIT FRAMES: you on top, your opponent below */}
-      <div className="absolute top-3 left-3 z-20 pointer-events-none flex flex-col gap-2">
+      <div className="absolute top-3 left-3 z-20 pointer-events-none flex flex-col gap-1">
         {(() => {
           const pc = CLASS_CONFIGS[playerClass];
           const meChips: UnitStats['chips'] = [];
-          if (hudMirror.isBloodRage) meChips.push({ text: '血怒 伤+35% 吸血', tone: 'red', pulse: true });
+          if (hudMirror.isBloodRage) meChips.push({ text: '血怒', tone: 'red', pulse: true });
           if (hudMirror.hasSuperArmor) meChips.push({ text: '霸体', tone: 'amber' });
           if (hudMirror.isBlocking) meChips.push({ text: '格挡', tone: 'sky' });
           if (hudMirror.poisonBuff > 0) meChips.push({ text: `淬毒 ${hudMirror.poisonBuff.toFixed(1)}s`, tone: 'green' });
-          if (hudMirror.pierceNext) meChips.push({ text: '袖里乾坤 下一镖穿透', tone: 'gold', pulse: true });
+          if (hudMirror.pierceNext) meChips.push({ text: '袖里乾坤', tone: 'gold', pulse: true });
           if (hudMirror.protect) meChips.push({ text: '保护', tone: 'slate' });
           if (hudMirror.p1Poisoned) meChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.p1Rooted) meChips.push({ text: '定身', tone: 'teal', pulse: true });
-          meChips.push(hudMirror.cdBreak > 0 ? { text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' } : { text: '受身 就绪', tone: 'slate' });
+          if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',
             classId: playerClass,
@@ -991,9 +991,7 @@ export default function App() {
         {/* Combo banner & tips (right side) */}
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
-            <span className="bg-black/60 px-2 py-0.5 rounded text-[10px] text-zinc-400 font-mono border border-zinc-800">
-              活跃特效数: <span className="text-amber-400 font-bold">{vfxCount}</span>
-            </span>
+
             <span className="bg-black/60 px-2 py-0.5 rounded text-[10px] text-zinc-400 font-mono border border-zinc-800">
               按 <span className="text-amber-300 font-bold">H</span> 技能指南 · <span className="text-amber-300 font-bold">F3</span> 监控面板
             </span>

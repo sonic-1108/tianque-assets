@@ -14,75 +14,92 @@ export interface UnitStats {
   chips: { text: string; tone: 'red' | 'amber' | 'green' | 'sky' | 'slate' | 'gold' | 'teal'; pulse?: boolean }[];
 }
 
-const TONE: Record<UnitStats['chips'][number]['tone'], string> = {
-  red: 'bg-red-600/30 text-red-200 border-red-500/70',
-  amber: 'bg-amber-500/20 text-amber-200 border-amber-500/50',
-  green: 'bg-green-600/25 text-green-200 border-green-500/60',
-  sky: 'bg-sky-500/20 text-sky-200 border-sky-500/50',
-  slate: 'bg-slate-500/25 text-slate-100 border-slate-300/50',
-  gold: 'bg-yellow-500/25 text-yellow-100 border-yellow-400',
-  teal: 'bg-teal-500/20 text-teal-100 border-teal-400/60',
+const DOT: Record<UnitStats['chips'][number]['tone'], string> = {
+  red: '#f87171',
+  amber: '#fbbf24',
+  green: '#4ade80',
+  sky: '#7dd3fc',
+  slate: '#cbd5e1',
+  gold: '#facc15',
+  teal: '#5eead4',
 };
 
-const GLYPH: Partial<Record<CharacterClassId, { ch: string; ring: string; bg: string }>> = {
-  Berserker: { ch: '刃', ring: 'ring-red-500/80', bg: 'from-red-900 via-red-800 to-zinc-900' },
-  Ranger: { ch: '镖', ring: 'ring-teal-400/80', bg: 'from-teal-900 via-teal-800 to-zinc-900' },
+const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
+  Berserker: `${import.meta.env.BASE_URL}portraits/berserker.png`,
+  Ranger: `${import.meta.env.BASE_URL}portraits/ranger.png`,
 };
 
-/** A bar with a trailing "damage taken" ghost: the bright fill snaps, the pale ghost catches up later */
-function Bar({ value, max, h, fill, ghost, label, labelClass = '' }: { value: number; max: number; h: string; fill: string; ghost?: string; label?: string; labelClass?: string }) {
+/** Slanted bar. The bright fill snaps to the new value; a pale "ghost" lingers and drains after a hit. */
+function Bar({ value, max, height, fill, ghost, track = 'rgba(0,0,0,0.55)' }: { value: number; max: number; height: number; fill: string; ghost?: string; track?: string }) {
   const pct = Math.max(0, Math.min(100, (value / Math.max(1, max)) * 100));
+  const slant = Math.min(6, height);
+  const clip = `polygon(${slant}px 0, 100% 0, calc(100% - ${slant}px) 100%, 0 100%)`;
   return (
-    <div className={`relative w-full ${h} bg-black/70 rounded-sm overflow-hidden border border-white/10`}>
-      {ghost && <div className={`absolute inset-y-0 left-0 ${ghost}`} style={{ width: `${pct}%`, transition: 'width 0.7s ease-out 0.35s' }} />}
-      <div className={`absolute inset-y-0 left-0 ${fill}`} style={{ width: `${pct}%`, transition: 'width 0.08s linear' }} />
-      {/* segment ticks every 10% */}
-      <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(0,0,0,0.35) calc(10% - 1px) 10%)' }} />
-      {label && <span className={`absolute inset-0 flex items-center justify-end pr-1.5 font-mono font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] ${labelClass}`}>{label}</span>}
+    <div className="relative w-full" style={{ height, background: track, clipPath: clip }}>
+      {ghost && <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: ghost, transition: 'width 0.6s cubic-bezier(.3,.7,.4,1) 0.3s' }} />}
+      <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: fill, transition: 'width 0.08s linear' }} />
+      {/* a thin highlight along the top edge gives the bar some depth */}
+      <div className="absolute inset-x-0 top-0" style={{ height: Math.max(1, height * 0.3), background: 'linear-gradient(rgba(255,255,255,0.28), transparent)' }} />
     </div>
   );
 }
 
 export function UnitFrame({ s, me }: { s: UnitStats; me: boolean }) {
-  const g = GLYPH[s.classId] ?? GLYPH.Berserker!;
-  const low = s.hp / Math.max(1, s.maxHp) < 0.3;
+  const ratio = s.hp / Math.max(1, s.maxHp);
+  const low = ratio < 0.3;
+  const size = me ? 60 : 46;
+  const width = me ? 250 : 210;
+  const hpFill = low
+    ? 'linear-gradient(90deg,#7f1d1d,#dc2626)'
+    : me
+    ? 'linear-gradient(90deg,#991b1b,#dc2626 60%,#f97316)'
+    : 'linear-gradient(90deg,#7f1d1d,#be123c 70%,#e11d48)';
   return (
-    <div className={`relative flex gap-2.5 items-start rounded-xl px-2.5 py-2 backdrop-blur-md shadow-xl border ${me ? 'bg-zinc-950/80 border-amber-500/40' : 'bg-zinc-950/70 border-zinc-700/70'} ${me ? 'w-[340px]' : 'w-[300px]'}`}>
-      <div
-        className={`shrink-0 rounded-full ring-2 ${g.ring} bg-gradient-to-br ${g.bg} flex items-center justify-center font-black text-white shadow-lg ${me ? 'w-14 h-14 text-2xl' : 'w-11 h-11 text-xl'} ${low ? 'animate-pulse' : ''}`}
-        style={{ fontFamily: '"Noto Serif SC", "Songti SC", serif' }}
-      >
-        {g.ch}
+    <div
+      className="flex items-center gap-3 pl-1 pr-6 py-1.5"
+      style={{ background: 'linear-gradient(90deg, rgba(8,8,12,0.62) 0%, rgba(8,8,12,0.35) 70%, rgba(8,8,12,0) 100%)' }}
+    >
+      {/* portrait */}
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <div
+          className={`absolute inset-0 rounded-full overflow-hidden ${low ? 'animate-pulse' : ''}`}
+          style={{
+            background: 'radial-gradient(circle at 50% 35%, #3a3340, #121016)',
+            boxShadow: me ? '0 0 0 1.5px #d4a74a, 0 0 0 3px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.5)' : '0 0 0 1.5px rgba(255,255,255,0.35), 0 0 0 3px rgba(0,0,0,0.6)',
+          }}
+        >
+          {PORTRAIT[s.classId] && <img src={PORTRAIT[s.classId]} alt="" className="w-full h-full object-cover" draggable={false} />}
+          {/* red vignette when close to death */}
+          {low && <div className="absolute inset-0" style={{ boxShadow: 'inset 0 0 14px rgba(220,38,38,0.85)' }} />}
+        </div>
       </div>
-      <div className="flex-1 min-w-0 flex flex-col gap-1">
-        <div className="flex items-baseline gap-1.5 leading-none">
-          <span className={`truncate font-black ${me ? 'text-amber-200 text-[15px]' : 'text-zinc-100 text-[13px]'}`}>{s.name}</span>
-          <span className="text-[10px] text-zinc-400 shrink-0">{s.className}</span>
-          {!me && <span className="ml-auto text-[9px] text-red-300/80 shrink-0">对手</span>}
+
+      <div className="flex flex-col" style={{ width }}>
+        <div className="flex items-baseline gap-2 leading-none mb-1.5">
+          <span
+            className="truncate text-white font-semibold tracking-wide"
+            style={{ fontSize: me ? 15 : 13, textShadow: '0 1px 2px rgba(0,0,0,0.9)', fontFamily: '"Noto Serif SC", "Songti SC", serif' }}
+          >
+            {s.name}
+          </span>
+          <span className="text-[10px] text-white/45 shrink-0 tracking-wider">{s.className}</span>
+          <span className="ml-auto text-[10px] font-mono text-white/70 shrink-0 tabular-nums" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}>
+            {Math.max(0, Math.round(s.hp))}
+            <span className="text-white/35"> / {s.maxHp}</span>
+          </span>
         </div>
-        <Bar
-          value={s.hp}
-          max={s.maxHp}
-          h={me ? 'h-[18px]' : 'h-[14px]'}
-          fill={low ? 'bg-gradient-to-r from-red-700 to-red-500' : me ? 'bg-gradient-to-r from-red-700 via-red-500 to-orange-400' : 'bg-gradient-to-r from-rose-800 via-rose-600 to-rose-400'}
-          ghost="bg-amber-100/80"
-          label={`${Math.round(s.hp)} / ${s.maxHp}`}
-          labelClass={me ? 'text-[11px] text-white' : 'text-[10px] text-white/90'}
-        />
-        <div className="flex gap-1 items-center">
-          <span className="text-[9px] font-bold text-sky-300 w-5 shrink-0">内力</span>
-          <Bar value={s.mp} max={s.maxMp} h="h-[7px]" fill="bg-gradient-to-r from-sky-600 to-cyan-300" />
-          <span className="text-[9px] font-mono text-sky-200/80 w-7 text-right shrink-0">{Math.round(s.mp)}</span>
+        <Bar value={s.hp} max={s.maxHp} height={me ? 9 : 7} fill={hpFill} ghost="rgba(255,236,210,0.75)" />
+        <div className="mt-[3px]">
+          <Bar value={s.mp} max={s.maxMp} height={3} fill="linear-gradient(90deg,#0369a1,#38bdf8)" />
         </div>
-        <div className="flex gap-1 items-center">
-          <span className="text-[9px] font-bold text-lime-300 w-5 shrink-0">体力</span>
-          <Bar value={s.stamina} max={s.maxStamina} h="h-[5px]" fill={s.stamina < 25 ? 'bg-zinc-500' : 'bg-gradient-to-r from-lime-600 to-yellow-300'} />
-          <span className="text-[9px] font-mono text-lime-200/80 w-7 text-right shrink-0">{Math.round(s.stamina)}</span>
+        <div className="mt-[2px]" style={{ width: '82%' }}>
+          <Bar value={s.stamina} max={s.maxStamina} height={2} fill={s.stamina < 25 ? '#71717a' : 'linear-gradient(90deg,#a16207,#facc15)'} />
         </div>
         {s.chips.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-0.5">
+          <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1.5">
             {s.chips.map((c) => (
-              <span key={c.text} className={`text-[9px] px-1.5 py-[1px] rounded border font-bold ${TONE[c.tone]} ${c.pulse ? 'animate-pulse' : ''}`}>
+              <span key={c.text} className={`flex items-center gap-1 text-[10px] text-white/80 leading-none ${c.pulse ? 'animate-pulse' : ''}`} style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}>
+                <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: DOT[c.tone], boxShadow: `0 0 4px ${DOT[c.tone]}` }} />
                 {c.text}
               </span>
             ))}
