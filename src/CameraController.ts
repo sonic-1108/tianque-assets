@@ -4,6 +4,8 @@ export class CameraController {
   yaw = 0; // radians, absolute
   pitch = 0.28; // radians, absolute
   distance = 4.6;
+  /** terrain height under a point, so the camera never sinks into a slope */
+  groundAt: ((x: number, z: number) => number) | null = null;
   pendingDX = 0;
   pendingDY = 0;
   private sensitivity = 0.0025;
@@ -68,6 +70,23 @@ export class CameraController {
       this.initialized = true;
     }
     this.smoothPos.lerp(desired, 1 - Math.exp(-22 * dt));
+    if (this.groundAt) {
+      // walk the boom from the player outward: if a slope is in the way, pull the camera in front of it
+      const n = 8;
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        const x = target.x + (this.smoothPos.x - target.x) * t;
+        const z = target.z + (this.smoothPos.z - target.z) * t;
+        const y = target.y + (this.smoothPos.y - target.y) * t;
+        const g = this.groundAt(x, z) + 0.45;
+        if (y < g) {
+          const keep = Math.max(0.35, (i - 1) / n);
+          this.smoothPos.set(target.x + (this.smoothPos.x - target.x) * keep, Math.max(g, target.y + (this.smoothPos.y - target.y) * keep), target.z + (this.smoothPos.z - target.z) * keep);
+          break;
+        }
+      }
+      this.smoothPos.y = Math.max(this.smoothPos.y, this.groundAt(this.smoothPos.x, this.smoothPos.z) + 0.45);
+    }
 
     // Calculate Trauma Shake offset
     if (this.shakeTrauma > 0) {

@@ -567,6 +567,7 @@ export function Game({
     }
 
     playerVec.set(p1.pos[0], p1.pos[1], p1.pos[2]);
+    if (controller) controller.groundAt = map.id === 'glacier' ? glacierHeight : null;
     controller?.update(playerVec, rawDt);
 
     if (keyLightRef.current) {
@@ -852,7 +853,7 @@ export function Game({
         if (dir.lengthSq() < 0.0001) dir.copy(fwdOf(c.rotY)).multiplyScalar(-1);
         dir.normalize();
         if (cur === 'buried') {
-          c.pos[1] = 0;
+          c.pos[1] = fy(c.pos[0], c.pos[2]);
           c.isGrounded = true;
         }
         c.actionState = 'dodge';
@@ -1413,7 +1414,7 @@ export function Game({
             if (foe.actionState === 'buried') {
               foe.isGrounded = true;
               foe.vel[1] = 0;
-              foe.pos[1] = Math.min(foe.pos[1], 0);
+              foe.pos[1] = Math.min(foe.pos[1], fy(foe.pos[0], foe.pos[2]));
               vfx.decal(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2]), foe.pos[2]), 2.2, 1.5);
               vfx.damageNumber(vA.set(foe.pos[0], 2.4, foe.pos[2]), '钉地!', true, '#fde68a');
             }
@@ -2104,7 +2105,7 @@ export function Game({
     function safeSpot(x: number, z: number): [number, number] {
       const cands: [number, number][] = [[0, 0]];
       for (let k = 0; k < 6; k++) cands.push([Math.cos((k / 6) * Math.PI * 2) * 5, Math.sin((k / 6) * Math.PI * 2) * 5]);
-      if (map.id === 'glacier') cands.push([GLACIER.pathX, 5], [GLACIER.pathX, 1], [GLACIER.pathX - 0.5, 9]);
+      if (map.id === 'glacier') for (let k = 0; k < GLACIER.pathPts.length; k += 26) cands.push([GLACIER.pathPts[k][0], GLACIER.pathPts[k][1]]);
       const ok = cands.filter((c) => !danger(c[0], c[1], 0));
       const pool = ok.length ? ok : cands;
       pool.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z));
@@ -2416,10 +2417,14 @@ export function Game({
       const A = avalancheRef.current;
       const [x0, x1] = GLACIER.avalancheX;
       // snowfall drifting off the ridge
-      if (Math.random() < dt * 3) vfx.dustPuff(vB.set(x0 + Math.random() * (x1 - x0), GLACIER.plateau + 0.3, GLACIER.faceTop - 1 - Math.random() * 3), 2, 0.6, 0.8, 0.8, '#f8fafc');
+      if (Math.random() < dt * 3) {
+        const x = x0 + Math.random() * (x1 - x0);
+        const z = GLACIER.avalancheTop - Math.random() * 3;
+        vfx.dustPuff(vB.set(x, fy(x, z) + 0.3, z), 2, 0.6, 0.8, 0.8, '#f8fafc');
+      }
       if (A.z > -900) {
         // the front rolls downhill, picking up speed on the steep part
-        A.z += dt * (A.z < GLACIER.faceBottom ? 11 : 8);
+        A.z += dt * (fy(0, A.z) > 3 ? 11 : 8);
         mapRuntime.avalancheZ = A.z;
         for (let k = 0; k < 4; k++) {
           const x = x0 + Math.random() * (x1 - x0);
@@ -2447,7 +2452,7 @@ export function Game({
           if (i === 0) onRoundEvent?.({ type: 'playerHit', heavy: true });
           koCheck(i, '#e0f2fe');
         });
-        if (A.z > 8) {
+        if (A.z > GLACIER.avalancheEnd) {
           A.z = -999;
           mapRuntime.avalancheZ = -999;
           A.timer = 16 + Math.random() * 8;
@@ -2457,11 +2462,11 @@ export function Game({
         mapRuntime.avalancheWarn = 1 - A.warn / 2.8;
         if (Math.random() < dt * 8) {
           const x = x0 + Math.random() * (x1 - x0);
-          vfx.dustPuff(vB.set(x, GLACIER.plateau + 0.2, GLACIER.faceTop - 0.5), 3, 0.5, 1.5, 0.9, '#f8fafc');
+          vfx.dustPuff(vB.set(x, fy(x, GLACIER.avalancheTop) + 0.2, GLACIER.avalancheTop), 3, 0.5, 1.5, 0.9, '#f8fafc');
         }
         controller?.addShake(dt * 0.25);
         if (A.warn <= 0) {
-          A.z = GLACIER.faceTop - 2;
+          A.z = GLACIER.avalancheTop;
           A.hit = [false, false];
           mapRuntime.avalancheWarn = 0;
           gameAudio.playWaveCrash();
@@ -2472,7 +2477,7 @@ export function Game({
         A.timer -= dt;
         if (A.timer <= 0) {
           A.warn = 2.8;
-          onRoundEvent?.({ type: 'toast', text: '雪崩要来了！离开雪坡，或者走东边的山道' });
+          onRoundEvent?.({ type: 'toast', text: '雪崩要来了！快离开南坡' });
           gameAudio.playThunder();
         }
       }

@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Sky, KarstPeaks, CloudSea, CloudPuffs, Banner, seeded, cloudPuffTexture } from './Scenery';
-import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient } from '../maps';
+import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -1395,37 +1395,59 @@ function SeaMap() {
 // a staked mountain path up the east side, blizzard, avalanches.
 // ------------------------------------------------------------------
 function glacierTerrain() {
-  const size = 120;
-  const seg = 240;
+  const size = 150;
+  const seg = 300;
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position as THREE.BufferAttribute;
+  const n = seg + 1;
+  const step = size / seg;
+  // heights first, so the slope can come from the neighbours instead of re-sampling
+  const H = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    H[i] = glacierHeight(pos.getX(i), pos.getZ(i));
+    pos.setY(i, H[i]);
+  }
   const cols = new Float32Array(pos.count * 3);
-  const snow = new THREE.Color('#e3eaf2');
-  const blue = new THREE.Color('#b7c8dc');
-  const rock = new THREE.Color('#3f464f');
-  const path = new THREE.Color('#bfc4c8');
-  const dirt = new THREE.Color('#8f877c');
+  const snow = new THREE.Color('#e6edf4');
+  const blue = new THREE.Color('#aebfd4');
+  const rock = new THREE.Color('#3d434b');
+  const path = new THREE.Color('#c4c7c9');
+  const dirt = new THREE.Color('#857b6f');
+  const ice = new THREE.Color('#9fd0ea');
   const c = new THREE.Color();
   const rand = seeded(23);
+  const [sx, sz] = GLACIER.summit;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    const h = glacierHeight(x, z);
-    pos.setY(i, h);
-    const [gx, gz] = glacierGradient(x, z);
-    const steep = Math.hypot(gx, gz);
-    // snow, a little bluer in hollows; bare rock where it is too steep for snow to stick
-    c.copy(snow).lerp(blue, Math.min(1, Math.max(0, 0.5 - h * 0.05)) * 0.6 + rand() * 0.08);
-    // streaky rock bands on the face and the rim: snow only clings to the gentler ledges
+    const h = H[i];
+    const ix = i % n;
+    const iz = Math.floor(i / n);
+    const hx = (H[iz * n + Math.min(n - 1, ix + 1)] - H[iz * n + Math.max(0, ix - 1)]) / (2 * step);
+    const hz = (H[Math.min(n - 1, iz + 1) * n + ix] - H[Math.max(0, iz - 1) * n + ix]) / (2 * step);
+    const steep = Math.hypot(hx, hz);
+    // snow, bluer in the shaded hollows of the valley
+    c.copy(snow).lerp(blue, Math.min(1, Math.max(0, 0.45 - h * 0.04)) * 0.55 + rand() * 0.07);
+    // bare rock on the terrace risers and the walls: snow only clings to the gentler ledges
     const streak = 0.5 + 0.5 * Math.sin(x * 1.7 + Math.sin(z * 0.9) * 2.0);
-    const rockAmt = THREE.MathUtils.smoothstep(steep + streak * 0.35, 1.05, 1.6) * (0.7 + rand() * 0.3);
-    c.lerp(rock, rockAmt);
-    // the trodden mountain path: packed snow with a muddy centre line
-    const onPath = 1 - THREE.MathUtils.smoothstep(Math.abs(x - GLACIER.pathX), GLACIER.pathHalf - 0.2, GLACIER.pathHalf + 0.6);
-    const pathRun = z < GLACIER.pathStart + 1 && z > GLACIER.faceTop - 1.5 ? 1 : 0;
-    c.lerp(path, onPath * pathRun * 0.85);
-    c.lerp(dirt, (1 - THREE.MathUtils.smoothstep(Math.abs(x - GLACIER.pathX), 0.2, 0.9)) * pathRun * 0.55);
+    c.lerp(rock, THREE.MathUtils.smoothstep(steep + streak * 0.3, 0.95, 1.55) * (0.7 + rand() * 0.3));
+    // glassy blue ice tongue running down the avalanche chute
+    const chute = 1 - THREE.MathUtils.smoothstep(Math.abs(x - (GLACIER.avalancheX[0] + GLACIER.avalancheX[1]) / 2), 2.5, 6.5);
+    const inChute = z > GLACIER.avalancheTop && z < 6 ? chute * THREE.MathUtils.smoothstep(steep, 0.2, 0.8) : 0;
+    c.lerp(ice, inChute * 0.35);
+    // the trodden road: packed snow with muddy wheel ruts
+    const r = Math.hypot(x - sx, z - sz);
+    if (r < GLACIER.footR + 3) {
+      const p = glacierPath(x, z);
+      if (p.on > 0) {
+        c.lerp(path, p.on * 0.85);
+        const rut = Math.abs(p.d - 0.75);
+        c.lerp(dirt, (1 - THREE.MathUtils.smoothstep(rut, 0.1, 0.45)) * p.on * 0.5);
+      }
+    }
+    // a wind-polished snow cap on the very top
+    c.lerp(snow, THREE.MathUtils.smoothstep(h, GLACIER.summitH - 2.5, GLACIER.summitH) * 0.8);
     cols.set([c.r, c.g, c.b], i * 3);
   }
   g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
@@ -1575,23 +1597,40 @@ function GlacierMap() {
   const pines = useMemo(() => {
     const rand = seeded(88);
     const out: [number, number, number][] = [];
-    // around the valley rim and up the slopes outside the arena
-    for (let k = 0; k < 70; k++) {
+    const [sx, sz] = GLACIER.summit;
+    // a ring of forest on the valley rim, outside the arena
+    for (let k = 0; k < 90; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 16 + rand() * 22;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      out.push([x, z, 0.9 + rand() * 0.9]);
+      const r = 28.5 + rand() * 18;
+      out.push([Math.cos(a) * r, Math.sin(a) * r, 0.9 + rand() * 1.0]);
     }
-    // a few along the outer side of the mountain path
-    for (let z = 4; z > -9; z -= 3.2) out.push([GLACIER.pathX + 3.6 + rand(), z + rand(), 0.8 + rand() * 0.4]);
+    // scattered on the lower terraces, but never on the road or in the avalanche chute
+    for (let k = 0; k < 160 && out.length < 125; k++) {
+      const a = rand() * Math.PI * 2;
+      const r = 8 + rand() * 13;
+      const x = sx + Math.cos(a) * r;
+      const z = sz + Math.sin(a) * r;
+      if (Math.hypot(x, z) > 25.5) continue;
+      if (glacierPath(x, z).d < GLACIER.pathHalf + 2) continue;
+      if (x > GLACIER.avalancheX[0] - 1.5 && x < GLACIER.avalancheX[1] + 1.5 && z > GLACIER.avalancheTop) continue;
+      const [gx, gz] = glacierGradient(x, z);
+      if (Math.hypot(gx, gz) > 0.7) continue; // only on the flat ledges
+      out.push([x, z, 0.7 + rand() * 0.5]);
+    }
     return out;
   }, []);
-  // wooden stakes with red ribbons marking the inner edge of the mountain path
+  // wooden stakes with red ribbons along the outer (downhill) edge of the road
   const stakes = useMemo(() => {
     const out: [number, number, number][] = [];
-    for (let z = GLACIER.pathStart; z > GLACIER.faceTop; z -= 2.2) {
-      const x = GLACIER.pathX - GLACIER.pathHalf - 0.25;
+    const [sx, sz] = GLACIER.summit;
+    const pts = GLACIER.pathPts;
+    for (let i = 4; i < pts.length; i += 9) {
+      const [px, pz] = pts[i];
+      const dx = px - sx;
+      const dz = pz - sz;
+      const l = Math.hypot(dx, dz) || 1;
+      const x = px + (dx / l) * (GLACIER.pathHalf + 0.15);
+      const z = pz + (dz / l) * (GLACIER.pathHalf + 0.15);
       out.push([x, glacierHeight(x, z), z]);
     }
     return out;
@@ -1636,6 +1675,23 @@ function GlacierMap() {
           </mesh>
         </group>
       ))}
+      {/* summit cairn with a tattered banner: the goal of the climb */}
+      <group position={[GLACIER.summit[0] + 1.6, glacierHeight(GLACIER.summit[0] + 1.6, GLACIER.summit[1] + 0.8), GLACIER.summit[1] + 0.8]}>
+        {[0.55, 0.42, 0.3].map((r, k) => (
+          <mesh key={k} position={[Math.sin(k * 2) * 0.08, 0.25 + k * 0.42, 0]} rotation={[0.2 * k, k, 0.1]} castShadow>
+            <dodecahedronGeometry args={[r, 0]} />
+            <meshStandardMaterial color="#5b6168" roughness={0.95} flatShading />
+          </mesh>
+        ))}
+        <mesh position={[0, 1.9, 0]} castShadow>
+          <cylinderGeometry args={[0.04, 0.05, 2.6, 6]} />
+          <meshStandardMaterial color="#3b2a1e" roughness={0.9} />
+        </mesh>
+        <mesh position={[0.45, 2.85, 0]}>
+          <planeGeometry args={[0.85, 0.5]} />
+          <meshStandardMaterial color="#9f1d1d" side={THREE.DoubleSide} roughness={0.8} />
+        </mesh>
+      </group>
       {/* ice boulders you can jump onto */}
       {def.pillars!.map((p, i) => (
         <group key={i} position={[p.x, glacierHeight(p.x, p.z), p.z]}>

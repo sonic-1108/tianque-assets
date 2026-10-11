@@ -126,21 +126,21 @@ export const MAPS: Record<MapId, MapDef> = {
   glacier: {
     id: 'glacier',
     name: '雪岭冰峰',
-    subtitle: '暴雪中的冰川山谷，北面是一整面雪坡',
+    subtitle: '暴雪中的一整座雪山，从山脚一路打上山顶',
     icon: '🏔️',
     mechanics: [
-      '谷底平地，北面是陡峭雪坡，坡顶有一片高台',
-      '爬陡坡会持续消耗体力，体力耗尽就会滑下来；东侧有一条缓坡山道，走山道几乎不耗体力',
-      '雪坡上会发生雪崩，从坡顶一路冲到谷底，山道上是安全的',
-      '居高临下：站在高台上，近战够不到你',
+      '山脚是雪谷，整座雪山一层层台阶一样往上，山顶 19 米高',
+      '直接爬陡坡会持续消耗体力，耗尽就滑下去；绕山的盘山路坡缓，走路几乎不耗体力',
+      '南坡会发生雪崩，从山腰一路冲到谷底',
+      '居高临下：站得比对手高，近战够不到你',
     ],
     homeClass: 'Ranger',
     homeClassName: '暗器',
     homeBonus: '伤害 +10%',
     available: true,
-    radius: 15,
-    spawnPlayer: [0, 7],
-    spawnEnemy: [-2, 0],
+    radius: 27,
+    spawnPlayer: [2, 20],
+    spawnEnemy: [-2, 14],
     background: '#b9c8d8',
     fog: [40, 200],
     hemi: ['#d6e3f2', '#3e4c60', 0.8],
@@ -149,8 +149,8 @@ export const MAPS: Record<MapId, MapDef> = {
     exposure: 0.78,
     cardGradient: 'from-sky-200/40 via-slate-500/50 to-slate-900/90',
     pillars: [
-      { x: -7.5, z: 4.5, r: 0.9, h: 1.6 },
-      { x: 3.5, z: 6.5, r: 0.75, h: 1.2 },
+      { x: -9, z: 17, r: 0.9, h: 1.6 },
+      { x: 8, z: 19, r: 0.75, h: 1.2 },
     ],
   },
   bamboo: {
@@ -234,36 +234,80 @@ export const mapRuntime = {
 };
 
 // ----------------------------------------------------------------------
-// 雪岭冰峰 terrain. Shared by the physics (Game) and the mesh (Maps3D).
+// 雪岭冰峰 terrain: a whole snow mountain you can fight your way up.
+// Shared by the physics (Game) and the mesh (Maps3D).
 // ----------------------------------------------------------------------
 export const GLACIER = {
-  plateau: 6.5, // height of the high shelf
-  faceTop: -10, // z where the steep face reaches the shelf
-  faceBottom: -3.5, // z where it starts rising from the valley floor
-  pathX: 10, // centre line of the gentle mountain path
-  pathHalf: 1.8,
-  pathStart: 6, // z where the path leaves the valley floor
-  avalancheX: [-11, 7] as [number, number], // the avalanche runs down this band of the face
+  summit: [0, -13] as [number, number], // x, z of the peak
+  summitH: 19, // height of the peak
+  footR: 22, // radius (from the summit) where the mountain meets the valley floor
+  stepH: 4, // terrace height: flat ledges to rest on, steep risers to climb
+  pathHalf: 1.7, // half-width of the switchback road
+  avalancheX: [-7, 7] as [number, number], // avalanches pour down this band of the south face
+  avalancheTop: -9, // z where they break loose
+  avalancheEnd: 18, // z where they run out on the valley floor
+  pathPts: [] as [number, number, number][], // x, z, height along the road (bottom to top)
 };
 const sstep = (a: number, b: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+/** Natural mountain height as a function of distance from the summit */
+function coneH(r: number) {
+  return GLACIER.summitH * Math.pow(1 - sstep(1.5, GLACIER.footR, r), 1.15);
+}
+// The road spirals up from the valley floor on the south-east to just under the peak.
+(function buildPath() {
+  const [sx, sz] = GLACIER.summit;
+  const n = 260;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const ang = 0.35 + t * Math.PI * 2.35; // starts south-east, winds round anticlockwise
+    const r = 20.5 - t * 17.5;
+    const x = sx + Math.cos(ang) * r;
+    const z = sz + Math.sin(ang) * r;
+    GLACIER.pathPts.push([x, z, coneH(r)]);
+  }
+})();
+/** Distance from (x, z) to the road, and the road's height at the nearest point */
+export function glacierPath(x: number, z: number) {
+  let best = 1e9;
+  let bh = 0;
+  const pts = GLACIER.pathPts;
+  for (let i = 0; i < pts.length; i++) {
+    const dx = x - pts[i][0];
+    const dz = z - pts[i][1];
+    const d = dx * dx + dz * dz;
+    if (d < best) {
+      best = d;
+      bh = pts[i][2];
+    }
+  }
+  const d = Math.sqrt(best);
+  return { d, h: bh, on: 1 - sstep(GLACIER.pathHalf, GLACIER.pathHalf + 1.3, d) };
+}
 /** Ground height of 雪岭冰峰 at (x, z) */
 export function glacierHeight(x: number, z: number) {
-  const G = GLACIER;
-  // steep north face rising to the shelf
-  const face = G.plateau * sstep(G.faceBottom, G.faceTop, z);
-  // the mountain path: a long gentle ramp hugging the east side
-  const ramp = G.plateau * sstep(G.pathStart, G.faceTop, z);
-  const onPath = 1 - sstep(G.pathHalf, G.pathHalf + 1.4, Math.abs(x - G.pathX));
-  // on the path the gentle ramp replaces the face (it runs as a raised track up the east side)
-  let h = face + (ramp - face) * onPath;
-  // drifts and hummocks, flattened in the centre of the valley
-  const r = Math.hypot(x, z);
-  h += (Math.sin(x * 0.45 + 1.3) * Math.cos(z * 0.38) * 0.35 + Math.sin(x * 1.1 - z * 0.7) * 0.08) * sstep(4, 9, r) * (1 - onPath * 0.8);
-  // mountains walling the valley in (outside the play area)
-  if (r > 16) h += Math.pow(r - 16, 1.25) * 0.75 + Math.sin(Math.atan2(z, x) * 7 + r * 0.15) * (r - 16) * 0.22;
+  const [sx, sz] = GLACIER.summit;
+  const r = Math.hypot(x - sx, z - sz);
+  const h0 = coneH(r);
+  // terraces: mostly flat ledges, then a steep riser up to the next one
+  const s = GLACIER.stepH;
+  const f = h0 / s;
+  const terr = (Math.floor(f) + sstep(0.5, 1.0, f - Math.floor(f))) * s;
+  let h = h0 + (terr - h0) * 0.68 * sstep(0.5, 3, h0);
+  // ridges and gullies running down the flanks
+  const a = Math.atan2(z - sz, x - sx);
+  h += (Math.sin(a * 7 + r * 0.25) * 0.55 + Math.sin(a * 13 - r * 0.4) * 0.25) * sstep(0.3, 4, h0) * (1 - sstep(GLACIER.summitH - 3, GLACIER.summitH, h0));
+  // the road is cut level across the slope
+  const p = glacierPath(x, z);
+  if (p.on > 0) h += (p.h - h) * p.on;
+  // drifts on the valley floor
+  const ro = Math.hypot(x, z);
+  h += Math.sin(x * 0.45 + 1.3) * Math.cos(z * 0.38) * 0.3 * (1 - sstep(0, 2, h0));
+  // mountains walling the whole valley in (outside the play area)
+  // a forested snow shelf ringing the valley (outside the play area), with the far ranges beyond
+  if (ro > 27) h += sstep(27, 36, ro) * 9 + sstep(44, 70, ro) * 16 + Math.sin(Math.atan2(z, x) * 7 + ro * 0.15) * sstep(27, 40, ro) * 1.5;
   return h;
 }
 /** Uphill gradient (dh/dx, dh/dz) */
