@@ -189,7 +189,7 @@ export default function App() {
     else gameAudio.startMusic();
   }, [isMusicMuted]);
   useEffect(() => {
-    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' ? mapId : 'temple');
+    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' ? mapId : 'temple');
   }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);

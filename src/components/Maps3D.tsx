@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Sky, KarstPeaks, CloudSea, CloudPuffs, Banner, seeded, cloudPuffTexture } from './Scenery';
 import { ChanganMap } from './maps/Changan';
+import { SummitMap } from './maps/Summit';
 import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
@@ -1727,6 +1728,7 @@ export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'sea') return <SeaMap />;
   if (mapId === 'glacier') return <GlacierMap />;
   if (mapId === 'rooftop') return <ChanganMap />;
+  if (mapId === 'summit') return <SummitMap />;
   return <TempleMap />;
 }
 

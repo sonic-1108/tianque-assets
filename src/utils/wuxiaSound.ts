@@ -4,7 +4,7 @@
  * and a generative guzheng score in D minor pentatonic.
  */
 
-export type AmbienceId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'none';
+export type AmbienceId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'rooftop' | 'summit' | 'none';
 
 interface Bus {
   ctx: AudioContext;
@@ -493,6 +493,48 @@ export class WuxiaSound {
           this.metal(b, b.now + 0.1, 520 + Math.random() * 200, 0.025, 1.2, [1, 2.4, 3.9], 0.6);
         }
       }, 2200);
+    } else if (id === 'rooftop') {
+      // the Lantern Festival below: a city-wide murmur of crowds, distant fireworks, temple bells and drums
+      loopNoise(this.pinkNoise, 'bandpass', 520, 0.9, 0.22, 0.05, 0.12);
+      loopNoise(this.pinkNoise, 'bandpass', 1400, 1.6, 0.06, 0.17, 0.04);
+      loopNoise(this.pinkNoise, 'lowpass', 160, 0.6, 0.18, 0.03, 0.08);
+      this.ambTimer = window.setInterval(() => {
+        const b = ambBus();
+        if (Math.random() < 0.55) {
+          // a far-off firework: soft thump, then a long crackle
+          const t0 = b.now + Math.random() * 0.4;
+          this.thump(b, t0, 90 + Math.random() * 40, 40, 0.5, 0.12, 0.35);
+          for (let k = 0; k < 14; k++) this.burst(b, t0 + 0.25 + Math.random() * 0.9, 0.012, 'bandpass', 2500 + Math.random() * 3500, 0.03 + Math.random() * 0.03);
+        }
+        if (Math.random() < 0.18) this.metal(b, b.now, 392 * (Math.random() < 0.5 ? 1 : 1.5), 0.04, 3.5, [1, 2.76, 5.4], 0.8);
+        if (Math.random() < 0.25) for (let k = 0; k < 4; k++) this.thump(b, b.now + k * 0.32, 110, 70, 0.35, 0.05, 0.15);
+      }, 1600);
+    } else if (id === 'summit') {
+      // thin high wind above the clouds, a crane calling, distant chimes
+      loopNoise(this.pinkNoise, 'bandpass', 900, 1.8, 0.14, 0.05, 0.1);
+      loopNoise(this.noise, 'highpass', 5000, 0.5, 0.02, 0.07, 0.015);
+      this.ambTimer = window.setInterval(() => {
+        const b = ambBus();
+        if (Math.random() < 0.3) {
+          // crane: two quick rising calls
+          for (let k = 0; k < 2; k++) {
+            const t0 = b.now + k * 0.28;
+            const o = ctx.createOscillator();
+            o.type = 'triangle';
+            o.frequency.setValueAtTime(900, t0);
+            o.frequency.exponentialRampToValueAtTime(1500, t0 + 0.12);
+            o.frequency.exponentialRampToValueAtTime(1100, t0 + 0.22);
+            const g = ctx.createGain();
+            g.gain.setValueAtTime(0.0001, t0);
+            g.gain.exponentialRampToValueAtTime(0.02, t0 + 0.03);
+            g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
+            o.connect(g).connect(this.verbIn);
+            o.start(t0);
+            o.stop(t0 + 0.26);
+          }
+        }
+        if (Math.random() < 0.3) this.metal(b, b.now, 1568 * [1, 1.122, 1.335, 1.498][Math.floor(Math.random() * 4)], 0.035, 3, [1, 2.0, 3.01], 0.8);
+      }, 2600);
     } else if (id === 'sea') {
       // rain hiss, swelling waves, creaking hull
       loopNoise(this.noise, 'highpass', 1800, 0.5, 0.09);
@@ -915,7 +957,11 @@ interface MusicTheme {
   bpm: number;
   scale: number[];
 }
-const THEMES: Record<'temple' | 'lavacliff' | 'sea' | 'glacier', MusicTheme> = {
+const THEMES: Record<'temple' | 'lavacliff' | 'sea' | 'glacier' | 'rooftop' | 'summit', MusicTheme> = {
+  // 宫调 on G: bright and festive, a Tang court at the Lantern Festival
+  rooftop: { root: 392, bpm: 100, scale: [0, 2, 4, 7, 9] },
+  // 徵调 on C: wide and solemn, the gate of heaven
+  summit: { root: 261.63, bpm: 78, scale: [0, 2, 5, 7, 9] },
   // 羽调 on D: open, majestic
   temple: { root: 293.66, bpm: 84, scale: [0, 3, 5, 7, 10] },
   // E with a flattened second: dark and driving
