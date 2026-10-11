@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { usePlayground, usePlaygroundGameLifecycle } from './utils/usePlayground';
 import { MenuOverlay, gameAudio, useIsMobile } from './utils/helper';
-import { BackgroundMusic } from './utils/BackgroundMusic';
 import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId } from './maps';
@@ -160,6 +159,14 @@ export default function App() {
   const playerClassRef = useRef<CharacterClassId>('Berserker');
   playerClassRef.current = playerClass;
   const HOTBAR_INFO = HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
+  // generative guzheng score and per-map ambience
+  useEffect(() => {
+    if (isMusicMuted) gameAudio.stopMusic();
+    else gameAudio.startMusic();
+  }, [isMusicMuted]);
+  useEffect(() => {
+    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' ? mapId : 'temple');
+  }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
   const netRef = useRef<NetSession | null>(null);
@@ -515,11 +522,7 @@ export default function App() {
   return (
     <div className="fixed inset-0 overflow-hidden touch-none flex flex-col bg-zinc-950 text-white font-sans select-none">
       {/* Background Music */}
-      <BackgroundMusic
-        url="https://assets.mixkit.co/music/preview/mixkit-game-level-music-689.mp3"
-        isPlaying={gameState.status === 'PLAYING'}
-        isMuted={isMusicMuted}
-      />
+{/* music and ambience are synthesised by gameAudio (see wuxiaSound.ts) */}
 
       {/* Blood Rage Edge Flash Overlay */}
       {bloodRageFlash && (

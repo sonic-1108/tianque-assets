@@ -437,7 +437,7 @@ export function Game({
           vfx.rocks(vB.set(c.pos[0], 0, c.pos[2]), 10, 6, 0.1);
           vfx.dustPuff(vB, 16, 0.6, 3, 0.7);
           vfx.ring(vB, 1.8, '#d6c2a8', 0.35, 0.14, 0.3);
-          gameAudio.playMeleePunch();
+          gameAudio.playSlam();
         }
       }
       if (c.actionState === 'dodge' && c.stateDuration > 0 && c.stateTimer >= c.stateDuration) c.dodgeEndAt = gt;
@@ -502,9 +502,13 @@ export function Game({
         if (footTimers.current[i] > 0.28) {
           footTimers.current[i] = 0;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 2, 0.15, 0.6, 0.35, '#7d7166');
+          if (i === 0) gameAudio.playStep();
         }
       }
-      if (!wasGrounded.current[i] && c.isGrounded && c.actionState !== 'ultimate') vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 6, 0.3, 1.4, 0.45);
+      if (!wasGrounded.current[i] && c.isGrounded && c.actionState !== 'ultimate') {
+        vfx.dustPuff(vB.set(c.pos[0], c.pos[1], c.pos[2]), 6, 0.3, 1.4, 0.45);
+        if (i === 0) gameAudio.playLand();
+      }
       wasGrounded.current[i] = c.isGrounded;
 
       // blood rage aura
@@ -849,7 +853,7 @@ export function Game({
         c.juggleCount = 0;
         vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.8, '#f8fafc', 0.35, 0.1, 0.3);
         vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '受身', true, '#f8fafc');
-        if (isPlayer) gameAudio.playRetroJump();
+        gameAudio.playDodge();
         report('受身', '成功脱离');
         return true;
       }
@@ -881,7 +885,7 @@ export function Game({
             c.stateDuration = 0.6; // spinning kick + knife, longer than the dart fan
             c.backSlash = true;
             c.volleyShots = 0;
-            gameAudio.playSwordClash();
+            gameAudio.playKick();
             report('右键: 撩刀后撤', '成功施放 (Cast)');
             return true;
           }
@@ -891,7 +895,7 @@ export function Game({
             if (!paySkill(one ? 0 : 1, req, one ? '1' : '2')) return false;
             start(one ? 'skill_1' : 'skill_2');
             c.volleyShots = 0;
-            gameAudio.playArcadeLaser();
+            gameAudio.playThrowHeavy();
             return true;
           }
           case 'skill3': {
@@ -907,7 +911,7 @@ export function Game({
             c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.4);
             c.perfectDodgeUsed = true;
             vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.5);
-            if (isPlayer) gameAudio.playRetroJump();
+            gameAudio.playDodge();
             return true;
           }
           case 'skill4': {
@@ -958,7 +962,7 @@ export function Game({
           c.dodgeCooldownTimer = ranger ? 0.6 : 0.9;
           c.perfectDodgeUsed = false;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.55);
-          if (isPlayer) gameAudio.playRetroJump();
+          gameAudio.playDodge();
           report('闪避', '成功施放 (Cast)');
           return true;
         }
@@ -979,7 +983,7 @@ export function Game({
             c.stateDuration = 0;
             vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 1.1, color, 0.3, 0.08, 0.2);
             vfx.embers(vC.set(c.pos[0], c.pos[1] + 0.3, c.pos[2]), 10, '#e0fdfa', 0.4, -1.5, 0.06);
-            if (isPlayer) gameAudio.playRetroJump();
+            gameAudio.playJump();
             report('跳跃', '二段跳');
             return true;
           }
@@ -989,7 +993,7 @@ export function Game({
           c.actionState = 'jump';
           c.stateDuration = 0;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 6, 0.3, 1.2, 0.45);
-          if (isPlayer) gameAudio.playRetroJump();
+          gameAudio.playJump();
           report('跳跃', '成功起跳');
           return true;
         }
@@ -1000,7 +1004,7 @@ export function Game({
             c.stateDuration = 3; // ends on landing
             c.vel[1] = Math.min(c.vel[1], -16);
             c.airSlash = true;
-            gameAudio.playSwordClash();
+            gameAudio.playSwingHeavy();
             report('普攻', '下劈');
             return true;
           }
@@ -1009,7 +1013,7 @@ export function Game({
             start('attack_2', 13);
             c.dodgeSlash = true;
             vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 8, 0.3, 2, 0.5);
-            gameAudio.playSwordClash();
+            gameAudio.playSwingHeavy();
             report('普攻', '回身斩');
             return true;
           }
@@ -1019,7 +1023,8 @@ export function Game({
           else if (cur === 'attack_2' && phase === 'recovery') next = 'attack_3';
           if (!next) return report('普攻', `被 [${cur} ${phase}] 占用`), false;
           start(next, phasesFor(c)[next]!.forwardMomentum);
-          gameAudio.playSwordClash();
+          if (next === 'attack_3') gameAudio.playSwingHeavy();
+          else gameAudio.playSwingLight();
           report('普攻', `施放 ${next.slice(-1)} 段斩`);
           return true;
         }
@@ -1038,7 +1043,7 @@ export function Game({
             c.vel[1] = 5.5;
             c.isGrounded = false;
           }
-          gameAudio.playPowerupChime();
+          gameAudio.playSwingHeavy();
           return true;
         }
         case 'skill2': {
@@ -1046,14 +1051,14 @@ export function Game({
           start('skill_2', 0);
           vfx.setVortex(true, phasesFor(c).skill_2!.totalDuration, slot);
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 18, 1, 3, 0.7);
-          gameAudio.playArcadeLaser();
+          gameAudio.playWhirl();
           return true;
         }
         case 'skill3': {
           if (!paySkill(2, 'skill3', '3')) return false;
           start('skill_3', phasesFor(c).skill_3!.forwardMomentum);
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 14, 0.5, 2.5, 0.6);
-          gameAudio.playGunshotBlast();
+          gameAudio.playCharge();
           return true;
         }
         case 'skill4': {
@@ -1070,7 +1075,7 @@ export function Game({
           if (isPlayer) {
             controller?.addShake(0.25);
             onBloodRageFlash?.();
-            gameAudio.playLevelUpStinger();
+            gameAudio.playRage();
           }
           report(`4: ${sk.name}`, '成功施放 (Cast)');
           return true;
@@ -1083,7 +1088,7 @@ export function Game({
           c.ultSlamStarted = false;
           vfx.ring(vB.set(c.pos[0], 0, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
           vfx.dustPuff(vB, 20, 0.8, 3.5, 0.8);
-          gameAudio.playVictoryFanfare();
+          gameAudio.playUltRise();
           return true;
         }
       }
@@ -1217,8 +1222,8 @@ export function Game({
         vfx.flash(chest, '#ffffff', 30, 0.15, 6);
         vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '完美格挡', true, '#e0f2fe');
         controller?.kick(-3);
-        gameAudio.playSwordClash();
-        gameAudio.playSwordClash();
+        gameAudio.playPerfect();
+        
         return;
       }
       if (def.isBlocking && frontal && !o.unblockable) {
@@ -1231,7 +1236,7 @@ export function Game({
         vfx.sparkBurst(chest, 22, '#cfe8ff', 7, 0.08, vA.copy(hitDir).multiplyScalar(-1), 1.2);
         vfx.flash(chest, '#d8ecff', 14, 0.1, 5);
         vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.0, def.pos[2]), `格挡 ${dmg}`, false, '#bfdbfe');
-        gameAudio.playSwordClash();
+        gameAudio.playClash();
         if (slot === 1) onRoundEvent?.({ type: 'playerHit', heavy: false });
         return;
       }
@@ -1282,8 +1287,9 @@ export function Game({
       if (o.noStop) vfx.sparkBurst(chest, 6, color, 5, 0.06, hitDir, 1.2);
       else vfx.hitImpact(chest, hitDir, !!o.heavy, color);
       vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.05, def.pos[2]), dmg, !!o.crit, attackerIsPlayer ? '#ffffff' : '#ff8a8a');
-      if (o.crit) gameAudio.playChiptuneExplosion();
-      else gameAudio.playMeleePunch();
+      if (o.ranged && !o.heavy && !o.crit) gameAudio.playDartHit();
+      else if (o.crit || o.heavy) gameAudio.playHitHeavy();
+      else gameAudio.playHitLight();
       if (attackerIsPlayer && o.shake) controller?.addShake(o.shake);
       if (!attackerIsPlayer) {
         controller?.addShake(o.noStop ? 0.05 : o.heavy ? 0.45 : 0.18);
@@ -1329,7 +1335,7 @@ export function Game({
           const iz = c.pos[2] + fwd.z * 0.8;
           vfx.groundSlam(vB.set(ix, 0, iz), 0.85, color);
           controller?.addShake(slot === 0 ? 0.55 : 0.3);
-          gameAudio.playGeneralExplosion();
+          gameAudio.playSlam();
           if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.8 && foe.hp > 0) {
             applyHit(slot, c, foe, 160, { heavy: true, crit: true, knock: 0, state: 'buried', dur: 0.5 });
             if (foe.actionState === 'buried') {
@@ -1395,7 +1401,7 @@ export function Game({
         }
         if (slot === 0) controller?.addShake(0.6);
         else controller?.addShake(Math.max(0, 0.5 - dist * 0.05));
-        gameAudio.playGeneralExplosion();
+        gameAudio.playSlam();
         if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 3.4) applyHit(slot, c, foe, 210, { heavy: true, crit: true, launch: 9.5, knock: 3, state: 'launched', dur: 0.9 });
       }
 
@@ -1454,8 +1460,8 @@ export function Game({
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.3);
           controller?.addShake(slot === 0 ? 1 : 0.7);
           vfx.ultimateImpact(vB.set(c.pos[0] + fwd.x * 0.8, 0, c.pos[2] + fwd.z * 0.8));
-          gameAudio.playGeneralExplosion();
-          gameAudio.playChiptuneExplosion();
+          gameAudio.playUltImpact();
+          
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,240,220,0.75)' });
           if (dist < 7) applyHit(slot, c, foe, 420, { heavy: true, crit: true, launch: 15, knock: 10, state: 'knockdown', dur: 1.2, unblockable: true });
           c.vel[0] = 0;
@@ -1568,13 +1574,13 @@ export function Game({
         c.volleyShots = 1;
         const from = handPos(c, fwd);
         fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from), 36, { dmg: 52 });
-        gameAudio.playCrispClick();
+        gameAudio.playThrow();
       }
       if (st === 'attack_3' && !c.backSlash && ready) {
         c.volleyShots = 1;
         const from = handPos(c, fwd);
         for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.14), 36, { dmg: 42, knock: 3, dur: 0.3 });
-        gameAudio.playArcadeLaser();
+        gameAudio.playThrowFan();
       }
       if (st === 'attack_3' && c.backSlash && t >= 0.28 && !c.hasHitCurrentMove) {
         // 撩刀后撤: backhand slash, then spring away
@@ -1613,7 +1619,7 @@ export function Game({
         const from = handPos(c, fwd);
         from.y = c.pos[1] + 1.2;
         for (let k = 0; k < 7; k++) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, (k - 3) * 0.17), 30, { dmg: 38, knock: 2 });
-        gameAudio.playArcadeLaser();
+        gameAudio.playThrowFan();
       }
       if (st === 'skill_4' && Math.random() < 0.4) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.1, c.pos[2]), 1, '#4ade80', 0.3, 1.5, 0.06);
       if ((c.poisonBuff ?? 0) > 0 && Math.random() < 0.15) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.2, c.pos[2]), 1, '#4ade80', 0.35, 1, 0.05);
@@ -1666,6 +1672,7 @@ export function Game({
       p.obj.lookAt(vC.copy(p.pos).sub(dir));
       p.stuck = seconds;
       p.spent = true;
+      if (!p.noStop || Math.random() < 0.2) gameAudio.playDartStick();
     }
 
     function updateProjectiles(step: number) {
@@ -2030,6 +2037,7 @@ export function Game({
         def.isGrounded = false;
       }
       vfx.ring(vA.set(def.pos[0], 0, def.pos[2]), 3, color, 0.7, 0.12, 0.5);
+      gameAudio.playGong();
       onRoundEvent?.({ type: 'ko', winner: defSlot === 1 ? 'player' : 'enemy' });
     }
 
@@ -2149,7 +2157,7 @@ export function Game({
       vfx.dustPuff(pt, 12, 0.4, 2.2, 0.7, '#8a7f72');
       vfx.sparkBurst(pt, 16, '#ffd9a8', 6, 0.08);
       vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), '撞墙!', true, '#fde68a');
-      gameAudio.playGeneralExplosion();
+      gameAudio.playHitHeavy();
       applyHit(other, att, c, 70, { heavy: true, knock: 0, state: 'hitstun', dur: 0.9, unblockable: true, noMark: true, shake: 0.3 });
     }
 
@@ -2246,7 +2254,7 @@ export function Game({
               vfx.ring(pos, v.r + 0.6, '#ff6a1a', 0.45, 0.14, 0.6);
               vfx.flash(vB.set(v.x, 1.5, v.z), '#ff7a2a', 45, 0.35, 10);
               controller?.addShake(Math.max(0, 0.35 - Math.hypot(v.x - p1.pos[0], v.z - p1.pos[2]) * 0.03));
-              gameAudio.playGeneralExplosion();
+              gameAudio.playBoom();
               fighters.forEach((c, i) => {
                 if (Math.hypot(c.pos[0] - v.x, c.pos[2] - v.z) < v.r && c.pos[1] < 1.5) envHit(i, 90, 10, '火柱');
               });
@@ -2267,8 +2275,8 @@ export function Game({
       onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,80,20,0.35)' });
       controller?.addShake(0.55);
       controller?.kick(-3);
-      gameAudio.playGeneralExplosion();
-      gameAudio.playChiptuneExplosion();
+      gameAudio.playBoom();
+      
       vfx.sparkBurst(crater, 90, '#ff6a1a', 26, 1.1, new THREE.Vector3(0, 1, 0), 0.5);
       vfx.dustPuff(crater, 20, 4, 6, 6, '#2a1a14');
       vfx.flash(crater, '#ff6a1a', 900, 2.5, 220);
@@ -2304,7 +2312,7 @@ export function Game({
             vfx.fireColumn(g, 2.4);
             const dp = Math.hypot(tx - p1.pos[0], tz - p1.pos[2]);
             controller?.addShake(Math.max(0.05, 0.45 - dp * 0.04));
-            gameAudio.playGeneralExplosion();
+            gameAudio.playBoom();
             fighters.forEach((c, i) => {
               if (Math.hypot(c.pos[0] - tx, c.pos[2] - tz) < zone.r && c.pos[1] < 2) envHit(i, 110, 9, '火山弹');
             });
@@ -2323,7 +2331,7 @@ export function Game({
           mapRuntime.lightning = 1;
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(225,235,255,0.45)' });
           vfx.later(0.35 + Math.random() * 0.4, () => {
-            gameAudio.playGeneralExplosion();
+            gameAudio.playThunder();
             controller?.addShake(0.12);
           });
         }
@@ -2342,7 +2350,7 @@ export function Game({
           mapRuntime.waveRise = 1.15;
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(170,215,255,0.4)' });
           controller?.addShake(0.4);
-          gameAudio.playGeneralExplosion();
+          gameAudio.playWaveCrash();
           for (let k = 0; k < 14; k++) {
             const z = -12 + (k / 13) * 24;
             vB.set(w.side * hx, 0.5, z);

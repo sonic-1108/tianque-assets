@@ -7,6 +7,7 @@ import React, {
   type MutableRefObject,
   type RefObject,
 } from 'react';
+import { WuxiaSound, AmbienceId } from './wuxiaSound';
 
 /**  --- Overlay component ---
  * A full-screen UI overlay component used to display game states
@@ -756,6 +757,116 @@ class GameAudio {
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// 天阙 sound set: the old chiptune blips are replaced by synthesised blades,
+// metal, impacts, gongs and taiko (see wuxiaSound.ts). New semantic sounds are
+// added as play* methods so online play can replay them on the guest by name.
+// ---------------------------------------------------------------------------
+export const wuxia = new WuxiaSound();
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+interface GameAudio {
+  playSwingLight(): void;
+  playSwingHeavy(): void;
+  playKick(): void;
+  playWhirl(): void;
+  playCharge(): void;
+  playHitLight(): void;
+  playHitHeavy(): void;
+  playClash(): void;
+  playPerfect(): void;
+  playThrow(): void;
+  playThrowFan(): void;
+  playThrowHeavy(): void;
+  playDartHit(): void;
+  playDartStick(): void;
+  playDodge(): void;
+  playJump(): void;
+  playLand(): void;
+  playStep(): void;
+  playSlam(): void;
+  playBoom(): void;
+  playRage(): void;
+  playPoison(): void;
+  playUltRise(): void;
+  playUltImpact(): void;
+  playGong(): void;
+  playThunder(): void;
+  playWaveCrash(): void;
+  startMusic(): void;
+  stopMusic(): void;
+  setAmbience(id: AmbienceId): void;
+}
+const viaWuxia = (fn: (w: WuxiaSound) => void) =>
+  function (this: any) {
+    const ctx: AudioContext | null = this.ensure();
+    if (!ctx || !this.sfxMaster || !this.master) return;
+    wuxia.attach(ctx, this.sfxMaster, this.master);
+    if (this.muted) return;
+    fn(wuxia);
+  };
+Object.assign(GameAudio.prototype, {
+  // legacy names, re-voiced
+  playCrispClick: viaWuxia((w) => w.wood()),
+  playConfirmSelect: viaWuxia((w) => w.wood()),
+  playPowerupChime: viaWuxia((w) => w.chime()),
+  playSwordClash: viaWuxia((w) => w.clash()),
+  playShieldBlock: viaWuxia((w) => w.clash()),
+  playMeleePunch: viaWuxia((w) => w.hitLight()),
+  playGeneralDamage: viaWuxia((w) => w.hitLight()),
+  playGeneralExplosion: viaWuxia((w) => w.boom()),
+  playChiptuneExplosion: viaWuxia((w) => w.hitHeavy()),
+  playArcadeLaser: viaWuxia((w) => w.throwHeavy()),
+  playRetroJump: viaWuxia((w) => w.jump()),
+  playVictoryFanfare: viaWuxia((w) => w.ultRise()),
+  playLevelUpStinger: viaWuxia((w) => w.rage()),
+  playGunshotBlast: viaWuxia((w) => w.charge()),
+  playDefeatMotif: viaWuxia((w) => w.gong()),
+  // new
+  playSwingLight: viaWuxia((w) => w.swingLight()),
+  playSwingHeavy: viaWuxia((w) => w.swingHeavy()),
+  playKick: viaWuxia((w) => w.kick()),
+  playWhirl: viaWuxia((w) => w.whirl()),
+  playCharge: viaWuxia((w) => w.charge()),
+  playHitLight: viaWuxia((w) => w.hitLight()),
+  playHitHeavy: viaWuxia((w) => w.hitHeavy()),
+  playClash: viaWuxia((w) => w.clash()),
+  playPerfect: viaWuxia((w) => w.perfect()),
+  playThrow: viaWuxia((w) => w.throwDart()),
+  playThrowFan: viaWuxia((w) => w.throwFan()),
+  playThrowHeavy: viaWuxia((w) => w.throwHeavy()),
+  playDartHit: viaWuxia((w) => w.dartHit()),
+  playDartStick: viaWuxia((w) => w.dartStick()),
+  playDodge: viaWuxia((w) => w.dodge()),
+  playJump: viaWuxia((w) => w.jump()),
+  playLand: viaWuxia((w) => w.land()),
+  playStep: viaWuxia((w) => w.step()),
+  playSlam: viaWuxia((w) => w.slam()),
+  playBoom: viaWuxia((w) => w.boom()),
+  playRage: viaWuxia((w) => w.rage()),
+  playPoison: viaWuxia((w) => w.poison()),
+  playUltRise: viaWuxia((w) => w.ultRise()),
+  playUltImpact: viaWuxia((w) => w.ultImpact()),
+  playGong: viaWuxia((w) => w.gong()),
+  playThunder: viaWuxia((w) => w.thunder()),
+  playWaveCrash: viaWuxia((w) => w.waveCrash()),
+  // music and ambience ignore the sfx mute flag (music has its own toggle)
+  startMusic: function (this: any) {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    wuxia.attach(ctx, this.sfxMaster, this.master);
+    wuxia.startMusic();
+  },
+  stopMusic: function () {
+    wuxia.stopMusic();
+  },
+  setAmbience: function (this: any, id: AmbienceId) {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    wuxia.attach(ctx, this.sfxMaster, this.master);
+    wuxia.setAmbience(id);
+  },
+});
 
 /** Shared singleton — import and use anywhere. */
 export const gameAudio = new GameAudio();
