@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'bamboo' | 'rooftop' | 'summit';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit';
 
 export interface Circle {
   x: number;
@@ -123,6 +123,36 @@ export const MAPS: Record<MapId, MapDef> = {
       { x: -2.9, z: -0.6, r: 0.7, h: 1.1 },
     ],
   },
+  glacier: {
+    id: 'glacier',
+    name: '雪岭冰峰',
+    subtitle: '暴雪中的冰川山谷，北面是一整面雪坡',
+    icon: '🏔️',
+    mechanics: [
+      '谷底平地，北面是陡峭雪坡，坡顶有一片高台',
+      '爬陡坡会持续消耗体力，体力耗尽就会滑下来；东侧有一条缓坡山道，走山道几乎不耗体力',
+      '雪坡上会发生雪崩，从坡顶一路冲到谷底，山道上是安全的',
+      '居高临下：站在高台上，近战够不到你',
+    ],
+    homeClass: 'Ranger',
+    homeClassName: '暗器',
+    homeBonus: '伤害 +10%',
+    available: true,
+    radius: 15,
+    spawnPlayer: [0, 7],
+    spawnEnemy: [-2, 0],
+    background: '#b9c8d8',
+    fog: [40, 200],
+    hemi: ['#d6e3f2', '#3e4c60', 0.8],
+    keyColor: '#fff1dd',
+    keyIntensity: 2.6,
+    exposure: 0.78,
+    cardGradient: 'from-sky-200/40 via-slate-500/50 to-slate-900/90',
+    pillars: [
+      { x: -7.5, z: 4.5, r: 0.9, h: 1.6 },
+      { x: 3.5, z: 6.5, r: 0.75, h: 1.2 },
+    ],
+  },
   bamboo: {
     id: 'bamboo',
     name: '雪夜竹林',
@@ -188,7 +218,7 @@ export const MAPS: Record<MapId, MapDef> = {
   },
 };
 
-export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'bamboo', 'rooftop', 'summit'];
+export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'rooftop', 'summit'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {
@@ -199,4 +229,45 @@ export const mapRuntime = {
   lightning: 0, // 0..1 lightning flash
   shipRoll: 0, // radians, 怒海战船 deck roll
   shipPitch: 0,
+  avalancheZ: -999, // 雪岭冰峰: z of the avalanche front (-999 = none)
+  avalancheWarn: 0, // 0..1 rumble before it breaks loose
 };
+
+// ----------------------------------------------------------------------
+// 雪岭冰峰 terrain. Shared by the physics (Game) and the mesh (Maps3D).
+// ----------------------------------------------------------------------
+export const GLACIER = {
+  plateau: 6.5, // height of the high shelf
+  faceTop: -10, // z where the steep face reaches the shelf
+  faceBottom: -3.5, // z where it starts rising from the valley floor
+  pathX: 10, // centre line of the gentle mountain path
+  pathHalf: 1.8,
+  pathStart: 6, // z where the path leaves the valley floor
+  avalancheX: [-11, 7] as [number, number], // the avalanche runs down this band of the face
+};
+const sstep = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+/** Ground height of 雪岭冰峰 at (x, z) */
+export function glacierHeight(x: number, z: number) {
+  const G = GLACIER;
+  // steep north face rising to the shelf
+  const face = G.plateau * sstep(G.faceBottom, G.faceTop, z);
+  // the mountain path: a long gentle ramp hugging the east side
+  const ramp = G.plateau * sstep(G.pathStart, G.faceTop, z);
+  const onPath = 1 - sstep(G.pathHalf, G.pathHalf + 1.4, Math.abs(x - G.pathX));
+  // on the path the gentle ramp replaces the face (it runs as a raised track up the east side)
+  let h = face + (ramp - face) * onPath;
+  // drifts and hummocks, flattened in the centre of the valley
+  const r = Math.hypot(x, z);
+  h += (Math.sin(x * 0.45 + 1.3) * Math.cos(z * 0.38) * 0.35 + Math.sin(x * 1.1 - z * 0.7) * 0.08) * sstep(4, 9, r) * (1 - onPath * 0.8);
+  // mountains walling the valley in (outside the play area)
+  if (r > 16) h += Math.pow(r - 16, 1.25) * 0.75 + Math.sin(Math.atan2(z, x) * 7 + r * 0.15) * (r - 16) * 0.22;
+  return h;
+}
+/** Uphill gradient (dh/dx, dh/dz) */
+export function glacierGradient(x: number, z: number): [number, number] {
+  const e = 0.25;
+  return [(glacierHeight(x + e, z) - glacierHeight(x - e, z)) / (2 * e), (glacierHeight(x, z + e) - glacierHeight(x, z - e)) / (2 * e)];
+}

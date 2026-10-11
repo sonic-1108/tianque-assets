@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Sky, KarstPeaks, CloudSea, CloudPuffs, Banner, seeded, cloudPuffTexture } from './Scenery';
-import { MAPS, MapId, mapRuntime, VOLCANO_CRATER } from '../maps';
+import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -1390,9 +1390,285 @@ function SeaMap() {
   );
 }
 
+// ------------------------------------------------------------------
+// 雪岭冰峰: a snowbound glacier valley, a steep north face with a shelf on top,
+// a staked mountain path up the east side, blizzard, avalanches.
+// ------------------------------------------------------------------
+function glacierTerrain() {
+  const size = 120;
+  const seg = 240;
+  const g = new THREE.PlaneGeometry(size, size, seg, seg);
+  g.rotateX(-Math.PI / 2);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const cols = new Float32Array(pos.count * 3);
+  const snow = new THREE.Color('#e3eaf2');
+  const blue = new THREE.Color('#b7c8dc');
+  const rock = new THREE.Color('#3f464f');
+  const path = new THREE.Color('#bfc4c8');
+  const dirt = new THREE.Color('#8f877c');
+  const c = new THREE.Color();
+  const rand = seeded(23);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const h = glacierHeight(x, z);
+    pos.setY(i, h);
+    const [gx, gz] = glacierGradient(x, z);
+    const steep = Math.hypot(gx, gz);
+    // snow, a little bluer in hollows; bare rock where it is too steep for snow to stick
+    c.copy(snow).lerp(blue, Math.min(1, Math.max(0, 0.5 - h * 0.05)) * 0.6 + rand() * 0.08);
+    // streaky rock bands on the face and the rim: snow only clings to the gentler ledges
+    const streak = 0.5 + 0.5 * Math.sin(x * 1.7 + Math.sin(z * 0.9) * 2.0);
+    const rockAmt = THREE.MathUtils.smoothstep(steep + streak * 0.35, 1.05, 1.6) * (0.7 + rand() * 0.3);
+    c.lerp(rock, rockAmt);
+    // the trodden mountain path: packed snow with a muddy centre line
+    const onPath = 1 - THREE.MathUtils.smoothstep(Math.abs(x - GLACIER.pathX), GLACIER.pathHalf - 0.2, GLACIER.pathHalf + 0.6);
+    const pathRun = z < GLACIER.pathStart + 1 && z > GLACIER.faceTop - 1.5 ? 1 : 0;
+    c.lerp(path, onPath * pathRun * 0.85);
+    c.lerp(dirt, (1 - THREE.MathUtils.smoothstep(Math.abs(x - GLACIER.pathX), 0.2, 0.9)) * pathRun * 0.55);
+    cols.set([c.r, c.g, c.b], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Distant snowy mountains: jagged cones, white above the snow line, fading into the haze */
+function SnowRange({ haze = '#c9d6e3' }: { haze?: string }) {
+  const items = useMemo(() => {
+    const rand = seeded(61);
+    const hz = new THREE.Color(haze);
+    const out: { geo: THREE.BufferGeometry; pos: [number, number, number] }[] = [];
+    for (const [dist, count, hMin, hMax, fade] of [
+      [95, 12, 35, 60, 0.15],
+      [170, 16, 55, 95, 0.45],
+      [260, 20, 80, 140, 0.7],
+    ] as const) {
+      for (let k = 0; k < count; k++) {
+        const a = (k / count) * Math.PI * 2 + rand() * 0.3;
+        const d = dist * (0.85 + rand() * 0.3);
+        const h = hMin + rand() * (hMax - hMin);
+        const r = h * (0.55 + rand() * 0.35);
+        const g = new THREE.ConeGeometry(r, h, 11, 6);
+        g.translate(0, h / 2, 0);
+        const p = g.attributes.position as THREE.BufferAttribute;
+        const cols = new Float32Array(p.count * 3);
+        const col = new THREE.Color();
+        for (let i = 0; i < p.count; i++) {
+          const y = p.getY(i);
+          const t = y / h;
+          const j = 1 + (rand() - 0.5) * 0.35 * (1 - t);
+          p.setX(i, p.getX(i) * j);
+          p.setZ(i, p.getZ(i) * j);
+          p.setY(i, y + (rand() - 0.5) * h * 0.05 * (1 - t));
+          const snowLine = 0.45 + rand() * 0.2;
+          col.set(t > snowLine ? '#f4f7fb' : '#4b5560').lerp(hz, Math.min(1, fade + (1 - t) * 0.35));
+          cols.set([col.r, col.g, col.b], i * 3);
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+        out.push({ geo: g, pos: [Math.cos(a) * d, -10, Math.sin(a) * d] });
+      }
+    }
+    return out;
+  }, [haze]);
+  const mat = useMemo(() => new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }), []);
+  return (
+    <group>
+      {items.map((it, i) => (
+        <mesh key={i} geometry={it.geo} material={mat} position={it.pos} />
+      ))}
+    </group>
+  );
+}
+
+/** Wind-blown snowfall */
+function Snowfall() {
+  const { geo, mat } = useMemo(() => {
+    const n = 3200;
+    const pos = new Float32Array(n * 3);
+    const seed = new Float32Array(n);
+    const rand = seeded(5);
+    for (let i = 0; i < n; i++) {
+      pos.set([(rand() - 0.5) * 80, rand() * 36, (rand() - 0.5) * 80], i * 3);
+      seed[i] = rand();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('seed', new THREE.BufferAttribute(seed, 1));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
+    const m = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */ `
+        uniform float uTime; attribute float seed; varying float vA;
+        void main(){
+          vec3 p = position;
+          p.y = mod(p.y - uTime * (1.4 + seed * 1.2), 36.0) - 6.0;
+          p.x = mod(p.x + uTime * 2.4 + sin(uTime * 0.7 + seed * 20.0) * 1.5 + 40.0, 80.0) - 40.0;
+          p.z += cos(uTime * 0.5 + seed * 13.0) * 1.2;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_PointSize = (28.0 + seed * 40.0) / -mv.z;
+          vA = 0.55 + seed * 0.45;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying float vA;
+        void main(){
+          float d = length(gl_PointCoord - 0.5);
+          if (d > 0.5) discard;
+          gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), (1.0 - d * 2.0) * vA);
+        }`,
+    });
+    return { geo: g, mat: m };
+  }, []);
+  useFrame((st) => {
+    mat.uniforms.uTime.value = st.clock.elapsedTime;
+  });
+  return <points geometry={geo} material={mat} frustumCulled={false} />;
+}
+
+/** Snow-laden pines (instanced): three tiers of needles, each capped with snow */
+function SnowPines({ spots }: { spots: [number, number, number][] }) {
+  const meshes = useMemo(() => {
+    const tiers = 3;
+    const needle = new THREE.MeshStandardMaterial({ color: '#203a2c', roughness: 0.9, flatShading: true });
+    const snowM = new THREE.MeshStandardMaterial({ color: '#f4f7fb', roughness: 0.85, flatShading: true });
+    const trunkM = new THREE.MeshStandardMaterial({ color: '#3b2a1e', roughness: 1 });
+    const cone = new THREE.ConeGeometry(1, 1, 7);
+    const trunkG = new THREE.CylinderGeometry(0.12, 0.16, 1, 6);
+    const n = spots.length;
+    const needles = new THREE.InstancedMesh(cone, needle, n * tiers);
+    const caps = new THREE.InstancedMesh(cone, snowM, n * tiers);
+    const trunks = new THREE.InstancedMesh(trunkG, trunkM, n);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    spots.forEach(([x, z, s], i) => {
+      const y = glacierHeight(x, z);
+      trunks.setMatrixAt(i, m.compose(new THREE.Vector3(x, y + 0.5 * s, z), q, new THREE.Vector3(s, s, s)));
+      for (let t = 0; t < tiers; t++) {
+        const r = (1.25 - t * 0.32) * s;
+        const hh = (1.5 - t * 0.25) * s;
+        const yy = y + (0.9 + t * 1.0) * s;
+        needles.setMatrixAt(i * tiers + t, m.compose(new THREE.Vector3(x, yy, z), q, new THREE.Vector3(r, hh, r)));
+        caps.setMatrixAt(i * tiers + t, m.compose(new THREE.Vector3(x, yy + hh * 0.22, z), q, new THREE.Vector3(r * 0.82, hh * 0.6, r * 0.82)));
+      }
+    });
+    for (const im of [needles, caps, trunks]) {
+      im.castShadow = true;
+      im.instanceMatrix.needsUpdate = true;
+    }
+    return [needles, caps, trunks];
+  }, [spots]);
+  return (
+    <group>
+      {meshes.map((im, i) => (
+        <primitive key={i} object={im} />
+      ))}
+    </group>
+  );
+}
+
+function GlacierMap() {
+  const def = MAPS.glacier;
+  const terrain = useMemo(() => glacierTerrain(), []);
+  const pines = useMemo(() => {
+    const rand = seeded(88);
+    const out: [number, number, number][] = [];
+    // around the valley rim and up the slopes outside the arena
+    for (let k = 0; k < 70; k++) {
+      const a = rand() * Math.PI * 2;
+      const r = 16 + rand() * 22;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      out.push([x, z, 0.9 + rand() * 0.9]);
+    }
+    // a few along the outer side of the mountain path
+    for (let z = 4; z > -9; z -= 3.2) out.push([GLACIER.pathX + 3.6 + rand(), z + rand(), 0.8 + rand() * 0.4]);
+    return out;
+  }, []);
+  // wooden stakes with red ribbons marking the inner edge of the mountain path
+  const stakes = useMemo(() => {
+    const out: [number, number, number][] = [];
+    for (let z = GLACIER.pathStart; z > GLACIER.faceTop; z -= 2.2) {
+      const x = GLACIER.pathX - GLACIER.pathHalf - 0.25;
+      out.push([x, glacierHeight(x, z), z]);
+    }
+    return out;
+  }, []);
+  // avalanche: a rolling wall of snow cloud
+  const avRef = useRef<THREE.Group>(null);
+  const puff = useMemo(() => cloudPuffTexture(), []);
+  useFrame((st) => {
+    const g = avRef.current;
+    if (!g) return;
+    const z = mapRuntime.avalancheZ;
+    g.visible = z > -900;
+    if (!g.visible) return;
+    const t = st.clock.elapsedTime;
+    g.children.forEach((s, i) => {
+      const x = GLACIER.avalancheX[0] + ((i % 9) / 8) * (GLACIER.avalancheX[1] - GLACIER.avalancheX[0]);
+      const back = Math.floor(i / 9) * 1.6;
+      const zz = z - back;
+      s.position.set(x + Math.sin(t * 2 + i) * 0.4, glacierHeight(x, zz) + 1.2 + Math.floor(i / 9) * 0.9, zz);
+      const k = 4.5 + Math.sin(t * 3 + i * 1.3) * 0.6 + Math.floor(i / 9);
+      s.scale.set(k * 1.4, k, 1);
+    });
+  });
+  return (
+    <group>
+      <Sky zenith="#7d92ab" horizon="#dbe4ed" below="#c9d4de" sunDir={[-0.35, 0.22, -1]} sunColor="#fff3e0" sunSize={1.2} streaks={0.7} streakColor="#f2f5f8" />
+      <SnowRange />
+      <CloudPuffs count={20} inner={40} outer={130} y={[14, 30]} color="#e9eef3" seed={41} />
+      <mesh geometry={terrain} receiveShadow castShadow>
+        <meshStandardMaterial vertexColors roughness={0.88} metalness={0} />
+      </mesh>
+      <SnowPines spots={pines} />
+      {stakes.map(([x, y, z], i) => (
+        <group key={i} position={[x, y, z]}>
+          <mesh position={[0, 0.5, 0]} castShadow>
+            <cylinderGeometry args={[0.05, 0.06, 1.0, 6]} />
+            <meshStandardMaterial color="#4a3423" roughness={0.9} />
+          </mesh>
+          <mesh position={[0.12, 0.92, 0]} rotation={[0, 0, -0.3]}>
+            <planeGeometry args={[0.28, 0.08]} />
+            <meshStandardMaterial color="#b91c1c" side={THREE.DoubleSide} roughness={0.8} />
+          </mesh>
+        </group>
+      ))}
+      {/* ice boulders you can jump onto */}
+      {def.pillars!.map((p, i) => (
+        <group key={i} position={[p.x, glacierHeight(p.x, p.z), p.z]}>
+          {[0, 1, 2, 3, 4].map((k) => (
+            <mesh
+              key={k}
+              position={[Math.cos(k * 1.3) * p.r * 0.35 * (k ? 1 : 0), ((p.h ?? 1.4) * (k ? 0.55 : 0.75)) / 2, Math.sin(k * 1.3) * p.r * 0.35 * (k ? 1 : 0)]}
+              rotation={[Math.sin(k) * 0.3, k * 0.9, Math.cos(k * 1.7) * 0.3]}
+              scale={[p.r * (k ? 0.55 : 0.9), (p.h ?? 1.4) * (k ? 0.65 : 1.05), p.r * (k ? 0.55 : 0.9)]}
+              castShadow
+            >
+              <octahedronGeometry args={[1, 0]} />
+              <meshStandardMaterial color="#bfe3f7" roughness={0.12} metalness={0.05} transparent opacity={0.88} emissive="#3b8bc4" emissiveIntensity={0.18} flatShading />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      <group ref={avRef} visible={false}>
+        {Array.from({ length: 27 }, (_, i) => (
+          <sprite key={i}>
+            <spriteMaterial map={puff} color="#f8fafc" transparent depthWrite={false} opacity={0.95} />
+          </sprite>
+        ))}
+      </group>
+      <Snowfall />
+    </group>
+  );
+}
+
 export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'lavacliff') return <LavaCliffMap />;
   if (mapId === 'sea') return <SeaMap />;
+  if (mapId === 'glacier') return <GlacierMap />;
   return <TempleMap />;
 }
 

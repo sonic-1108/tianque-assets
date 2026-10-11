@@ -4,7 +4,7 @@
  * and a generative guzheng score in D minor pentatonic.
  */
 
-export type AmbienceId = 'temple' | 'lavacliff' | 'sea' | 'none';
+export type AmbienceId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'none';
 
 interface Bus {
   ctx: AudioContext;
@@ -481,6 +481,18 @@ export class WuxiaSound {
         for (let k = 0; k < 3; k++) if (Math.random() < 0.6) this.burst(b, b.now + Math.random() * 0.4, 0.02, 'bandpass', 1500 + Math.random() * 3000, 0.08 + Math.random() * 0.1);
         if (Math.random() < 0.4) this.thump(b, b.now + Math.random() * 0.3, 140 + Math.random() * 120, 60, 0.15, 0.15, 0.1);
       }, 400);
+    } else if (id === 'glacier') {
+      // a howling blizzard: two wind voices with slow gusts, and now and then ice groaning
+      loopNoise(this.pinkNoise, 'bandpass', 650, 1.4, 0.32, 0.06, 0.28);
+      loopNoise(this.pinkNoise, 'bandpass', 1300, 2.2, 0.12, 0.13, 0.1);
+      loopNoise(this.noise, 'highpass', 4000, 0.5, 0.03, 0.09, 0.02);
+      this.ambTimer = window.setInterval(() => {
+        if (Math.random() < 0.25) {
+          const b = ambBus();
+          this.thump(b, b.now, 60 + Math.random() * 30, 35, 0.9, 0.12, 0.4);
+          this.metal(b, b.now + 0.1, 520 + Math.random() * 200, 0.025, 1.2, [1, 2.4, 3.9], 0.6);
+        }
+      }, 2200);
     } else if (id === 'sea') {
       // rain hiss, swelling waves, creaking hull
       loopNoise(this.noise, 'highpass', 1800, 0.5, 0.09);
@@ -903,13 +915,15 @@ interface MusicTheme {
   bpm: number;
   scale: number[];
 }
-const THEMES: Record<'temple' | 'lavacliff' | 'sea', MusicTheme> = {
+const THEMES: Record<'temple' | 'lavacliff' | 'sea' | 'glacier', MusicTheme> = {
   // 羽调 on D: open, majestic
   temple: { root: 293.66, bpm: 84, scale: [0, 3, 5, 7, 10] },
   // E with a flattened second: dark and driving
   lavacliff: { root: 329.63, bpm: 104, scale: [0, 1, 5, 7, 8] },
   // A minor pentatonic, restless
   sea: { root: 220, bpm: 96, scale: [0, 3, 5, 7, 10] },
+  // B, sparse and cold
+  glacier: { root: 246.94, bpm: 72, scale: [0, 2, 5, 7, 10] },
 };
 // chord roots per bar, as scale degrees
 const PROGS = [

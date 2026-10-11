@@ -10,7 +10,7 @@ import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { CameraController } from './CameraController';
 import type { NetSession } from './net';
@@ -167,6 +167,7 @@ export function Game({
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   const lightningRef = useRef({ timer: 5 });
+  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
   const wallCdRef = useRef([0, 0]);
@@ -429,16 +430,16 @@ export function Game({
       if (c.actionState === 'buried') {
         c.vel[0] = 0;
         c.vel[2] = 0;
-        c.pos[1] = THREE.MathUtils.damp(c.pos[1], -0.75, 25, cdt);
+        c.pos[1] = THREE.MathUtils.damp(c.pos[1], fy(c.pos[0], c.pos[2]) - 0.75, 25, cdt);
         if (c.stateTimer >= c.stateDuration && c.hp > 0) {
-          c.pos[1] = 0;
+          c.pos[1] = fy(c.pos[0], c.pos[2]);
           c.vel[1] = 8.5;
           c.isGrounded = false;
           c.actionState = 'launched';
           c.stateTimer = 0;
           c.stateDuration = 0.9;
           c.juggleCount = 0;
-          vfx.rocks(vB.set(c.pos[0], 0, c.pos[2]), 10, 6, 0.1);
+          vfx.rocks(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 6, 0.1);
           vfx.dustPuff(vB, 16, 0.6, 3, 0.7);
           vfx.ring(vB, 1.8, '#d6c2a8', 0.35, 0.14, 0.3);
           gameAudio.playSlam();
@@ -458,7 +459,7 @@ export function Game({
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
         const gh = groundHeight(c);
-        if (c.vel[1] <= 0 && c.pos[1] <= gh && c.pos[1] > gh - 0.6) {
+        if (c.vel[1] <= 0 && c.pos[1] <= gh && (c.pos[1] > gh - 0.6 || map.id === 'glacier')) {
           c.pos[1] = gh;
           const impact = -c.vel[1];
           c.vel[1] = 0;
@@ -471,7 +472,7 @@ export function Game({
             c.stateTimer = 0;
             c.stateDuration = c.hp > 0 ? 0.8 : 99;
           }
-          if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
+          if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
         }
       }
       const pinned = (c.rootTimer ?? 0) > 0 && c.isGrounded && c.actionState !== 'launched' && c.actionState !== 'knockdown';
@@ -489,7 +490,14 @@ export function Game({
         c.vel[2] *= k;
       }
       applyBounds(i, c);
-      if (c.isGrounded && c.pos[1] > 0.01 && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - 0.05) {
+      if (map.id === 'glacier' && c.isGrounded && c.actionState !== 'buried') {
+        const gh2 = groundHeight(c);
+        if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
+      } else if (!c.isGrounded && map.id === 'glacier' && c.actionState !== 'buried') {
+        const gh2 = groundHeight(c);
+        if (c.pos[1] < gh2 - 0.05 && c.vel[1] <= 0) c.pos[1] = gh2; // never fall through a slope
+      }
+      if (c.isGrounded && (c.pos[1] > 0.01 || map.id === 'glacier') && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - (map.id === 'glacier' ? 0.6 : 0.05)) {
         c.isGrounded = false;
         c.vel[1] = Math.min(c.vel[1], 0);
         if (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'block') c.actionState = 'jump';
@@ -505,7 +513,7 @@ export function Game({
         footTimers.current[i] += dt;
         if (footTimers.current[i] > 0.28) {
           footTimers.current[i] = 0;
-          vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 2, 0.15, 0.6, 0.35, '#7d7166');
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2, 0.15, 0.6, 0.35, '#7d7166');
           if (i === 0) gameAudio.playStep();
         }
       }
@@ -642,7 +650,7 @@ export function Game({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn },
         ev: net.events.splice(0),
       });
     }
@@ -918,7 +926,7 @@ export function Game({
             c.isGrounded = false;
             c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.4);
             c.perfectDodgeUsed = true;
-            vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.5);
+            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 0.4, 2, 0.5);
             gameAudio.playDodge();
             return true;
           }
@@ -926,7 +934,7 @@ export function Game({
             if (!paySkill(3, 'skill4', '4')) return false;
             start('skill_4');
             c.poisonBuff = 3;
-            vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
+            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
             vfx.embers(vC.set(c.pos[0], 0.4, c.pos[2]), 30, '#4ade80', 0.6, 2.5, 0.07);
             gameAudio.playPowerupChime();
             return true;
@@ -941,7 +949,7 @@ export function Game({
             c.volleyShots = 0;
             const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
             c.rainCenter = foe.hp > 0 && fd < 14 ? [foe.pos[0], foe.pos[2]] : [c.pos[0] + f.x * 7, c.pos[2] + f.z * 7];
-            vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
+            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
             vfx.embers(vC.set(c.pos[0], 0.3, c.pos[2]), 30, color, 0.6, 4, 0.08);
             gameAudio.playVictoryFanfare();
             return true;
@@ -975,7 +983,7 @@ export function Game({
           c.dodgeIframeTimer = ranger ? 0.42 : 0.35;
           c.dodgeCooldownTimer = ranger ? 0.3 : 0.45; // stamina is the real limit now
           c.perfectDodgeUsed = false;
-          vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.55);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 0.4, 2, 0.55);
           gameAudio.playDodge();
           report('闪避', '成功施放 (Cast)');
           return true;
@@ -1008,7 +1016,7 @@ export function Game({
           c.isGrounded = false;
           c.actionState = 'jump';
           c.stateDuration = 0;
-          vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 6, 0.3, 1.2, 0.45);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 6, 0.3, 1.2, 0.45);
           gameAudio.playJump();
           report('跳跃', '成功起跳');
           return true;
@@ -1028,7 +1036,7 @@ export function Game({
           if (c.isGrounded && ((cur === 'dodge' && c.stateTimer > 0.18) || (free && gt - (c.dodgeEndAt ?? -9) < 0.3))) {
             start('attack_2', 13);
             c.dodgeSlash = true;
-            vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 8, 0.3, 2, 0.5);
+            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 8, 0.3, 2, 0.5);
             gameAudio.playSwingHeavy();
             report('普攻', '回身斩');
             return true;
@@ -1066,14 +1074,14 @@ export function Game({
           if (!paySkill(1, 'skill2', '2')) return false;
           start('skill_2', 0);
           vfx.setVortex(true, phasesFor(c).skill_2!.totalDuration, slot);
-          vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 18, 1, 3, 0.7);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 18, 1, 3, 0.7);
           gameAudio.playWhirl();
           return true;
         }
         case 'skill3': {
           if (!paySkill(2, 'skill3', '3')) return false;
           start('skill_3', phasesFor(c).skill_3!.forwardMomentum);
-          vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 14, 0.5, 2.5, 0.6);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 14, 0.5, 2.5, 0.6);
           gameAudio.playCharge();
           return true;
         }
@@ -1086,7 +1094,7 @@ export function Game({
           c.buffs = c.buffs.filter((b) => b.type !== 'blood_rage');
           c.buffs.push({ id: `rage_${slot}_${Date.now()}`, type: 'blood_rage', duration: 8, value: 0.35 });
           vfx.pillarAt(1.1, isPlayer ? '#ff1f1f' : '#1f6bff', slot);
-          vfx.ring(vB.set(c.pos[0], 0, c.pos[2]), 2.6, isPlayer ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2.6, isPlayer ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
           vfx.embers(vC.set(c.pos[0], 0.2, c.pos[2]), 45, isPlayer ? '#ff3b2a' : '#3b8bff', 0.7, 3.5, 0.08);
           if (isPlayer) {
             controller?.addShake(0.25);
@@ -1102,7 +1110,7 @@ export function Game({
           c.vel[1] = 13;
           c.isGrounded = false;
           c.ultSlamStarted = false;
-          vfx.ring(vB.set(c.pos[0], 0, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
           vfx.dustPuff(vB, 20, 0.8, 3.5, 0.8);
           gameAudio.playUltRise();
           return true;
@@ -1158,6 +1166,48 @@ export function Game({
           if (c.actionState === 'idle' || c.actionState === 'block') c.targetRotY = intent.faceYaw;
         }
       }
+      if (map.id === 'glacier') climb(c, intent);
+    }
+
+    /**
+     * 雪岭冰峰 climbing. Hauling yourself up a steep face drains 体力 fast and slows you right down;
+     * run dry and you slide back to the bottom. The mountain path is gentle enough to walk for free.
+     * Standing still on the steep face, the snow slowly gives way under you.
+     */
+    function climb(c: CombatantState, intent: Intent) {
+      c.climbing = false;
+      c.sliding = false;
+      if (!c.isGrounded || c.hp <= 0 || c.actionState === 'buried' || c.actionState === 'launched' || c.actionState === 'knockdown') return;
+      const [gx, gz] = glacierGradient(c.pos[0], c.pos[2]);
+      const steep = Math.hypot(gx, gz);
+      if (steep < 0.75) return; // valley floor, plateau and the mountain path
+      const ux = gx / steep;
+      const uz = gz / steep;
+      const mv = intent.move;
+      const along = mv.lengthSq() > 0.01 ? (mv.x * ux + mv.z * uz) / Math.max(0.001, mv.length()) : 0; // +1 = straight uphill
+      if (along > 0.3) {
+        if ((c.stamina ?? 0) > 0.5) {
+          // climbing: slow, costly, steeper costs more
+          c.climbing = true;
+          const ml = Math.max(0.001, mv.length());
+          const climbSpeed = speedOf(c) * 0.42;
+          c.vel[0] = (mv.x / ml) * climbSpeed;
+          c.vel[2] = (mv.z / ml) * climbSpeed;
+          c.stamina = Math.max(0, (c.stamina ?? 0) - dt * (16 + steep * 9) * along);
+          c.staminaDelay = 0.8;
+          return;
+        }
+      }
+      // no grip left (or not climbing): the snow slides you back down the face
+      const exhausted = (c.stamina ?? 0) <= 0.5 && along > 0.3;
+      const slip = exhausted ? 6.5 : steep > 1.05 && mv.lengthSq() < 0.01 && !c.isBlocking ? 1.4 : 0;
+      if (slip > 0) {
+        c.sliding = exhausted;
+        c.vel[0] = THREE.MathUtils.damp(c.vel[0], -ux * slip, 10, dt);
+        c.vel[2] = THREE.MathUtils.damp(c.vel[2], -uz * slip, 10, dt);
+        if (exhausted && Math.random() < 0.3) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 2, 0.3, 1.2, 0.5, '#f1f5f9');
+        if (exhausted) c.staminaDelay = 1.2;
+      }
     }
 
     function applyHit(
@@ -1181,7 +1231,7 @@ export function Game({
           def.perfectDodgeUsed = true;
           def.counterTimer = 1.6;
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.45);
-          vfx.ring(vA.set(def.pos[0], 0.05, def.pos[2]), 2.4, '#7dd3fc', 0.5, 0.1, 0.3);
+          vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 2.4, '#7dd3fc', 0.5, 0.1, 0.3);
           vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '极限闪避', true, '#a5f3fc');
           if (slot === 1) onRoundEvent?.({ type: 'screenFlash', color: 'rgba(125,211,252,0.35)' });
         } else {
@@ -1234,7 +1284,7 @@ export function Game({
         slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.25);
         vfx.sparkBurst(chest, 40, '#ffffff', 10, 0.1, vA.copy(hitDir).multiplyScalar(-1), 1.6);
         vfx.slashMark(chest, '#e0f2fe', 1.3);
-        vfx.ring(vA.set(def.pos[0], 0.05, def.pos[2]), 2.0, '#e0f2fe', 0.35, 0.16, 0.4);
+        vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 2.0, '#e0f2fe', 0.35, 0.16, 0.4);
         vfx.flash(chest, '#ffffff', 30, 0.15, 6);
         vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '完美格挡', true, '#e0f2fe');
         controller?.kick(-3);
@@ -1355,7 +1405,7 @@ export function Game({
           c.stateDuration = cfg1.totalDuration;
           const ix = c.pos[0] + fwd.x * 0.8;
           const iz = c.pos[2] + fwd.z * 0.8;
-          vfx.groundSlam(vB.set(ix, 0, iz), 0.85, color);
+          vfx.groundSlam(vB.set(ix, fy(ix, iz), iz), 0.85, color);
           controller?.addShake(slot === 0 ? 0.55 : 0.3);
           gameAudio.playSlam();
           if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.8 && foe.hp > 0) {
@@ -1364,7 +1414,7 @@ export function Game({
               foe.isGrounded = true;
               foe.vel[1] = 0;
               foe.pos[1] = Math.min(foe.pos[1], 0);
-              vfx.decal(vB.set(foe.pos[0], 0, foe.pos[2]), 2.2, 1.5);
+              vfx.decal(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2]), foe.pos[2]), 2.2, 1.5);
               vfx.damageNumber(vA.set(foe.pos[0], 2.4, foe.pos[2]), '钉地!', true, '#fde68a');
             }
           }
@@ -1379,7 +1429,7 @@ export function Game({
           c.stateDuration = 0.7;
           const ix = c.pos[0] + fwd.x * 1.0;
           const iz = c.pos[2] + fwd.z * 1.0;
-          vfx.ring(vB.set(ix, 0, iz), 1.8, color, 0.35, 0.14, 0.5);
+          vfx.ring(vB.set(ix, fy(ix, iz), iz), 1.8, color, 0.35, 0.14, 0.5);
           vfx.dustPuff(vB, 12, 0.5, 2.5, 0.6);
           vfx.rocks(vB, 6, 5, 0.08);
           controller?.addShake(slot === 0 ? 0.35 : 0.2);
@@ -1391,7 +1441,7 @@ export function Game({
       }
       // 回身斩: dash slash out of a dodge
       if (c.actionState === 'attack_2' && c.dodgeSlash) {
-        if (c.stateTimer < 0.25) vfx.chargeWave(vB.set(c.pos[0], 0, c.pos[2]), fwd, color);
+        if (c.stateTimer < 0.25) vfx.chargeWave(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), fwd, color);
         if (active && !c.hasHitCurrentMove && dist < 2.8 && inFront) {
           c.hasHitCurrentMove = true;
           applyHit(slot, c, foe, 110, { heavy: true, crit: true, knock: 7, dur: 0.55 });
@@ -1404,17 +1454,17 @@ export function Game({
         c.hasHitCurrentMove = true;
         const ix = c.pos[0] + fwd.x * 1.5;
         const iz = c.pos[2] + fwd.z * 1.5;
-        vfx.groundSlam(vB.set(ix, 0, iz), 1, color);
+        vfx.groundSlam(vB.set(ix, fy(ix, iz), iz), 1, color);
         for (let k = 0; k < 4; k++) {
           const px = c.pos[0] + fwd.x * (0.6 + k * 0.75);
           const pz = c.pos[2] + fwd.z * (0.6 + k * 0.75);
-          vfx.later(k * 0.05, () => vfx.fireColumn(new THREE.Vector3(px, 0, pz), 1.4 + k * 0.2, color));
+          vfx.later(k * 0.05, () => vfx.fireColumn(new THREE.Vector3(px, fy(px, pz), pz), 1.4 + k * 0.2, color));
         }
         if (rage) {
           // Blood rage: the fissure keeps burning
           for (let k = 1; k <= 4; k++) {
             vfx.later(k * 0.4, () => {
-              vfx.fireColumn(new THREE.Vector3(ix, 0, iz), 1.2, color);
+              vfx.fireColumn(new THREE.Vector3(ix, fy(ix, iz), iz), 1.2, color);
               if (foe.hp > 0 && c.hp > 0 && Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.3) {
                 applyHit(slot, c, foe, 25, { knock: 0, state: foe.isGrounded ? 'hitstun' : 'launched', dur: 0.15, noMark: true });
               }
@@ -1428,7 +1478,7 @@ export function Game({
       }
 
       if (c.actionState === 'skill_2') {
-        if (Math.random() < 0.2) vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 1, 1, 2.5, 0.45);
+        if (Math.random() < 0.2) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 1, 1, 2.5, 0.45);
         vfx.spiral(vB.set(c.pos[0], c.pos[1], c.pos[2]), 1.3, gt * 15, color);
         if (rage && dist < 4.5 && dist > 1.2 && foe.hp > 0) {
           // Blood rage: the vortex drags the opponent in
@@ -1438,7 +1488,7 @@ export function Game({
         const t = performance.now();
         if (t - c.lastHitTick > 200) {
           c.lastHitTick = t;
-          vfx.ring(vB.set(c.pos[0], 0.05, c.pos[2]), 1.9, color, 0.25, 0.1);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 1.9, color, 0.25, 0.1);
           if (dist < 2.9) applyHit(slot, c, foe, 40, { knock: 1.5, dur: 0.25 });
         }
       }
@@ -1448,8 +1498,8 @@ export function Game({
         if (go) {
           c.vel[0] = fwd.x * 20;
           c.vel[2] = fwd.z * 20;
-          vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 2, 0.3, 1.5, 0.55);
-          vfx.chargeWave(vB.set(c.pos[0], 0, c.pos[2]), fwd, color);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2, 0.3, 1.5, 0.55);
+          vfx.chargeWave(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), fwd, color);
         } else {
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 9, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 9, dt);
@@ -1460,7 +1510,7 @@ export function Game({
           // Charge connects: jump straight to recovery so a skill can be chained immediately
           const c3 = phasesFor(c).skill_3!;
           c.stateTimer = Math.max(c.stateTimer, c3.startup + c3.active);
-          vfx.ring(vB.set(foe.pos[0], 0, foe.pos[2]), 2.2, color, 0.4, 0.14, 0.4);
+          vfx.ring(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2]), foe.pos[2]), 2.2, color, 0.4, 0.14, 0.4);
           c.vel[0] *= 0.2;
           c.vel[2] *= 0.2;
         }
@@ -1618,7 +1668,7 @@ export function Game({
           c.vel[0] = -fwd.x * 13;
           c.vel[2] = -fwd.z * 13;
         }
-        vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 8, 0.3, 2, 0.45);
+        vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 8, 0.3, 2, 0.45);
       }
       if (st === 'skill_1' && ready) {
         c.volleyShots = 1;
@@ -1764,8 +1814,8 @@ export function Game({
           } else p.pos.addScaledVector(p.vel, step / 2);
           p.traveled += (p.vel.length() * step) / 2;
           if (p.kind !== 'boomerang') {
-            if (p.pos.y < 0.02) {
-              p.pos.y = 0.02;
+            if (p.pos.y < fy(p.pos.x, p.pos.z) + 0.02) {
+              p.pos.y = fy(p.pos.x, p.pos.z) + 0.02;
               embed(p, p.noStop ? 1.0 : 2.5);
               vfx.dustPuff(vB.copy(p.pos), 2, 0.1, 0.8, 0.25);
               break;
@@ -1810,7 +1860,7 @@ export function Game({
               }
               if (p.root > 0 && def.hp > 0) {
                 def.rootTimer = p.root;
-                vfx.ring(vA.set(def.pos[0], 0.05, def.pos[2]), 1.3, '#5eead4', 0.5, 0.12, 0.4);
+                vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 1.3, '#5eead4', 0.5, 0.12, 0.4);
                 vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.4, def.pos[2]), '定身', true, '#5eead4');
               }
             }
@@ -1997,8 +2047,8 @@ export function Game({
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
       projRef.current = [];
-      p1.pos = [map.spawnPlayer[0], 0, map.spawnPlayer[1]];
-      en.pos = [map.spawnEnemy[0], 0, map.spawnEnemy[1]];
+      p1.pos = [map.spawnPlayer[0], fy(map.spawnPlayer[0], map.spawnPlayer[1]), map.spawnPlayer[1]];
+      en.pos = [map.spawnEnemy[0], fy(map.spawnEnemy[0], map.spawnEnemy[1]), map.spawnEnemy[1]];
       p1.rotY = p1.targetRotY = yawTo(p1.pos, en.pos);
       en.rotY = en.targetRotY = yawTo(en.pos, p1.pos);
       if (controller) controller.yaw = p1.rotY;
@@ -2008,6 +2058,9 @@ export function Game({
       bombZonesRef.current = [];
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
       lightningRef.current = { timer: 5 };
+      avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
+      mapRuntime.avalancheZ = -999;
+      mapRuntime.avalancheWarn = 0;
       mapRuntime.eruption = 0;
       mapRuntime.waveSide = 0;
       mapRuntime.waveRise = 0;
@@ -2018,8 +2071,13 @@ export function Game({
     }
 
     /** Height of whatever is under the fighter: arena floor or the top of a pillar / crate */
+    /** floor height under (x, z): flat everywhere except the glacier valley */
+    function fy(x: number, z: number) {
+      return map.id === 'glacier' ? glacierHeight(x, z) : 0;
+    }
+
     function groundHeight(c: CombatantState) {
-      let g = overGround(c) ? 0 : -99;
+      let g = map.id === 'glacier' ? glacierHeight(c.pos[0], c.pos[2]) : overGround(c) ? 0 : -99;
       for (const pl of map.pillars || []) {
         if (pl.h === undefined) continue;
         if (c.pos[1] >= pl.h - 0.45 && Math.hypot(c.pos[0] - pl.x, c.pos[2] - pl.z) < pl.r + 0.15) g = Math.max(g, pl.h);
@@ -2035,12 +2093,18 @@ export function Game({
     function danger(x: number, z: number, margin: number) {
       for (const zn of bombZonesRef.current) if (Math.hypot(x - zn.x, z - zn.z) < zn.r + 0.6) return true;
       if (map.id === 'lavacliff') return Math.hypot(x, z) > map.radius - 1.8 - margin;
+      if (map.id === 'glacier') {
+        const A = avalancheRef.current;
+        const inBand = x > GLACIER.avalancheX[0] - 1 && x < GLACIER.avalancheX[1] + 1;
+        if (inBand && (A.warn > 0 || (A.z > -900 && z > A.z - 2 && z < A.z + 6))) return true;
+      }
       return false;
     }
 
     function safeSpot(x: number, z: number): [number, number] {
       const cands: [number, number][] = [[0, 0]];
       for (let k = 0; k < 6; k++) cands.push([Math.cos((k / 6) * Math.PI * 2) * 5, Math.sin((k / 6) * Math.PI * 2) * 5]);
+      if (map.id === 'glacier') cands.push([GLACIER.pathX, 5], [GLACIER.pathX, 1], [GLACIER.pathX - 0.5, 9]);
       const ok = cands.filter((c) => !danger(c[0], c[1], 0));
       const pool = ok.length ? ok : cands;
       pool.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z));
@@ -2061,7 +2125,7 @@ export function Game({
         def.vel[1] = 6;
         def.isGrounded = false;
       }
-      vfx.ring(vA.set(def.pos[0], 0, def.pos[2]), 3, color, 0.7, 0.12, 0.5);
+      vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       onRoundEvent?.({ type: 'ko', winner: defSlot === 1 ? 'player' : 'enemy' });
     }
@@ -2243,6 +2307,7 @@ export function Game({
       }
 
       if (map.id === 'sea') updateSea();
+      if (map.id === 'glacier') updateGlacier();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
@@ -2343,6 +2408,73 @@ export function Game({
             });
           }, 1.3);
         });
+      }
+    }
+
+    /** 雪岭冰峰: avalanches roar down the north face every so often. The mountain path is out of their way. */
+    function updateGlacier() {
+      const A = avalancheRef.current;
+      const [x0, x1] = GLACIER.avalancheX;
+      // snowfall drifting off the ridge
+      if (Math.random() < dt * 3) vfx.dustPuff(vB.set(x0 + Math.random() * (x1 - x0), GLACIER.plateau + 0.3, GLACIER.faceTop - 1 - Math.random() * 3), 2, 0.6, 0.8, 0.8, '#f8fafc');
+      if (A.z > -900) {
+        // the front rolls downhill, picking up speed on the steep part
+        A.z += dt * (A.z < GLACIER.faceBottom ? 11 : 8);
+        mapRuntime.avalancheZ = A.z;
+        for (let k = 0; k < 4; k++) {
+          const x = x0 + Math.random() * (x1 - x0);
+          vB.set(x, fy(x, A.z) + 0.4, A.z + Math.random());
+          vfx.dustPuff(vB, 3, 1.2, 4, 1.6, '#f1f5f9');
+          if (Math.random() < 0.3) vfx.rocks(vB, 2, 5, 0.12);
+        }
+        controller?.addShake(dt * 1.2);
+        fighters.forEach((c, i) => {
+          if (A.hit[i] || c.hp <= 0) return;
+          if (c.pos[0] < x0 - 0.5 || c.pos[0] > x1 + 0.5 || Math.abs(c.pos[2] - A.z) > 1.4) return;
+          if (c.pos[1] > fy(c.pos[0], c.pos[2]) + 1.6) return; // jumped over it
+          A.hit[i] = true;
+          if (c.dodgeIframeTimer > 0) return;
+          c.hp = Math.max(0, c.hp - 110);
+          c.vel[0] = (Math.random() - 0.5) * 3;
+          c.vel[2] = 11;
+          c.vel[1] = 5.5;
+          c.isGrounded = false;
+          c.actionState = 'launched';
+          c.stateTimer = 0;
+          c.stateDuration = 0.9;
+          c.whiteFlashTimer = 0.1;
+          vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.1, c.pos[2]), '雪崩 110', true, '#e0f2fe');
+          if (i === 0) onRoundEvent?.({ type: 'playerHit', heavy: true });
+          koCheck(i, '#e0f2fe');
+        });
+        if (A.z > 8) {
+          A.z = -999;
+          mapRuntime.avalancheZ = -999;
+          A.timer = 16 + Math.random() * 8;
+        }
+      } else if (A.warn > 0) {
+        A.warn -= dt;
+        mapRuntime.avalancheWarn = 1 - A.warn / 2.8;
+        if (Math.random() < dt * 8) {
+          const x = x0 + Math.random() * (x1 - x0);
+          vfx.dustPuff(vB.set(x, GLACIER.plateau + 0.2, GLACIER.faceTop - 0.5), 3, 0.5, 1.5, 0.9, '#f8fafc');
+        }
+        controller?.addShake(dt * 0.25);
+        if (A.warn <= 0) {
+          A.z = GLACIER.faceTop - 2;
+          A.hit = [false, false];
+          mapRuntime.avalancheWarn = 0;
+          gameAudio.playWaveCrash();
+          gameAudio.playBoom();
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(240,248,255,0.35)' });
+        }
+      } else if (!round.over) {
+        A.timer -= dt;
+        if (A.timer <= 0) {
+          A.warn = 2.8;
+          onRoundEvent?.({ type: 'toast', text: '雪崩要来了！离开雪坡，或者走东边的山道' });
+          gameAudio.playThunder();
+        }
       }
     }
 

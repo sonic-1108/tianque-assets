@@ -189,7 +189,7 @@ export default function App() {
     else gameAudio.startMusic();
   }, [isMusicMuted]);
   useEffect(() => {
-    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' ? mapId : 'temple');
+    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' ? mapId : 'temple');
   }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
@@ -479,6 +479,8 @@ export default function App() {
     p1Stamina: 100,
     p1Poisoned: false,
     p1Rooted: false,
+    p1Climb: false,
+    p1Slide: false,
     dMaxHp: 1600,
     dMp: 100,
     dMaxMp: 100,
@@ -533,6 +535,8 @@ export default function App() {
         p1Stamina: p1.stamina ?? 100,
         p1Poisoned: (p1.poisonTimer || 0) > 0,
         p1Rooted: (p1.rootTimer || 0) > 0,
+        p1Climb: !!p1.climbing,
+        p1Slide: !!p1.sliding,
         dMaxHp: dummy.maxHp,
         dMp: dummy.mp,
         dMaxMp: dummy.maxMp,
@@ -931,6 +935,8 @@ export default function App() {
           if (hudMirror.protect) meChips.push({ text: '保护', tone: 'slate' });
           if (hudMirror.p1Poisoned) meChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.p1Rooted) meChips.push({ text: '定身', tone: 'teal', pulse: true });
+          if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
+          else if (hudMirror.p1Climb) meChips.push({ text: '攀爬中', tone: 'amber' });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',
