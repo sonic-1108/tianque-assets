@@ -168,6 +168,7 @@ export function Game({
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
+  const footLiftRef = useRef([0, 0]);
   const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
@@ -560,17 +561,36 @@ export function Game({
 
     // ================= TRANSFORMS / CAMERA / LIGHTS =================
     if (playerGroupRef.current) {
-      playerGroupRef.current.position.set(p1.pos[0], p1.pos[1], p1.pos[2]);
+      playerGroupRef.current.position.set(p1.pos[0], p1.pos[1] + footLift(p1, 0), p1.pos[2]);
       playerGroupRef.current.rotation.y = p1.rotY;
       playerGroupRef.current.updateMatrixWorld(true);
     }
     if (enemyGroupRef.current) {
-      enemyGroupRef.current.position.set(en.pos[0], en.pos[1], en.pos[2]);
+      enemyGroupRef.current.position.set(en.pos[0], en.pos[1] + footLift(en, 1), en.pos[2]);
       enemyGroupRef.current.rotation.y = en.rotY;
       enemyGroupRef.current.updateMatrixWorld(true);
     }
 
     playerVec.set(p1.pos[0], p1.pos[1], p1.pos[2]);
+
+    /**
+     * On a slope the uphill foot would sink into the ground: lift the model to the highest ground under
+     * its footprint (a few samples round the feet), so boots rest on the surface instead of in it.
+     */
+    function footLift(c: CombatantState, i: number) {
+      let target = 0;
+      if (map.terrain && c.isGrounded) {
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * Math.PI * 2;
+          const h = terrainHeight(map.id, c.pos[0] + Math.cos(a) * 0.24, c.pos[2] + Math.sin(a) * 0.24) - c.pos[1];
+          if (h < 1) target = Math.max(target, h);
+        }
+        target = Math.min(0.45, target * 0.85);
+      }
+      const L = footLiftRef.current;
+      L[i] = THREE.MathUtils.damp(L[i], target, 16, rawDt);
+      return L[i];
+    }
     if (controller) controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), p1.pos[1] - 2.5) : null;
     controller?.update(playerVec, rawDt);
 

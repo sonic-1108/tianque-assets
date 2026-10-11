@@ -149,11 +149,11 @@ export const MAPS: Record<MapId, MapDef> = {
     spawnPlayer: [2, 20],
     spawnEnemy: [-2, 14],
     background: '#b9c8d8',
-    fog: [40, 200],
+    fog: [45, 260],
     hemi: ['#d6e3f2', '#3e4c60', 0.8],
     keyColor: '#fff1dd',
     keyIntensity: 2.6,
-    exposure: 0.78,
+    exposure: 0.72,
     cardGradient: 'from-sky-200/40 via-slate-500/50 to-slate-900/90',
     pillars: [
       { x: -9, z: 17, r: 0.9, h: 1.6 },
@@ -282,17 +282,44 @@ const sstep = (a: number, b: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+function hash2(x: number, y: number) {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+/** smooth value noise, 0..1 */
+function vnoise(x: number, y: number) {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi);
+  const b = hash2(xi + 1, yi);
+  const c = hash2(xi, yi + 1);
+  const d = hash2(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
 /** Natural mountain height as a function of distance from the summit */
 function coneH(r: number) {
-  return GLACIER.summitH * Math.pow(1 - sstep(1.5, GLACIER.footR, r), 1.15);
+  // an even slope (about 0.95) from foot to summit, with the foot and the summit rounded off,
+  // so no stretch of the mountain is much steeper than the rest
+  const v = Math.max(0, Math.min(1, 1 - (r - 1.5) / (GLACIER.footR - 1.5)));
+  const a = 0.1;
+  let g: number;
+  if (v < a) g = (v * v) / (2 * a);
+  else if (v > 1 - a) g = 1 - a - ((1 - v) * (1 - v)) / (2 * a) + (a / 2) * 0 + a / 2 - a / 2;
+  else g = v - a / 2;
+  return (GLACIER.summitH * g) / (1 - a);
 }
 // The road spirals up from the valley floor on the south-east to just under the peak.
+const GLACIER_TURNS = 2.2;
 (function buildPath() {
   const [sx, sz] = GLACIER.summit;
-  const n = 260;
+  const n = 420;
   for (let i = 0; i <= n; i++) {
     const t = i / n;
-    const ang = 0.35 + t * Math.PI * 2.35; // starts south-east, winds round anticlockwise
+    const ang = 0.35 + t * Math.PI * 2 * GLACIER_TURNS; // starts east-south-east, winds round 2.2 times
     const r = 20.5 - t * 17.5;
     const x = sx + Math.cos(ang) * r;
     const z = sz + Math.sin(ang) * r;
@@ -304,7 +331,9 @@ export function glacierPath(x: number, z: number) {
   let best = 1e9;
   let bh = 0;
   const pts = GLACIER.pathPts;
-  for (let i = 0; i < pts.length; i++) {
+  const n = pts.length - 1;
+  const test = (i: number) => {
+    if (i < 0 || i > n) return;
     const dx = x - pts[i][0];
     const dz = z - pts[i][1];
     const d = dx * dx + dz * dz;
@@ -312,9 +341,22 @@ export function glacierPath(x: number, z: number) {
       best = d;
       bh = pts[i][2];
     }
-  }
+  };
+  // the road is a spiral: only the turns passing this bearing can be close, so test those stretches
+  const [sx, sz] = GLACIER.summit;
+  let th = Math.atan2(z - sz, x - sx) - 0.35;
+  th = ((th % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  if (Math.hypot(x - sx, z - sz) < 8) for (let i = 0; i <= n; i++) test(i);
+  else
+    for (let k = 0; k < 3; k++) {
+      const i0 = Math.round(((th + Math.PI * 2 * k) / (Math.PI * 2 * GLACIER_TURNS)) * n);
+      if (i0 < -22 || i0 > n + 22) continue;
+      for (let j = -22; j <= 22; j++) test(i0 + j);
+    }
+  test(0);
+  test(n);
   const d = Math.sqrt(best);
-  return { d, h: bh, on: 1 - sstep(GLACIER.pathHalf, GLACIER.pathHalf + 1.3, d) };
+  return { d, h: bh, on: 1 - sstep(GLACIER.pathHalf, GLACIER.pathHalf + 2.2, d) };
 }
 /** Ground height of 雪岭冰峰 at (x, z) */
 export function glacierHeight(x: number, z: number) {
@@ -323,15 +365,16 @@ export function glacierHeight(x: number, z: number) {
   const h0 = coneH(r);
   // terraces: mostly flat ledges, then a steep riser up to the next one
   const s = GLACIER.stepH;
-  const f = h0 / s;
-  const terr = (Math.floor(f) + sstep(0.5, 1.0, f - Math.floor(f))) * s;
-  let h = h0 + (terr - h0) * 0.68 * sstep(0.5, 3, h0);
+  // ledges wander up and down round the mountain instead of making perfect rings
+  const f = h0 / s + (vnoise(x * 0.11 + 3.1, z * 0.11 - 1.7) - 0.5) * 1.1 + (vnoise(x * 0.31, z * 0.31) - 0.5) * 0.25;
+  const terr = (Math.floor(f) + sstep(0.35, 1.0, f - Math.floor(f))) * s;
+  let h = h0 + (terr - h0) * 0.42 * sstep(0.5, 3, h0);
   // ridges and gullies running down the flanks
   const a = Math.atan2(z - sz, x - sx);
-  h += (Math.sin(a * 7 + r * 0.25) * 0.55 + Math.sin(a * 13 - r * 0.4) * 0.25) * sstep(0.3, 4, h0) * (1 - sstep(GLACIER.summitH - 3, GLACIER.summitH, h0));
+  h += (Math.sin(a * 7 + r * 0.25) * 0.45 + Math.sin(a * 13 - r * 0.4) * 0.15) * sstep(0.3, 4, h0) * (1 - sstep(GLACIER.summitH - 3, GLACIER.summitH, h0));
   // the road is cut level across the slope
   const p = glacierPath(x, z);
-  if (p.on > 0) h += (p.h - h) * p.on;
+  if (p.on > 0) h += (p.h - h) * p.on * 0.7;
   // drifts on the valley floor
   const ro = Math.hypot(x, z);
   h += Math.sin(x * 0.45 + 1.3) * Math.cos(z * 0.38) * 0.3 * (1 - sstep(0, 2, h0));
