@@ -32,6 +32,12 @@ export interface MapDef {
   cardGradient: string;
   pillars?: Circle[];
   vents?: Circle[];
+  /** image-based light strength (default 0.55): low for night maps so nothing glows grey */
+  env?: number;
+  /** bloom strength (default 0.9) */
+  bloom?: number;
+  /** ground is a height field (see terrainHeight) instead of a flat floor */
+  terrain?: boolean;
   /** rectangular play area (half extents) instead of a circle */
   rect?: { hx: number; hz: number };
 }
@@ -138,6 +144,7 @@ export const MAPS: Record<MapId, MapDef> = {
     homeClassName: '暗器',
     homeBonus: '伤害 +10%',
     available: true,
+    terrain: true,
     radius: 27,
     spawnPlayer: [2, 20],
     spawnEnemy: [-2, 14],
@@ -176,45 +183,60 @@ export const MAPS: Record<MapId, MapDef> = {
   },
   rooftop: {
     id: 'rooftop',
-    name: '雨夜屋顶',
-    subtitle: '古城屋脊上的高低差对决',
-    icon: '🏯',
-    mechanics: ['可以跳上屋脊居高临下', '打雷时闪电照亮全场'],
-    homeClass: 'LightHealer',
-    homeClassName: '灵雀',
-    homeBonus: '待职业上线',
-    available: false,
+    name: '长安上元夜',
+    subtitle: '上元节，唐长安满城灯火，打在宫城殿宇的屋顶上',
+    icon: '🏮',
+    mechanics: [
+      '五座殿顶由廊道连成一片，屋檐平缓，越往屋脊越陡，往上爬要耗体力',
+      '正殿屋脊最高，站上去居高临下；但上元节的烟花会落在正殿屋脊上，看到天上有烟花弹落下、屋脊冒火星就快下来',
+      '四角是天井，被打进天井会摔伤，再被送回屋顶',
+      '走路不会自己掉下去，被击飞才会',
+    ],
+    homeClass: 'Ranger',
+    homeClassName: '暗器',
+    homeBonus: '伤害 +10%',
+    available: true,
+    terrain: true,
     radius: 14,
-    spawnPlayer: [0, 3],
-    spawnEnemy: [0, -3],
-    background: '#0b0f18',
-    fog: [12, 45],
-    hemi: ['#9fb3d9', '#141821', 0.7],
-    keyColor: '#b9c8ff',
-    keyIntensity: 1.5,
+    spawnPlayer: [0, 9.2],
+    spawnEnemy: [0, -9.2],
+    background: '#1a1426',
+    fog: [40, 420],
+    hemi: ['#56619a', '#6a3418', 0.7],
+    keyColor: '#aebcff',
+    keyIntensity: 1.1,
     exposure: 1.1,
+    env: 0.12,
+    bloom: 1.35,
     cardGradient: 'from-indigo-900/70 via-slate-900/80 to-black/90',
   },
   summit: {
     id: 'summit',
     name: '天阙之巅',
-    subtitle: '云海浮台，场地会碎裂缩小',
+    subtitle: '云海之上的白玉浮台，打着打着就碎了',
     icon: '☁️',
-    mechanics: ['打到一半外圈碎裂', '最后在小圆台上决胜负'],
-    homeClass: 'BuddhistMage',
-    homeClassName: '梵音',
-    homeBonus: '待职业上线',
-    available: false,
-    radius: 14,
-    spawnPlayer: [0, 3],
-    spawnEnemy: [0, -3],
+    mechanics: [
+      '开局是三圈白玉台，外圈 35 秒后碎裂坠入云海，中圈 75 秒后碎裂',
+      '碎裂前地面会出现裂纹并发光，提前三秒',
+      '被击飞出台面直接判负；最后只剩中心小圆台决胜负',
+      '四根悬空玉柱可以跳上去，碎裂后也还在',
+    ],
+    homeClass: 'Berserker',
+    homeClassName: '狂刃',
+    homeBonus: '伤害 +10%',
+    available: true,
+    radius: 13,
+    spawnPlayer: [0, 6.5],
+    spawnEnemy: [0, -6.5],
     background: '#a9c3e6',
-    fog: [20, 80],
+    fog: [60, 400],
     hemi: ['#ffffff', '#8aa0c0', 1.0],
     keyColor: '#fff3dc',
-    keyIntensity: 2.4,
-    exposure: 1.1,
+    keyIntensity: 2.6,
+    exposure: 0.95,
     cardGradient: 'from-sky-300/40 via-indigo-300/30 to-zinc-900/90',
+    // floating jade posts just outside the inner disc: they survive the collapse
+    pillars: ring(4, 6.6, 0.7, Math.PI / 4).map((p) => ({ ...p, h: 2.2 })),
   },
 };
 
@@ -231,6 +253,13 @@ export const mapRuntime = {
   shipPitch: 0,
   avalancheZ: -999, // 雪岭冰峰: z of the avalanche front (-999 = none)
   avalancheWarn: 0, // 0..1 rumble before it breaks loose
+  ridgeWarn: 0, // 雨夜屋顶: 0..1 static building up on the main ridge before a strike
+  boltT: 0, // 1 -> 0 while a lightning bolt is visible
+  boltX: 0,
+  boltZ: 0,
+  summitStage: 0, // 天阙之巅: rings already fallen (0, 1 = outer gone, 2 = middle gone)
+  summitWarn: 0, // 0..1 cracks glowing on the ring that is about to go
+  summitFall: 0, // seconds since the last ring broke (drives the falling pieces)
 };
 
 // ----------------------------------------------------------------------
@@ -315,3 +344,91 @@ export function glacierGradient(x: number, z: number): [number, number] {
   const e = 0.25;
   return [(glacierHeight(x + e, z) - glacierHeight(x - e, z)) / (2 * e), (glacierHeight(x, z + e) - glacierHeight(x, z - e)) / (2 * e)];
 }
+
+// ----------------------------------------------------------------------
+// 雨夜屋顶 terrain: five tiled hall roofs joined by flat corridor roofs.
+// ----------------------------------------------------------------------
+export interface Hall {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  /** direction the ridge runs */
+  axis: 'x' | 'z';
+  ridge: number;
+  eave: number;
+}
+export const ROOF = {
+  street: -9,
+  corridor: 2.6,
+  halls: [
+    { x0: -8, x1: 8, z0: -5, z1: 5, axis: 'x', ridge: 6.2, eave: 3.4 }, // 正殿
+    { x0: -8, x1: 8, z0: -14, z1: -6, axis: 'x', ridge: 4.7, eave: 2.6 }, // 后殿
+    { x0: -8, x1: 8, z0: 6, z1: 14, axis: 'x', ridge: 4.7, eave: 2.6 }, // 前殿
+    { x0: -14, x1: -9, z0: -8, z1: 8, axis: 'z', ridge: 4.4, eave: 2.6 }, // 西配殿
+    { x0: 9, x1: 14, z0: -8, z1: 8, axis: 'z', ridge: 4.4, eave: 2.6 }, // 东配殿
+  ] as Hall[],
+  /** flat corridor roofs linking the halls */
+  corridors: [
+    [-8, 8, -6, -5],
+    [-8, 8, 5, 6],
+    [-9, -8, -8, 8],
+    [8, 9, -8, 8],
+  ] as [number, number, number, number][],
+  /** above this height you are on the main ridge, where lightning strikes */
+  strikeY: 5.3,
+};
+/** Height of a hall roof at (x, z), or null outside it */
+export function hallHeight(hl: Hall, x: number, z: number): number | null {
+  if (x < hl.x0 || x > hl.x1 || z < hl.z0 || z > hl.z1) return null;
+  const cx = (hl.x0 + hl.x1) / 2;
+  const cz = (hl.z0 + hl.z1) / 2;
+  const [a, b, ha, hb] = hl.axis === 'x' ? [Math.abs(z - cz), Math.abs(x - cx), (hl.z1 - hl.z0) / 2, (hl.x1 - hl.x0) / 2] : [Math.abs(x - cx), Math.abs(z - cz), (hl.x1 - hl.x0) / 2, (hl.z1 - hl.z0) / 2];
+  // hip roof: the ends slope at the same pitch as the sides
+  const u = Math.min(1, Math.max(0, a / ha, (b - (hb - ha)) / ha));
+  // concave Chinese roof: steep near the ridge, flattening out to the eaves
+  let h = hl.eave + (hl.ridge - hl.eave) * Math.pow(1 - u, 1.6);
+  // 飞檐: the eaves sweep up at the four corners
+  const dc = Math.min(Math.hypot(x - hl.x0, z - hl.z0), Math.hypot(x - hl.x0, z - hl.z1), Math.hypot(x - hl.x1, z - hl.z0), Math.hypot(x - hl.x1, z - hl.z1));
+  h += 0.7 * sstep(0.55, 1, u) * Math.pow(Math.max(0, 1 - dc / 3.4), 2);
+  // ridge beam: a narrow flat walkway on top
+  if (a < 0.32 && b < hb - ha + 0.3) h = hl.ridge + 0.3;
+  return h;
+}
+export function roofHeight(x: number, z: number) {
+  let h = -1e9;
+  for (const hl of ROOF.halls) {
+    const v = hallHeight(hl, x, z);
+    if (v !== null && v > h) h = v;
+  }
+  for (const [x0, x1, z0, z1] of ROOF.corridors) if (x >= x0 && x <= x1 && z >= z0 && z <= z1) h = Math.max(h, ROOF.corridor);
+  return h > -1e8 ? h : ROOF.street;
+}
+
+/** Floor height for maps with a height field (0 for flat maps) */
+export function terrainHeight(id: MapId, x: number, z: number) {
+  if (id === 'glacier') return glacierHeight(x, z);
+  if (id === 'rooftop') return roofHeight(x, z);
+  return 0;
+}
+/** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */
+export function terrainGradient(id: MapId, x: number, z: number): [number, number] {
+  if (id === 'glacier') return glacierGradient(x, z);
+  if (id !== 'rooftop') return [0, 0];
+  const e = 0.25;
+  const h0 = roofHeight(x, z);
+  const s = (dx: number, dz: number) => {
+    const v = roofHeight(x + dx, z + dz);
+    return v < h0 - 1.2 ? h0 : v;
+  };
+  return [(s(e, 0) - s(-e, 0)) / (2 * e), (s(0, e) - s(0, -e)) / (2 * e)];
+}
+
+// ----------------------------------------------------------------------
+// 天阙之巅: three concentric jade rings that break away during the round.
+// ----------------------------------------------------------------------
+export const SUMMIT = {
+  rings: [13, 9.2, 5.6] as const, // outer radius of the floor at stage 0, 1, 2
+  breakAt: [35, 75] as const, // seconds into the round
+  warn: 3,
+};

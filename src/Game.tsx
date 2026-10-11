@@ -10,7 +10,7 @@ import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { CameraController } from './CameraController';
 import type { NetSession } from './net';
@@ -167,6 +167,7 @@ export function Game({
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   const lightningRef = useRef({ timer: 5 });
+  const ridgeRef = useRef({ timer: 9, warn: 0 });
   const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
@@ -240,7 +241,7 @@ export function Game({
     const pmrem = new THREE.PMREMGenerator(gl);
     const env = pmrem.fromScene(new (RoomEnvironment as any)(), 0.04).texture;
     scene.environment = env;
-    (scene as any).environmentIntensity = 0.55;
+    (scene as any).environmentIntensity = map.env ?? 0.55;
     scene.background = new THREE.Color(map.background);
     scene.fog = new THREE.Fog(map.background, map.fog[0], map.fog[1]);
     gl.toneMappingExposure = map.exposure;
@@ -459,7 +460,7 @@ export function Game({
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
         const gh = groundHeight(c);
-        if (c.vel[1] <= 0 && c.pos[1] <= gh && (c.pos[1] > gh - 0.6 || map.id === 'glacier')) {
+        if (c.vel[1] <= 0 && c.pos[1] <= gh && (c.pos[1] > gh - 0.6 || map.terrain)) {
           c.pos[1] = gh;
           const impact = -c.vel[1];
           c.vel[1] = 0;
@@ -481,8 +482,11 @@ export function Game({
         c.vel[2] = 0;
         if (Math.random() < 0.15) vfx.ring(vB.set(c.pos[0], 0.04, c.pos[2]), 0.9, '#5eead4', 0.25, 0.06);
       }
+      const px0 = c.pos[0];
+      const pz0 = c.pos[2];
       c.pos[0] += c.vel[0] * cdt;
       c.pos[2] += c.vel[2] * cdt;
+      ledgeGuard(c, px0, pz0);
       const free = c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || c.actionState === 'skill_2';
       if (!free || c.actionState === 'dodge') {
         const k = Math.exp(-4.5 * cdt);
@@ -490,14 +494,14 @@ export function Game({
         c.vel[2] *= k;
       }
       applyBounds(i, c);
-      if (map.id === 'glacier' && c.isGrounded && c.actionState !== 'buried') {
+      if (map.terrain && c.isGrounded && c.actionState !== 'buried') {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
-      } else if (!c.isGrounded && map.id === 'glacier' && c.actionState !== 'buried') {
+      } else if (!c.isGrounded && map.terrain && c.actionState !== 'buried') {
         const gh2 = groundHeight(c);
         if (c.pos[1] < gh2 - 0.05 && c.vel[1] <= 0) c.pos[1] = gh2; // never fall through a slope
       }
-      if (c.isGrounded && (c.pos[1] > 0.01 || map.id === 'glacier') && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - (map.id === 'glacier' ? 0.6 : 0.05)) {
+      if (c.isGrounded && (c.pos[1] > 0.01 || map.terrain) && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - (map.terrain ? 0.6 : 0.05)) {
         c.isGrounded = false;
         c.vel[1] = Math.min(c.vel[1], 0);
         if (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'block') c.actionState = 'jump';
@@ -567,12 +571,14 @@ export function Game({
     }
 
     playerVec.set(p1.pos[0], p1.pos[1], p1.pos[2]);
-    if (controller) controller.groundAt = map.id === 'glacier' ? glacierHeight : null;
+    if (controller) controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), p1.pos[1] - 2.5) : null;
     controller?.update(playerVec, rawDt);
 
     if (keyLightRef.current) {
-      keyLightRef.current.position.set(p1.pos[0] + 8, 14, p1.pos[2] + 6);
-      keyLightRef.current.target.position.set(p1.pos[0], 0, p1.pos[2]);
+      // the shadow frustum follows the player, height included (the glacier summit is 19 m up)
+      const ly = map.terrain ? p1.pos[1] : 0;
+      keyLightRef.current.position.set(p1.pos[0] + 8, ly + 14, p1.pos[2] + 6);
+      keyLightRef.current.target.position.set(p1.pos[0], ly, p1.pos[2]);
       keyLightRef.current.target.updateMatrixWorld();
     }
     if (rimLightRef.current) {
@@ -651,7 +657,7 @@ export function Game({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall },
         ev: net.events.splice(0),
       });
     }
@@ -1167,7 +1173,7 @@ export function Game({
           if (c.actionState === 'idle' || c.actionState === 'block') c.targetRotY = intent.faceYaw;
         }
       }
-      if (map.id === 'glacier') climb(c, intent);
+      if (map.terrain) climb(c, intent);
     }
 
     /**
@@ -1179,7 +1185,7 @@ export function Game({
       c.climbing = false;
       c.sliding = false;
       if (!c.isGrounded || c.hp <= 0 || c.actionState === 'buried' || c.actionState === 'launched' || c.actionState === 'knockdown') return;
-      const [gx, gz] = glacierGradient(c.pos[0], c.pos[2]);
+      const [gx, gz] = terrainGradient(map.id, c.pos[0], c.pos[2]);
       const steep = Math.hypot(gx, gz);
       if (steep < 0.75) return; // valley floor, plateau and the mountain path
       const ux = gx / steep;
@@ -1206,7 +1212,7 @@ export function Game({
         c.sliding = exhausted;
         c.vel[0] = THREE.MathUtils.damp(c.vel[0], -ux * slip, 10, dt);
         c.vel[2] = THREE.MathUtils.damp(c.vel[2], -uz * slip, 10, dt);
-        if (exhausted && Math.random() < 0.3) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 2, 0.3, 1.2, 0.5, '#f1f5f9');
+        if (exhausted && Math.random() < 0.3) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 2, 0.3, 1.2, 0.5, map.id === 'rooftop' ? '#9fb3d9' : '#f1f5f9');
         if (exhausted) c.staminaDelay = 1.2;
       }
     }
@@ -1771,8 +1777,8 @@ export function Game({
           p.obj.position.copy(p.pos);
           p.obj.rotateX(step * 22);
           p.obj.rotateY(step * 9);
-          if (p.pos.y < 0.04) {
-            p.pos.y = 0.04;
+          if (p.pos.y < fy(p.pos.x, p.pos.z) + 0.04) {
+            p.pos.y = fy(p.pos.x, p.pos.z) + 0.04;
             p.obj.position.copy(p.pos);
             p.obj.rotation.set(0, Math.random() * 6, 0); // lies flat where it dropped
             p.stuck = 1.6;
@@ -2062,6 +2068,12 @@ export function Game({
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
       mapRuntime.avalancheWarn = 0;
+      ridgeRef.current = { timer: 9, warn: 0 };
+      mapRuntime.ridgeWarn = 0;
+      mapRuntime.boltT = 0;
+      mapRuntime.summitStage = 0;
+      mapRuntime.summitWarn = 0;
+      mapRuntime.summitFall = 0;
       mapRuntime.eruption = 0;
       mapRuntime.waveSide = 0;
       mapRuntime.waveRise = 0;
@@ -2074,11 +2086,11 @@ export function Game({
     /** Height of whatever is under the fighter: arena floor or the top of a pillar / crate */
     /** floor height under (x, z): flat everywhere except the glacier valley */
     function fy(x: number, z: number) {
-      return map.id === 'glacier' ? glacierHeight(x, z) : 0;
+      return map.terrain ? terrainHeight(map.id, x, z) : 0;
     }
 
     function groundHeight(c: CombatantState) {
-      let g = map.id === 'glacier' ? glacierHeight(c.pos[0], c.pos[2]) : overGround(c) ? 0 : -99;
+      let g = map.terrain ? terrainHeight(map.id, c.pos[0], c.pos[2]) : overGround(c) ? 0 : -99;
       for (const pl of map.pillars || []) {
         if (pl.h === undefined) continue;
         if (c.pos[1] >= pl.h - 0.45 && Math.hypot(c.pos[0] - pl.x, c.pos[2] - pl.z) < pl.r + 0.15) g = Math.max(g, pl.h);
@@ -2087,13 +2099,55 @@ export function Game({
     }
 
     function overGround(c: CombatantState) {
-      if (map.id === 'lavacliff') return Math.hypot(c.pos[0], c.pos[2]) <= map.radius + 0.35;
+      if (map.id === 'lavacliff' || map.id === 'summit') return Math.hypot(c.pos[0], c.pos[2]) <= edgeR() + 0.35;
       return true;
+    }
+
+    /** radius of the floor that is still there (天阙之巅 shrinks as its rings break away) */
+    function edgeR() {
+      if (map.id === 'summit') return SUMMIT.rings[Math.min(2, mapRuntime.summitStage)];
+      return map.radius;
+    }
+
+    /**
+     * Walking never takes you over a sheer drop (roof edge, cliff): only being knocked, dodging or jumping does.
+     * Slide along the edge instead of stopping dead, so the AI can steer round a courtyard.
+     */
+    function ledgeGuard(c: CombatantState, px0: number, pz0: number) {
+      if (!map.terrain || !c.isGrounded) return;
+      const s = c.actionState;
+      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || s === 'dodge' || c.hp <= 0) return;
+      const drop = (x: number, z: number) => terrainHeight(map.id, x, z) < c.pos[1] - 1.5;
+      if (!drop(c.pos[0], c.pos[2])) return;
+      if (!drop(c.pos[0], pz0)) {
+        c.pos[2] = pz0;
+        c.vel[2] = 0;
+      } else if (!drop(px0, c.pos[2])) {
+        c.pos[0] = px0;
+        c.vel[0] = 0;
+      } else {
+        c.pos[0] = px0;
+        c.pos[2] = pz0;
+        c.vel[0] = c.vel[2] = 0;
+      }
+      c.ledgeBlocked = 0.3;
     }
 
     function danger(x: number, z: number, margin: number) {
       for (const zn of bombZonesRef.current) if (Math.hypot(x - zn.x, z - zn.z) < zn.r + 0.6) return true;
       if (map.id === 'lavacliff') return Math.hypot(x, z) > map.radius - 1.8 - margin;
+      if (map.id === 'summit') {
+        const d = Math.hypot(x, z);
+        if (d > edgeR() - 1.8 - margin) return true;
+        if (mapRuntime.summitWarn > 0 && mapRuntime.summitStage < 2 && d > SUMMIT.rings[mapRuntime.summitStage + 1] - 1.2 - margin) return true;
+        return false;
+      }
+      if (map.id === 'rooftop') {
+        const h = terrainHeight(map.id, x, z);
+        if (h < 0) return true; // courtyard
+        if (mapRuntime.ridgeWarn > 0 && h > ROOF.strikeY - 0.6) return true;
+        return false;
+      }
       if (map.id === 'glacier') {
         const A = avalancheRef.current;
         const inBand = x > GLACIER.avalancheX[0] - 1 && x < GLACIER.avalancheX[1] + 1;
@@ -2106,6 +2160,10 @@ export function Game({
       const cands: [number, number][] = [[0, 0]];
       for (let k = 0; k < 6; k++) cands.push([Math.cos((k / 6) * Math.PI * 2) * 5, Math.sin((k / 6) * Math.PI * 2) * 5]);
       if (map.id === 'glacier') for (let k = 0; k < GLACIER.pathPts.length; k += 26) cands.push([GLACIER.pathPts[k][0], GLACIER.pathPts[k][1]]);
+      if (map.id === 'rooftop') {
+        cands.length = 0;
+        cands.push([0, 4.2], [0, -4.2], [0, 9.8], [0, -9.8], [-11.5, 0], [11.5, 0], [-8.5, 0], [8.5, 0], [5, 5.5], [-5, -5.5]);
+      }
       const ok = cands.filter((c) => !danger(c[0], c[1], 0));
       const pool = ok.length ? ok : cands;
       pool.sort((a, b) => Math.hypot(a[0] - x, a[1] - z) - Math.hypot(b[0] - x, b[1] - z));
@@ -2163,11 +2221,12 @@ export function Game({
       const knocked = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown';
       if (wallCdRef.current[i] > 0) wallCdRef.current[i] -= dt;
 
-      if (map.id === 'lavacliff') {
-        const R = map.radius;
+      if (map.id === 'lavacliff' || map.id === 'summit') {
+        const R = edgeR();
         const falling = c.pos[1] < -0.05;
         // walking can't take you off the edge; knockback (and charges/rolls) can
-        const canLeave = knocked || falling || c.actionState === 'skill_3' || c.hp <= 0;
+        // (on 天阙之巅 you may also hop off a jade post, or stand on one outside the shrunken floor)
+        const canLeave = knocked || falling || c.actionState === 'skill_3' || c.hp <= 0 || (map.id === 'summit' && c.pos[1] > 0.3);
         if (!canLeave && d > R - 0.25) {
           c.pos[0] *= (R - 0.25) / d;
           c.pos[2] *= (R - 0.25) / d;
@@ -2179,7 +2238,7 @@ export function Game({
             c.vel[2] -= nz * out;
           }
         }
-        if (c.isGrounded && !overGround(c)) {
+        if (c.isGrounded && !overGround(c) && groundHeight(c) < c.pos[1] - 0.05) {
           c.isGrounded = false;
           c.vel[1] = Math.min(c.vel[1], 0);
           c.actionState = 'launched';
@@ -2213,6 +2272,7 @@ export function Game({
           c.vel[0] = 0;
           c.vel[2] = 0;
         }
+        if (map.id === 'rooftop' && c.pos[1] < -3.5) courtyardFall(i);
       }
       for (const pl of map.pillars || []) {
         if (c.pos[1] >= (pl.h ?? 99) - 0.45) continue; // standing on (or above) it
@@ -2253,11 +2313,15 @@ export function Game({
 
     function ringOut(i: number) {
       const c = fighters[i];
-      vfx.sparkBurst(vA.set(c.pos[0], -6.5, c.pos[2]), 40, '#ff6a1a', 10, 0.14, new THREE.Vector3(0, 1, 0), 0.6);
-      vfx.flash(vA.set(c.pos[0], -5, c.pos[2]), '#ff6a1a', 60, 0.5, 14);
+      if (map.id === 'summit') vfx.dustPuff(vA.set(c.pos[0], -6, c.pos[2]), 24, 2, 4, 2.2, '#f8fafc');
+      else {
+        vfx.sparkBurst(vA.set(c.pos[0], -6.5, c.pos[2]), 40, '#ff6a1a', 10, 0.14, new THREE.Vector3(0, 1, 0), 0.6);
+        vfx.flash(vA.set(c.pos[0], -5, c.pos[2]), '#ff6a1a', 60, 0.5, 14);
+      }
       if (aiOn && !round.over && c.hp > 0) {
         c.hp = 0;
-        onRoundEvent?.({ type: 'toast', text: i === 0 ? '你坠入了岩浆！' : '霍岩影 坠入岩浆！' });
+        const where = map.id === 'summit' ? '坠入云海' : '坠入岩浆';
+        onRoundEvent?.({ type: 'toast', text: i === 0 ? `你${where}！` : `对手${where}！` });
         koCheck(i, '#ff6a1a');
       }
       // respawn above the platform (practice mode, or after the KO is decided)
@@ -2270,6 +2334,101 @@ export function Game({
       if (!aiOn) {
         c.hp = Math.max(1, c.hp - 200);
         if (c === en) c.hp = c.maxHp;
+      }
+    }
+
+    /** 长安: knocked off the roofs into a courtyard. Hurts, then you are helped back up onto the nearest roof. */
+    function courtyardFall(i: number) {
+      const c = fighters[i];
+      vfx.dustPuff(vA.set(c.pos[0], ROOF.street + 0.2, c.pos[2]), 14, 1, 3, 1.2, '#8b7a66');
+      gameAudio.playSlam();
+      const [sx, sz] = safeSpot(c.pos[0], c.pos[2]);
+      envHit(i, 110, 0, '坠落');
+      c.pos = [sx, terrainHeight(map.id, sx, sz) + 2.5, sz];
+      c.vel = [0, 0, 0];
+      c.isGrounded = false;
+      c.actionState = 'launched';
+      c.stateTimer = 0;
+      c.stateDuration = 0.7;
+      c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 1.2);
+      if (i === 0) onRoundEvent?.({ type: 'toast', text: '掉进天井！' });
+    }
+
+    /** 长安上元夜: festival fireworks keep raining down on the tallest ridge. Sparks crawl along it first. */
+    function updateRooftop() {
+      const R = ridgeRef.current;
+      if (round.over) {
+        mapRuntime.ridgeWarn = 0;
+        return;
+      }
+      mapRuntime.boltT = Math.max(0, mapRuntime.boltT - dt * 1.6);
+      if (R.warn > 0) {
+        R.warn -= dt;
+        mapRuntime.ridgeWarn = Math.min(1, 1 - R.warn / 1.8);
+        if (Math.random() < 0.6) vfx.sparkBurst(vB.set(mapRuntime.boltX + (Math.random() - 0.5) * 3, 6.6, (Math.random() - 0.5) * 0.4), 2, '#ffd27a', 3, 0.06, vC.set(0, 1, 0), 0.8);
+        if (R.warn <= 0) {
+          R.warn = 0;
+          mapRuntime.ridgeWarn = 0;
+          mapRuntime.boltT = 1;
+          vB.set(mapRuntime.boltX, 6.6, 0);
+          vfx.sparkBurst(vB, 60, '#ffcf6b', 12, 0.12, vC.set(0, 1, 0), 1);
+          vfx.sparkBurst(vB, 30, '#ff5a3c', 9, 0.1, vC.set(0, 1, 0), 1);
+          vfx.flash(vB, '#ffb347', 80, 0.5, 18);
+          vfx.ring(vB, 3.2, '#ffd27a', 0.5, 0.18, 0.2);
+          gameAudio.playBoom();
+          controller?.addShake(0.35);
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,200,120,0.35)' });
+          fighters.forEach((c, i) => {
+            if (c.pos[1] > ROOF.strikeY - 0.2 && Math.abs(c.pos[2]) < 2.2 && Math.abs(c.pos[0] - mapRuntime.boltX) < 4.5) envHit(i, 140, 7, '烟花');
+          });
+        }
+      } else {
+        R.timer -= dt;
+        if (R.timer <= 0) {
+          R.timer = 10 + Math.random() * 6;
+          R.warn = 1.8;
+          mapRuntime.boltX = -2.5 + Math.random() * 5;
+          mapRuntime.boltZ = 0;
+          onRoundEvent?.({ type: 'toast', text: '烟花要落在正殿屋脊上了！' });
+        }
+      }
+    }
+
+    /** 天阙之巅: the outer rings crack, glow, then break away into the clouds. */
+    function updateSummit(t: number) {
+      mapRuntime.summitFall += dt;
+      const st = mapRuntime.summitStage;
+      if (st >= 2 || round.over) {
+        mapRuntime.summitWarn = 0;
+        return;
+      }
+      const at = SUMMIT.breakAt[st];
+      if (t > at - SUMMIT.warn) {
+        if (mapRuntime.summitWarn === 0) {
+          onRoundEvent?.({ type: 'toast', text: st === 0 ? '外圈要碎了！往里走' : '中圈要碎了！只剩中心台' });
+          gameAudio.playGong();
+        }
+        mapRuntime.summitWarn = Math.min(1, (t - (at - SUMMIT.warn)) / SUMMIT.warn) || 0.001;
+        if (Math.random() < 0.5) {
+          const a = Math.random() * Math.PI * 2;
+          const r = SUMMIT.rings[st + 1] + Math.random() * (SUMMIT.rings[st] - SUMMIT.rings[st + 1]);
+          vfx.dustPuff(vB.set(Math.cos(a) * r, 0.05, Math.sin(a) * r), 2, 0.3, 1, 0.5, '#e7e5e4');
+        }
+      }
+      if (t >= at) {
+        mapRuntime.summitStage = st + 1;
+        mapRuntime.summitWarn = 0;
+        mapRuntime.summitFall = 0;
+        controller?.addShake(0.5);
+        gameAudio.playSlam();
+        gameAudio.playBoom();
+        for (let k = 0; k < 18; k++) {
+          const a = (k / 18) * Math.PI * 2;
+          const r = (SUMMIT.rings[st] + SUMMIT.rings[st + 1]) / 2;
+          vfx.rocks(vB.set(Math.cos(a) * r, 0.1, Math.sin(a) * r), 4, 4, 0.14);
+          vfx.dustPuff(vB, 3, 0.8, 2, 1.0, '#f5f5f4');
+        }
+        // anyone standing on the broken ring drops through (handled by the edge check next tick)
       }
     }
 
@@ -2309,6 +2468,8 @@ export function Game({
 
       if (map.id === 'sea') updateSea();
       if (map.id === 'glacier') updateGlacier();
+      if (map.id === 'rooftop') updateRooftop();
+      if (map.id === 'summit') updateSummit(t);
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
@@ -2714,12 +2875,12 @@ export function Game({
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
-        shadow-camera-left={-12}
-        shadow-camera-right={12}
-        shadow-camera-top={12}
-        shadow-camera-bottom={-12}
+        shadow-camera-left={-16}
+        shadow-camera-right={16}
+        shadow-camera-top={16}
+        shadow-camera-bottom={-16}
         shadow-camera-near={1}
-        shadow-camera-far={40}
+        shadow-camera-far={60}
       />
       <directionalLight ref={rimLightRef} color="#bcd7ff" intensity={2.4} />
       <directionalLight position={[-10, 6, 10]} color="#7f9cc9" intensity={0.5} />
@@ -2745,7 +2906,7 @@ export function Game({
       <primitive object={vfx.root} />
 
       <EffectComposer multisampling={4}>
-        <Bloom mipmapBlur intensity={0.9} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
+        <Bloom mipmapBlur intensity={map.bloom ?? 0.9} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
       </EffectComposer>

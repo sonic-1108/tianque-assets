@@ -191,6 +191,7 @@ export interface CombatantState {
   celebrate?: boolean;
   stamina?: number; // 体力: dodges, double jumps and climbing spend it
   climbing?: boolean; // 雪岭冰峰: hauling up a steep slope
+  ledgeBlocked?: number; // walking was stopped at a sheer drop (AI uses it to steer)
   sliding?: boolean; // out of stamina on a steep slope
   maxStamina?: number;
   staminaDelay?: number;
