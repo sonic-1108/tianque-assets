@@ -760,7 +760,28 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <p className="text-center text-[11px] text-zinc-500 -mt-2 mb-4">选好职业后点一张地图开打</p>
+            {!net && (
+              <div className="flex items-center justify-center gap-2 -mt-2 mb-3">
+                <span className="text-[11px] text-zinc-400">对手：</span>
+                {([
+                  [true, '会还手的 AI'],
+                  [false, '木桩（站着不动）'],
+                ] as const).map(([on, label]) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      if (aiEnabledRef.current !== on) toggleAI();
+                    }}
+                    className={`text-[11px] px-3 py-1 rounded-full border transition-all ${
+                      aiEnabled === on ? 'bg-amber-500 text-black border-amber-400 font-bold' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-center text-[11px] text-zinc-500 mb-4">选好职业后点一张地图开打 · 游戏里按 P 随时让对手停手或恢复</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {MAP_ORDER.map((id) => {
                 const m = MAPS[id];
@@ -1029,6 +1050,19 @@ export default function App() {
       >
         <span>菜单 (Esc)</span>
       </button>
+      {!online && (
+        <button
+          onClick={() => {
+            gameAudio.playCrispClick();
+            toggleAI();
+          }}
+          className={`absolute top-4 right-[118px] z-40 rounded-xl px-3 py-2 text-xs font-bold shadow-xl pointer-events-auto transition-all border ${
+            aiEnabled ? 'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-200 border-zinc-600' : 'bg-sky-900/90 hover:bg-sky-800 text-sky-100 border-sky-400/70'
+          }`}
+        >
+          {aiEnabled ? '⏸ 暂停对手 (P)' : '▶ 对手恢复 (P)'}
+        </button>
+      )}
 
       {/* BOTTOM HOTBAR: short descriptions + right-click detail cards */}
       <div className="absolute bottom-3 inset-x-0 pointer-events-none flex flex-col items-center z-20 px-4 gap-2">
