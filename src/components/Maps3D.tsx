@@ -304,7 +304,7 @@ function cliffTexture() {
 /** 汉白玉 balustrade: posts with lotus caps and two rails, built as instanced meshes */
 function Balustrade({ radius, gapAngles = [] }: { radius: number; gapAngles?: number[] }) {
   const { posts, rails, caps } = useMemo(() => {
-    const n = 48;
+    const n = Math.max(48, Math.round((2 * Math.PI * radius) / 1.7));
     const keep: number[] = [];
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
@@ -348,12 +348,65 @@ function Balustrade({ radius, gapAngles = [] }: { radius: number; gapAngles?: nu
   );
 }
 
+/** Vermilion lacquer column: brush-streaked lacquer, a gilt band of cloud scrolls near the top, worn edges */
+function lacquerTexture() {
+  const W = 512;
+  const H = 1024;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const rand = seeded(77);
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, '#7d1b12');
+  grd.addColorStop(1, '#6a150f');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, W, H);
+  // vertical brush streaks in the lacquer
+  for (let i = 0; i < 700; i++) {
+    g.fillStyle = `rgba(${rand() < 0.5 ? '40,6,4' : '160,48,30'},${rand() * 0.08})`;
+    g.fillRect(rand() * W, rand() * H, 1 + rand() * 3, 20 + rand() * 200);
+  }
+  // gilt bands with cloud scrolls (top) and a plain band (base)
+  const band = (y0: number, h: number, scrolls: boolean) => {
+    g.fillStyle = '#1d3b3a';
+    g.fillRect(0, y0, W, h);
+    g.fillStyle = '#c99a3a';
+    g.fillRect(0, y0, W, 6);
+    g.fillRect(0, y0 + h - 6, W, 6);
+    if (!scrolls) return;
+    g.strokeStyle = '#d8aa48';
+    g.lineWidth = 5;
+    for (let k = 0; k < 8; k++) {
+      const x = (k + 0.5) * (W / 8);
+      const cy = y0 + h / 2;
+      g.beginPath();
+      g.arc(x, cy, h * 0.28, Math.PI * 0.2, Math.PI * 1.7);
+      g.stroke();
+      g.beginPath();
+      g.arc(x + h * 0.18, cy + h * 0.06, h * 0.13, Math.PI, Math.PI * 2.6);
+      g.stroke();
+    }
+  };
+  band(60, 120, true);
+  band(H - 90, 50, false);
+  // wear: chipped lacquer showing dark wood near the base
+  for (let i = 0; i < 160; i++) {
+    g.fillStyle = `rgba(30,16,10,${0.2 + rand() * 0.4})`;
+    g.fillRect(rand() * W, H - 220 + rand() * 200, 2 + rand() * 10, 1 + rand() * 5);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
 function TempleMap() {
   const def = MAPS.temple;
   const R = def.radius;
   const floor = useMemo(() => templeFloorTextures(), []);
   const cliff = useMemo(() => cliffTexture(), []);
-  const lacquer = useMemo(() => new THREE.MeshStandardMaterial({ color: '#6e1a13', roughness: 0.55, metalness: 0.05 }), []);
+  const lacquer = useMemo(() => new THREE.MeshPhysicalMaterial({ map: lacquerTexture(), roughness: 0.42, metalness: 0.02, clearcoat: 0.7, clearcoatRoughness: 0.25 }), []);
   const gold = useMemo(() => new THREE.MeshStandardMaterial({ color: '#c9962e', roughness: 0.3, metalness: 0.9 }), []);
   const stone = useMemo(() => new THREE.MeshStandardMaterial({ color: '#cfc6b6', roughness: 0.7 }), []);
   const weathered = useMemo(() => new THREE.MeshStandardMaterial({ color: '#5e2a22', roughness: 0.85 }), []);
@@ -428,8 +481,8 @@ function TempleMap() {
         );
       })}
       {/* banners around the rim */}
-      {[0, 1, 2, 3, 4, 5, 6, 7].map((k) => {
-        const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+      {Array.from({ length: 12 }, (_, k) => k).map((k) => {
+        const a = (k / 12) * Math.PI * 2 + Math.PI / 12;
         return <Banner key={k} position={[Math.cos(a) * (R + 1.85), 0, Math.sin(a) * (R + 1.85)]} rotationY={-a - Math.PI / 2} color={k % 2 ? '#8f1d1d' : '#1f3a5f'} />;
       })}
 
@@ -495,7 +548,7 @@ function TempleMap() {
                 >
                   <coneGeometry args={[0.38, 1.0, 12]} />
                 </mesh>
-                <pointLight position={[0, 6.2, 0]} color="#ffa04a" intensity={8} distance={10} />
+                {Math.hypot(p.x, p.z) < 12 && <pointLight position={[0, 6.2, 0]} color="#ffa04a" intensity={8} distance={12} />}
               </>
             )}
           </group>
@@ -1357,7 +1410,7 @@ function SeaMap() {
           <meshStandardMaterial color="#5a3a26" roughness={0.7} />
         </mesh>
         {/* lanterns hung along the rails, out of the camera's way */}
-        {[-hz + 1.5, -1, hz - 2].flatMap((z) => [-1, 1].map((sd) => <Lantern key={`${z}${sd}`} position={[sd * (hx + 0.35), 1.1, z]} />))}
+        {[-hz + 1.5, -hz * 0.5, -1, hz * 0.5, hz - 2].flatMap((z) => [-1, 1].map((sd) => <Lantern key={`${z}${sd}`} position={[sd * (hx + 0.35), 1.1, z]} />))}
         {/* masts with battened junk sails high above the deck, and pennants */}
         {def.pillars!.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
@@ -1365,7 +1418,7 @@ function SeaMap() {
               <cylinderGeometry args={[p.r * 0.55, p.r, 14, 14]} />
               <meshStandardMaterial color={wood} roughness={0.8} />
             </mesh>
-            <JunkSail width={i ? 6.4 : 7.4} height={i ? 6.4 : 7.6} y={i ? 9.4 : 9.0} />
+            <JunkSail width={i ? 9 : 10.5} height={i ? 7.4 : 8.6} y={i ? 9.6 : 9.0} />
             <Banner position={[0, 13.2, 0]} color="#7a1a14" trim="#c9a24a" height={2.2} width={0.6} pole={1.6} />
           </group>
         ))}
@@ -1375,15 +1428,19 @@ function SeaMap() {
         {/* cargo crates lashed with rope */}
         {def.pillars!.slice(2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]} rotation={[0, i * 0.7, 0]}>
-            <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
-              <boxGeometry args={[p.r * 1.7, 1.1, p.r * 1.7]} />
-              <meshStandardMaterial map={planks} color="#a07850" roughness={0.85} />
-            </mesh>
-            {[-0.3, 0.3].map((o) => (
-              <mesh key={o} position={[o * p.r * 1.7, 0.55, 0]}>
-                <boxGeometry args={[0.06, 1.14, p.r * 1.74]} />
-                <meshStandardMaterial color="#3a2a18" roughness={1} />
-              </mesh>
+            {Array.from({ length: Math.round((p.h ?? 1.1) / 1.1) }, (_, k) => (
+              <group key={k} position={[0, k * 1.1, 0]} rotation={[0, k * 0.35, 0]}>
+                <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
+                  <boxGeometry args={[p.r * 1.7 - k * 0.08, 1.1, p.r * 1.7 - k * 0.08]} />
+                  <meshStandardMaterial map={planks} color="#a07850" roughness={0.85} />
+                </mesh>
+                {[-0.3, 0.3].map((o) => (
+                  <mesh key={o} position={[o * p.r * 1.7, 0.55, 0]}>
+                    <boxGeometry args={[0.06, 1.14, p.r * 1.74]} />
+                    <meshStandardMaterial color="#3a2a18" roughness={1} />
+                  </mesh>
+                ))}
+              </group>
             ))}
           </group>
         ))}

@@ -343,7 +343,7 @@ export default function App() {
   });
 
   // Dummy 2D Screen Projection state
-  const [dummyScreenPos, setDummyScreenPos] = useState({
+  const [dummyScreenPos, setDummyScreenPos] = useState<{ visible: boolean; screenX: number; screenY: number; angle?: number; dist?: number }>({
     visible: false,
     screenX: 0,
     screenY: 0,
@@ -897,6 +897,20 @@ export default function App() {
           </Canvas>
         </Suspense>
 
+        {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
+        {!dummyScreenPos.visible && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
+          <div
+            className="absolute pointer-events-none z-20 flex flex-col items-center"
+            style={{
+              left: `calc(50% + ${Math.sin(dummyScreenPos.angle) * 42}%)`,
+              top: `calc(50% - ${Math.cos(dummyScreenPos.angle) * 40}%)`,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <div style={{ transform: `rotate(${dummyScreenPos.angle}rad)` }} className="w-0 h-0 border-l-[9px] border-r-[9px] border-b-[16px] border-l-transparent border-r-transparent border-b-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]" />
+            <span className="mt-1 text-[10px] font-bold text-red-200 bg-black/60 px-1.5 rounded">{Math.round(dummyScreenPos.dist ?? 0)}米</span>
+          </div>
+        )}
         {/* Projected Screen Space Healthbar for Dummy */}
         {dummyScreenPos.visible && !isGameMenuOpen && !isHowToPlayOpen && (
           <div

@@ -39,7 +39,7 @@ function ridged(x: number, y: number) {
   let amp = 0.5;
   let f = 1;
   let prev = 1;
-  for (let o = 0; o < 4; o++) {
+  for (let o = 0; o < 3; o++) {
     let n = 1 - Math.abs(vnoise(x * f, y * f) * 2 - 1);
     n *= n;
     sum += n * amp * prev;
@@ -182,8 +182,8 @@ function makeTerrainMaterial() {
 // terrain mesh
 // ---------------------------------------------------------------
 function terrainGeometry() {
-  const size = 152;
-  const seg = 380; // 0.4 m
+  const size = 216;
+  const seg = 432; // 0.5 m
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position as THREE.BufferAttribute;
@@ -224,7 +224,7 @@ function AlpineRange() {
   const { geo, mat } = useMemo(() => {
     const nA = 540;
     const nR = 90;
-    const r0 = 73;
+    const r0 = 104;
     const r1 = 520;
     const pos: number[] = [];
     const col: number[] = [];
@@ -245,8 +245,8 @@ function AlpineRange() {
         const base = glacierHeight(Math.cos(a) * r0, Math.sin(a) * r0);
         // massifs come and go round the horizon; ridged noise gives knife-edge crests
         const massif = 0.45 + 0.55 * vnoise(Math.cos(a) * 2.2 + 7, Math.sin(a) * 2.2 + 3);
-        const env = THREE.MathUtils.smoothstep(r, r0, r0 + 60) * (1 - THREE.MathUtils.smoothstep(r, 300, 520) * 0.6);
-        const h = base + env * (25 + 165 * massif * ridged(x * 0.008, z * 0.008));
+        const env = THREE.MathUtils.smoothstep(r, r0, r0 + 70) * (1 - THREE.MathUtils.smoothstep(r, 300, 520) * 0.6);
+        const h = base + env * (25 + 165 * massif * ridged(x * 0.006, z * 0.006));
         heights.push(h);
         pos.push(x, h, z);
       }
@@ -451,7 +451,7 @@ function Spindrift() {
     // low drifts skimming the valley floor
     for (let k = 0; k < 10; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 14 + rand() * 10;
+      const r = 20 + rand() * 16;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
       out.push({ x, z, y: glacierHeight(x, z) + 0.6, s: 5 + rand() * 4, ph: rand() * 6, sp: 0.3 + rand() * 0.4 });
@@ -586,12 +586,12 @@ function Outcrops() {
     const rand = seeded(44);
     const [sx, sz] = GLACIER.summit;
     const out: { p: THREE.Vector3; s: THREE.Vector3; r: THREE.Euler }[] = [];
-    for (let k = 0; k < 60 && out.length < 26; k++) {
+    for (let k = 0; k < 120 && out.length < 45; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 5 + rand() * 15;
+      const r = 5 + rand() * 22;
       const x = sx + Math.cos(a) * r;
       const z = sz + Math.sin(a) * r;
-      if (Math.hypot(x, z) > 25) continue;
+      if (Math.hypot(x, z) > 38) continue;
       if (glacierPath(x, z).d < GLACIER.pathHalf + 2.2) continue; // keep the road clear
       if (x > GLACIER.avalancheX[0] - 1 && x < GLACIER.avalancheX[1] + 1 && z > GLACIER.avalancheTop) continue;
       const s = 0.6 + rand() * 1.1;
@@ -661,26 +661,26 @@ export function GlacierMap() {
     const out: [number, number, number][] = [];
     const [sx, sz] = GLACIER.summit;
     // forest on the shelf ringing the valley, outside the arena
-    for (let k = 0; k < 260; k++) {
+    for (let k = 0; k < 420; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 28.5 + Math.pow(rand(), 0.8) * 40;
+      const r = 41.5 + Math.pow(rand(), 0.8) * 55;
       out.push([Math.cos(a) * r, Math.sin(a) * r, 1.0 + rand() * 1.2]);
     }
     // a few on the lower terraces, never on the road or in the avalanche chute
-    for (let k = 0; k < 220 && out.length < 300; k++) {
+    for (let k = 0; k < 400 && out.length < 500; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 9 + rand() * 13;
+      const r = 9 + rand() * 20;
       const x = sx + Math.cos(a) * r;
       const z = sz + Math.sin(a) * r;
-      if (Math.hypot(x, z) > 25.5) continue;
+      if (Math.hypot(x, z) > 38.5) continue;
       if (glacierPath(x, z).d < GLACIER.pathHalf + 2.4) continue;
       if (x > GLACIER.avalancheX[0] - 2 && x < GLACIER.avalancheX[1] + 2 && z > GLACIER.avalancheTop) continue;
       out.push([x, z, 0.7 + rand() * 0.5]);
     }
     // valley edges
-    for (let k = 0; k < 30; k++) {
+    for (let k = 0; k < 60; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 23 + rand() * 4;
+      const r = 34 + rand() * 5;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
       if (Math.hypot(x - sx, z - sz) < GLACIER.footR + 2) continue;
@@ -693,7 +693,7 @@ export function GlacierMap() {
     const out: [number, number, number][] = [];
     const [sx, sz] = GLACIER.summit;
     const pts = GLACIER.pathPts;
-    for (let i = 4; i < pts.length; i += 12) {
+    for (let i = 4; i < pts.length; i += 14) {
       const [px, pz] = pts[i];
       const dx = px - sx;
       const dz = pz - sz;

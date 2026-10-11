@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { EffectComposer, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
+import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
@@ -47,7 +48,7 @@ interface GameSceneProps {
     camPitch: number;
     camDist: number;
   }) => void;
-  onDummyScreenPosUpdate?: (data: { visible: boolean; screenX: number; screenY: number }) => void;
+  onDummyScreenPosUpdate?: (data: { visible: boolean; screenX: number; screenY: number; angle?: number; dist?: number }) => void;
   onBloodRageFlash?: () => void;
   onAnimationDebug?: (info: AnimationDebugInfo) => void;
   onLoadProgress?: (progress: ModelLoadProgress) => void;
@@ -249,16 +250,15 @@ export function Game({
 
   // ---------- environment ----------
   useEffect(() => {
-    const pmrem = new THREE.PMREMGenerator(gl);
-    const env = pmrem.fromScene(new (RoomEnvironment as any)(), 0.04).texture;
+    const sky = SKY_ENV[map.id];
+    const env = makeSkyEnvironment(gl, sky);
     scene.environment = env;
-    (scene as any).environmentIntensity = map.env ?? 0.55;
+    (scene as any).environmentIntensity = map.env ?? sky.intensity;
     scene.background = new THREE.Color(map.background);
     scene.fog = new THREE.Fog(map.background, map.fog[0], map.fog[1]);
     gl.toneMappingExposure = map.exposure;
     return () => {
       env.dispose();
-      pmrem.dispose();
       scene.environment = null;
     };
   }, [gl, scene, map]);
@@ -645,10 +645,14 @@ export function Game({
 
     // ================= HUD =================
     headProj.set(en.pos[0], en.pos[1] + 2.25, en.pos[2]).project(camera);
+    // direction to the opponent in camera space, for the off-screen arrow on the big maps
+    vD.set(en.pos[0], en.pos[1] + 1, en.pos[2]).applyMatrix4(camera.matrixWorldInverse);
     onDummyScreenPosUpdate?.({
       visible: headProj.z < 1 && Math.abs(headProj.x) < 1.1 && Math.abs(headProj.y) < 1.1,
       screenX: (headProj.x * 0.5 + 0.5) * size.width,
       screenY: (-headProj.y * 0.5 + 0.5) * size.height,
+      angle: Math.atan2(vD.x, -vD.z),
+      dist: Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]),
     });
     const nowMs = performance.now();
     if (nowMs - lastReportRef.current > 150) {
@@ -2192,7 +2196,7 @@ export function Game({
       if (map.id === 'glacier') for (let k = 0; k < GLACIER.pathPts.length; k += 26) cands.push([GLACIER.pathPts[k][0], GLACIER.pathPts[k][1]]);
       if (map.id === 'rooftop') {
         cands.length = 0;
-        cands.push([0, 4.2], [0, -4.2], [0, 9.8], [0, -9.8], [-11.5, 0], [11.5, 0], [-8.5, 0], [8.5, 0], [5, 5.5], [-5, -5.5]);
+        cands.push([0, 7.5], [0, -7.5], [0, 15.5], [0, -15.5], [-18, 0], [18, 0], [-11.5, 0], [11.5, 0], [16.5, 16.5], [-16.5, -16.5], [16.5, -16.5], [-16.5, 16.5]);
       }
       const ok = cands.filter((c) => !danger(c[0], c[1], 0));
       const pool = ok.length ? ok : cands;
@@ -2395,12 +2399,12 @@ export function Game({
       if (R.warn > 0) {
         R.warn -= dt;
         mapRuntime.ridgeWarn = Math.min(1, 1 - R.warn / 1.8);
-        if (Math.random() < 0.6) vfx.sparkBurst(vB.set(mapRuntime.boltX + (Math.random() - 0.5) * 3, 6.6, (Math.random() - 0.5) * 0.4), 2, '#ffd27a', 3, 0.06, vC.set(0, 1, 0), 0.8);
+        if (Math.random() < 0.6) vfx.sparkBurst(vB.set(mapRuntime.boltX + (Math.random() - 0.5) * 3, ROOF.ridgeTop - 0.1, (Math.random() - 0.5) * 0.4), 2, '#ffd27a', 3, 0.06, vC.set(0, 1, 0), 0.8);
         if (R.warn <= 0) {
           R.warn = 0;
           mapRuntime.ridgeWarn = 0;
           mapRuntime.boltT = 1;
-          vB.set(mapRuntime.boltX, 6.6, 0);
+          vB.set(mapRuntime.boltX, ROOF.ridgeTop - 0.1, 0);
           vfx.sparkBurst(vB, 60, '#ffcf6b', 12, 0.12, vC.set(0, 1, 0), 1);
           vfx.sparkBurst(vB, 30, '#ff5a3c', 9, 0.1, vC.set(0, 1, 0), 1);
           vfx.flash(vB, '#ffb347', 80, 0.5, 18);
@@ -2417,7 +2421,7 @@ export function Game({
         if (R.timer <= 0) {
           R.timer = 10 + Math.random() * 6;
           R.warn = 1.8;
-          mapRuntime.boltX = -2.5 + Math.random() * 5;
+          mapRuntime.boltX = -3.5 + Math.random() * 7;
           mapRuntime.boltZ = 0;
           onRoundEvent?.({ type: 'toast', text: '烟花要落在正殿屋脊上了！' });
         }
@@ -2562,8 +2566,8 @@ export function Game({
       vfx.sparkBurst(crater, 90, '#ff6a1a', 26, 1.1, new THREE.Vector3(0, 1, 0), 0.5);
       vfx.dustPuff(crater, 20, 4, 6, 6, '#2a1a14');
       vfx.flash(crater, '#ff6a1a', 900, 2.5, 220);
-      for (let k = 0; k < 7; k++) {
-        vfx.later(0.7 + k * 0.38, () => {
+      for (let k = 0; k < 11; k++) {
+        vfx.later(0.7 + k * 0.3, () => {
           if (round.over || map.id !== 'lavacliff') return;
           let tx: number;
           let tz: number;
@@ -2707,7 +2711,7 @@ export function Game({
         w.warn -= dt;
         mapRuntime.waveRise = Math.min(1, 1 - w.warn / 2.2);
         if (Math.random() < 0.5) {
-          vB.set(w.side * (hx + 0.6), 0.6, (Math.random() - 0.5) * 24);
+          vB.set(w.side * (hx + 0.6), 0.6, (Math.random() - 0.5) * map.rect!.hz * 2);
           vfx.sparkBurst(vB, 2, '#cfe8ff', 4, 0.1, vC.set(-w.side * 0.3, 1, 0), 0.4);
         }
         if (w.warn <= 0) {
@@ -2717,15 +2721,15 @@ export function Game({
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(170,215,255,0.4)' });
           controller?.addShake(0.4);
           gameAudio.playWaveCrash();
-          for (let k = 0; k < 14; k++) {
-            const z = -12 + (k / 13) * 24;
+          for (let k = 0; k < 20; k++) {
+            const z = -map.rect!.hz + (k / 19) * map.rect!.hz * 2;
             vB.set(w.side * hx, 0.5, z);
             vfx.sparkBurst(vB, 6, '#e0f2ff', 9, 0.16, vC.set(-w.side, 0.6, 0), 0.5);
             vfx.dustPuff(vB, 2, 0.5, 6, 1.1, '#cfe3f5');
           }
           fighters.forEach((c) => {
             if (c.hp <= 0 || c.pos[1] > 1.5) return;
-            const push = c.isBlocking ? 4 : 16;
+            const push = c.isBlocking ? 5 : 21;
             c.vel[0] = -w.side * push;
             c.vel[2] *= 0.3;
             if (!c.isBlocking && !c.hasSuperArmor) {
@@ -2935,7 +2939,10 @@ export function Game({
 
       <primitive object={vfx.root} />
 
-      <EffectComposer multisampling={4}>
+      <EffectComposer multisampling={quality === 'high' ? 4 : quality === 'medium' ? 2 : 0}>
+        {quality === 'high' && <N8AO halfRes quality="medium" aoRadius={2.4} distanceFalloff={1.0} intensity={3.5} color="#1a1410" />}
+        <HueSaturation saturation={0.08} />
+        <BrightnessContrast brightness={0} contrast={0.06} />
         <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />

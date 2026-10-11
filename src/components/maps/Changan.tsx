@@ -403,17 +403,23 @@ function Halls() {
     for (const hl of ROOF.halls) {
       const { cx, cz, alongX, ha, hb, ridgeHalf } = hallFrame(hl);
       items.push({ geo: roofGeometry(hl), mat: roofMat, cast: true, recv: true });
+      if (ridgeHalf < 0.5) {
+        // square corner tower: a pyramid roof crowned with a gilded finial (宝顶)
+        items.push({ geo: new THREE.SphereGeometry(0.42, 16, 12), mat: goldMat, pos: [cx, hl.ridge + 0.55, cz], cast: true });
+        items.push({ geo: new THREE.ConeGeometry(0.2, 1.1, 12), mat: goldMat, pos: [cx, hl.ridge + 1.3, cz], cast: true });
+        items.push({ geo: new THREE.CylinderGeometry(0.5, 0.62, 0.3, 16), mat: ridgeMat, pos: [cx, hl.ridge + 0.15, cz], cast: true });
+      }
       // main ridge: a raised tiled beam with gold caps and a 鸱吻 at each end
       const ridgeLen = ridgeHalf * 2 + 0.7;
       const rg = new THREE.BoxGeometry(alongX ? ridgeLen : 0.64, 0.5, alongX ? 0.64 : ridgeLen);
-      items.push({ geo: rg, mat: ridgeMat, pos: [cx, hl.ridge + 0.06, cz], cast: true, recv: true });
+      if (ridgeHalf >= 0.5) items.push({ geo: rg, mat: ridgeMat, pos: [cx, hl.ridge + 0.06, cz], cast: true, recv: true });
       const cap = new THREE.BoxGeometry(alongX ? ridgeLen + 0.1 : 0.7, 0.05, alongX ? 0.7 : ridgeLen + 0.1);
-      items.push({ geo: cap, mat: goldMat, pos: [cx, hl.ridge + 0.31, cz] });
-      for (const sgn of [-1, 1]) {
+      if (ridgeHalf >= 0.5) items.push({ geo: cap, mat: goldMat, pos: [cx, hl.ridge + 0.31, cz] });
+      for (const sgn of ridgeHalf >= 0.5 ? [-1, 1] : []) {
         const ex = alongX ? cx + sgn * (ridgeHalf + 0.25) : cx;
         const ez = alongX ? cz : cz + sgn * (ridgeHalf + 0.25);
         const rotY = alongX ? (sgn > 0 ? Math.PI : 0) : sgn > 0 ? Math.PI / 2 : -Math.PI / 2;
-        items.push({ geo: chiwei, mat: goldMat, pos: [ex, hl.ridge + 0.3, ez], rot: [0, rotY, 0], scale: hl.ridge > 5.5 ? 1.25 : 0.95, cast: true });
+        items.push({ geo: chiwei, mat: goldMat, pos: [ex, hl.ridge + 0.3, ez], rot: [0, rotY, 0], scale: hl.ridge > 7 ? 1.4 : 1.0, cast: true });
       }
       // hip ridges: from each end of the main ridge down to the four corners
       const ends: [number, number][] = alongX
@@ -528,12 +534,16 @@ function lanternSpots() {
   }
   // festival strings criss-crossing high above the roofs, from ridge to ridge
   const ridgeTops: [number, number, number][] = [
-    [0, -10, 5.3],
-    [0, 10, 5.3],
-    [-11.5, 0, 5.0],
-    [11.5, 0, 5.0],
-    [-6.5, 0, 6.8],
-    [6.5, 0, 6.8],
+    [0, -14, 6.0],
+    [0, 14, 6.0],
+    [-18, 0, 5.8],
+    [18, 0, 5.8],
+    [-4, 0, 7.7],
+    [4, 0, 7.7],
+    [16.5, -16.5, 6.6],
+    [-16.5, -16.5, 6.6],
+    [16.5, 16.5, 6.6],
+    [-16.5, 16.5, 6.6],
   ];
   const strings: [number, number][] = [
     [0, 4],
@@ -542,7 +552,14 @@ function lanternSpots() {
     [1, 5],
     [2, 4],
     [3, 5],
-    [0, 1],
+    [0, 6],
+    [0, 7],
+    [1, 8],
+    [1, 9],
+    [3, 6],
+    [3, 8],
+    [2, 7],
+    [2, 9],
   ];
   for (const [a, b] of strings) {
     const A = ridgeTops[a];
@@ -561,10 +578,10 @@ function lanternSpots() {
   }
   // strings of lanterns across the four courtyards, sagging between the halls
   const corners: [number, number, number, number][] = [
-    [8.2, 8.2, 13, 13],
-    [-8.2, 8.2, -13, 13],
-    [8.2, -8.2, 13, -13],
-    [-8.2, -8.2, -13, -13],
+    [9.2, 9.2, 12.8, 14.3],
+    [-9.2, 9.2, -12.8, 14.3],
+    [9.2, -9.2, 12.8, -14.3],
+    [-9.2, -9.2, -12.8, -14.3],
   ];
   for (const [ax, az, bx, bz] of corners) {
     for (const [p, q] of [
@@ -653,14 +670,14 @@ function Lanterns() {
 /** A handful of real lights so the lanterns actually light the wet tiles and the frieze */
 function LanternLights() {
   const lights: [number, number, number, string, number][] = [
-    [10.5, 0.8, 10.5, '#ff8a3d', 60],
-    [-10.5, 0.8, 10.5, '#ff7a35', 60],
-    [10.5, 0.8, -10.5, '#ff8a3d', 60],
-    [-10.5, 0.8, -10.5, '#ff7a35', 60],
-    [0, 11, 5.5, '#ffa060', 9],
-    [0, 11, -5.5, '#ffa060', 9],
-    [8.5, 10.5, 0, '#ff9050', 8],
-    [-8.5, 10.5, 0, '#ff9050', 8],
+    [11, 1.2, 11.5, '#ff8a3d', 70],
+    [-11, 1.2, 11.5, '#ff7a35', 70],
+    [11, 1.2, -11.5, '#ff8a3d', 70],
+    [-11, 1.2, -11.5, '#ff7a35', 70],
+    [0, 12, 7.5, '#ffa060', 12],
+    [0, 12, -7.5, '#ffa060', 12],
+    [11.5, 11.5, 0, '#ff9050', 10],
+    [-11.5, 11.5, 0, '#ff9050', 10],
   ];
   return (
     <group>
@@ -717,10 +734,10 @@ function PlumTree({ seed }: { seed: number }) {
 function Courtyards() {
   const items = useMemo(() => {
     const out: { x: number; z: number }[] = [
-      { x: 11, z: 11 },
-      { x: -11, z: 11 },
-      { x: 11, z: -11 },
-      { x: -11, z: -11 },
+      { x: 11, z: 11.5 },
+      { x: -11, z: 11.5 },
+      { x: 11, z: -11.5 },
+      { x: -11, z: -11.5 },
     ];
     return out;
   }, []);
@@ -742,7 +759,7 @@ function Courtyards() {
   return (
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, ROOF.street, 0]} receiveShadow>
-        <planeGeometry args={[60, 60]} />
+        <planeGeometry args={[54, 54]} />
         <meshStandardMaterial map={paving} roughness={0.6} metalness={0.05} />
       </mesh>
       {items.map(({ x, z }, i) => (
@@ -796,7 +813,7 @@ function City() {
           const x = wx + (rand() - 0.5) * (ward - 12);
           const z = wz + (rand() - 0.5) * (ward - 12);
           const r = Math.hypot(x, z);
-          if (r < 26 || r > 300) continue;
+          if (r < 36 || r > 300) continue;
           // the 朱雀大街 avenue running north-south stays open
           if (Math.abs(x) < 9) continue;
           const big = rand() < 0.12;
@@ -908,7 +925,7 @@ function City() {
     roofs.instanceMatrix.needsUpdate = true;
     // lantern strings down both sides of the avenue, and a dense glow of street lamps
     for (let z = -300; z < 300; z += 2.2) {
-      if (Math.abs(z) < 22) continue;
+      if (Math.abs(z) < 32) continue;
       for (const sx of [-7.5, 7.5]) {
         lp.push(sx, ROOF.street + 3 + Math.sin(z * 0.7) * 0.4, z);
         col.set(rand() < 0.8 ? '#ff5a2a' : '#ffd27a');
@@ -1253,19 +1270,19 @@ function RidgeShell() {
     const g = shell.current;
     if (g) {
       g.visible = w > 0;
-      g.position.set(mapRuntime.boltX + (1 - w) * 6, 6.9 + Math.pow(1 - w, 1.4) * 40, -(1 - w) * 10);
+      g.position.set(mapRuntime.boltX + (1 - w) * 6, ROOF.ridgeTop + 0.3 + Math.pow(1 - w, 1.4) * 40, -(1 - w) * 10);
       g.rotation.z = st.clock.elapsedTime * 9;
     }
     if (mark.current) {
       mark.current.visible = w > 0;
-      mark.current.position.set(mapRuntime.boltX, 6.58, 0);
+      mark.current.position.set(mapRuntime.boltX, ROOF.ridgeTop - 0.02, 0);
       const k = 0.6 + w * 3.4;
       mark.current.scale.set(k, k, k);
       (mark.current.material as THREE.MeshBasicMaterial).opacity = 0.25 + 0.5 * Math.abs(Math.sin(st.clock.elapsedTime * 10));
     }
     if (light.current) {
       light.current.intensity = mapRuntime.boltT * 900;
-      light.current.position.set(mapRuntime.boltX, 8, 0);
+      light.current.position.set(mapRuntime.boltX, ROOF.ridgeTop + 1.4, 0);
     }
   });
   return (
@@ -1304,7 +1321,7 @@ function Haze() {
           void main(){
             float n = fbm(vW.xz * 0.05 + vec2(uTime * 0.02, uTime * 0.013));
             float d = length(vW.xz);
-            float a = smoothstep(0.45, 0.85, n) * smoothstep(18.0, 40.0, d) * (1.0 - smoothstep(120.0, 260.0, d));
+            float a = smoothstep(0.45, 0.85, n) * smoothstep(30.0, 55.0, d) * (1.0 - smoothstep(120.0, 260.0, d));
             gl_FragColor = vec4(vec3(0.55, 0.3, 0.2), a * 0.35);
           }`,
       }),

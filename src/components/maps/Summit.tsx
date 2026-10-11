@@ -10,13 +10,13 @@ import { Sky, CloudSea, CloudPuffs, KarstPeaks, seeded, GLSL_NOISE } from '../Sc
 // crack and fall away during the round.
 // ==================================================================
 
-const FLOOR_SIZE = 28; // metres covered by the carved floor texture
+const FLOOR_SIZE = 46; // metres covered by the carved floor texture
 
 /** Carved white-jade floor, gold inlay, and a separate crack layer that glows before a ring breaks */
 let floorCache: { map: THREE.Texture; bump: THREE.Texture; cracks: THREE.Texture } | null = null;
 function floorTextures() {
   if (floorCache) return floorCache;
-  const N = 1024;
+  const N = 2048;
   const px = (m: number) => (m / FLOOR_SIZE) * N; // metres -> pixels
   const C = N / 2;
   const make = (draw: (g: CanvasRenderingContext2D) => void, srgb: boolean) => {
@@ -31,7 +31,7 @@ function floorTextures() {
   };
   const rand = seeded(31);
   const veins: { x: number; y: number; pts: [number, number][] }[] = [];
-  for (let k = 0; k < 60; k++) {
+  for (let k = 0; k < 140; k++) {
     let x = rand() * N;
     let y = rand() * N;
     const pts: [number, number][] = [[x, y]];
@@ -49,8 +49,8 @@ function floorTextures() {
     g.translate(C, C);
     // paving: concentric courses split into radial slabs
     g.strokeStyle = ink;
-    g.lineWidth = forBump ? 3 : 1.6;
-    const rings = [1.4, 2.8, 4.2, 5.6, 7.4, 9.2, 11.1, 13];
+    g.lineWidth = forBump ? 5 : 2.8;
+    const rings = [2.1, 4.2, 6.4, 8.5, 10.6, 12.8, 15, 17.4, 19.7, 22];
     for (const r of rings) {
       g.beginPath();
       g.arc(0, 0, px(r), 0, Math.PI * 2);
@@ -70,16 +70,16 @@ function floorTextures() {
     }
     // gold inlay: the ring borders, a band of cloud scrolls, and the 太极 in the centre
     g.strokeStyle = gold;
-    g.lineWidth = forBump ? 6 : 5;
+    g.lineWidth = forBump ? 11 : 9;
     for (const r of [SUMMIT.rings[2] - 0.12, SUMMIT.rings[1] - 0.12, SUMMIT.rings[0] - 0.35]) {
       g.beginPath();
       g.arc(0, 0, px(r), 0, Math.PI * 2);
       g.stroke();
     }
-    g.lineWidth = forBump ? 4 : 3;
+    g.lineWidth = forBump ? 7 : 5;
     for (let k = 0; k < 24; k++) {
       const a = (k / 24) * Math.PI * 2;
-      const r = px(8.3);
+      const r = px(13.2);
       g.beginPath();
       g.arc(Math.cos(a) * r, Math.sin(a) * r, px(0.45), a + 0.6, a + 0.6 + Math.PI * 1.5);
       g.stroke();
@@ -93,14 +93,14 @@ function floorTextures() {
       g.save();
       g.rotate(a);
       g.beginPath();
-      g.moveTo(px(2.9), 0);
-      g.quadraticCurveTo(px(3.6), px(0.5), px(4.3), 0);
-      g.quadraticCurveTo(px(3.6), -px(0.5), px(2.9), 0);
+      g.moveTo(px(4.6), 0);
+      g.quadraticCurveTo(px(5.8), px(0.8), px(7.0), 0);
+      g.quadraticCurveTo(px(5.8), -px(0.8), px(4.6), 0);
       g.stroke();
       g.restore();
     }
     // 太极
-    const R = px(1.3);
+    const R = px(2.0);
     g.beginPath();
     g.arc(0, 0, R, 0, Math.PI * 2);
     g.stroke();
@@ -120,17 +120,17 @@ function floorTextures() {
   const map = make((g) => {
     // jade: warm white with faint grey-green veining
     const grd = g.createRadialGradient(C, C, 0, C, C, N * 0.6);
-    grd.addColorStop(0, '#ebe6d8');
-    grd.addColorStop(1, '#ddd8c9');
+    grd.addColorStop(0, '#d8d1bf');
+    grd.addColorStop(1, '#c9c1ad');
     g.fillStyle = grd;
     g.fillRect(0, 0, N, N);
-    for (let i = 0; i < 9000; i++) {
+    for (let i = 0; i < 30000; i++) {
       const v = 225 + rand() * 30;
       g.fillStyle = `rgba(${v},${v},${v - 6},0.25)`;
       g.fillRect(rand() * N, rand() * N, 3, 3);
     }
     g.strokeStyle = 'rgba(150,160,150,0.18)';
-    g.lineWidth = 1.2;
+    g.lineWidth = 2;
     for (const v of veins) {
       g.beginPath();
       g.moveTo(v.pts[0][0], v.pts[0][1]);
@@ -151,7 +151,7 @@ function floorTextures() {
     g.strokeStyle = '#fff';
     g.lineCap = 'round';
     for (const ringR of [SUMMIT.rings[1], SUMMIT.rings[2]]) {
-      g.lineWidth = 3.5;
+      g.lineWidth = 6;
       g.beginPath();
       for (let k = 0; k <= 220; k++) {
         const a = (k / 220) * Math.PI * 2;
@@ -163,8 +163,8 @@ function floorTextures() {
       }
       g.stroke();
       // branches running out across the ring that is going to break
-      g.lineWidth = 2;
-      for (let k = 0; k < 46; k++) {
+      g.lineWidth = 3.5;
+      for (let k = 0; k < 80; k++) {
         let a = rand() * Math.PI * 2;
         let r = px(ringR);
         g.beginPath();
@@ -236,8 +236,8 @@ function useFloor() {
     const R = SUMMIT.rings;
     // ring 0 = outer (breaks first), ring 1 = middle, ring 2 = the inner disc that stays
     const layout: [number, number, number][] = [
-      [R[1], R[0], 16],
-      [R[2], R[1], 10],
+      [R[1], R[0], 22],
+      [R[2], R[1], 14],
     ];
     layout.forEach(([r0, r1, n], ring) => {
       const off = rand() * 0.5;
@@ -248,8 +248,8 @@ function useFloor() {
         const posts: [number, number][] = [];
         if (ring === 0) {
           // balustrade posts along the outer edge
-          for (let t = 0; t < 3; t++) {
-            const a = a0 + ((a1 - a0) * (t + 0.5)) / 3;
+          for (let t = 0; t < 4; t++) {
+            const a = a0 + ((a1 - a0) * (t + 0.5)) / 4;
             posts.push([Math.cos(a) * (r1 - 0.3), Math.sin(a) * (r1 - 0.3)]);
           }
         }
@@ -436,8 +436,8 @@ function GateTowers() {
     const roof = new THREE.MeshStandardMaterial({ color: '#c8982f', roughness: 0.38, metalness: 0.55, side: THREE.DoubleSide });
     const rail = new THREE.MeshStandardMaterial({ color: '#efe9da', roughness: 0.6 });
     for (const side of [-1, 1]) {
-      const x = side * 46;
-      const z = -120;
+      const x = side * 62;
+      const z = -150;
       // tapering rammed-earth and stone base rising out of the clouds
       const base = new THREE.Mesh(new THREE.CylinderGeometry(13, 17, 46, 4, 1), stone);
       base.rotation.y = Math.PI / 4;
@@ -490,7 +490,7 @@ function GateTowers() {
 function Cranes() {
   const birds = useMemo(() => {
     const rand = seeded(8);
-    return Array.from({ length: 9 }, () => ({ r: 30 + rand() * 30, y: 4 + rand() * 14, a: rand() * 6.28, s: 0.05 + rand() * 0.05, flap: rand() * 6 }));
+    return Array.from({ length: 9 }, () => ({ r: 40 + rand() * 35, y: 4 + rand() * 14, a: rand() * 6.28, s: 0.05 + rand() * 0.05, flap: rand() * 6 }));
   }, []);
   const refs = useRef<(THREE.Group | null)[]>([]);
   const wings = useRef<(THREE.Mesh | null)[][]>([]);
@@ -569,7 +569,7 @@ function SunRays() {
 }
 
 // module-level constants: KarstPeaks rebuilds its meshes whenever these props change identity
-const SUN_DIR: [number, number, number] = [0.4, 0.22, -1];
+const SUN_DIR: [number, number, number] = [0.5, 0.14, -1];
 const PEAK_LAYERS = [
   { dist: 120, count: 9, height: [30, 55] as [number, number], radius: [6, 11] as [number, number], haze: 0.25 },
   { dist: 210, count: 14, height: [40, 80] as [number, number], radius: [10, 18] as [number, number], haze: 0.55 },
@@ -580,11 +580,11 @@ const PUFF_Y: [number, number] = [-24, -9];
 export function SummitMap() {
   return (
     <group>
-      <Sky zenith="#4f7fc9" horizon="#f6e2c4" below="#efe6da" sunDir={SUN_DIR} sunColor="#ffe2b0" sunSize={1.3} streaks={0.8} streakColor="#fff6ea" />
-      <CloudSea y={-26} color="#fffaf2" shadow="#b8b6c8" horizon="#f3e3cc" sunDir={SUN_DIR} />
-      <KarstPeaks seed={21} baseY={-40} haze="#efe2cf" rock="#6f7a74" light="#ffe2b0" lightDir={SUN_DIR} layers={PEAK_LAYERS} exclude={PEAK_EXCLUDE} />
+      <Sky zenith="#2a56a3" horizon="#f3cf98" below="#efe2cf" sunDir={SUN_DIR} sunColor="#ffc878" sunSize={1.6} streaks={0.7} streakColor="#ffe9cc" />
+      <CloudSea y={-26} color="#fff4e4" shadow="#9a9ab4" horizon="#f1d3a8" sunDir={SUN_DIR} />
+      <KarstPeaks seed={21} baseY={-40} haze="#e9cfae" rock="#5f625c" light="#ffc878" lightDir={SUN_DIR} layers={PEAK_LAYERS} exclude={PEAK_EXCLUDE} />
       <GateTowers />
-      <CloudPuffs count={30} inner={26} outer={110} y={PUFF_Y} color="#fffaf3" seed={33} />
+      <CloudPuffs count={30} inner={34} outer={130} y={PUFF_Y} color="#fffaf3" seed={33} />
       <SunRays />
       <FloatingFloor />
       <JadePosts />

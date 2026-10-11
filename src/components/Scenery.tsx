@@ -107,27 +107,53 @@ export function Sky({
 // Karst peaks (张家界 style stone pillars) rising out of a sea of clouds.
 // Each layer is fogged toward the haze colour by hand so depth reads like ink painting.
 // ------------------------------------------------------------------
+function hash2(x: number, y: number) {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+/** smooth value noise 0..1 (wraps in x every `px` cells when px > 0) */
+function vnoise(x: number, y: number, px = 0) {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const w = (i: number) => (px > 0 ? ((i % px) + px) % px : i);
+  const a = hash2(w(xi), yi);
+  const b = hash2(w(xi + 1), yi);
+  const c = hash2(w(xi), yi + 1);
+  const d = hash2(w(xi + 1), yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+/** A sandstone pillar: near-vertical fluted walls, ledges of strata, a rounded wooded crown */
 function peakGeometry(rand: () => number, height: number, radius: number) {
+  const steps = 44;
+  const radial = 30;
+  const off = rand() * 100;
   const pts: THREE.Vector2[] = [];
-  const steps = 14;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    // steep sides, rounded crown, jittered silhouette
-    // near-vertical walls, a slight waist, then a rounded cap
-    const crown = t > 0.88 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.88) / 0.12, 2))) : 1;
-    const r = radius * (1.1 - 0.25 * t + 0.08 * Math.sin(t * 9 + rand() * 2)) * crown * (0.92 + rand() * 0.16);
+    const crown = t > 0.86 ? Math.sqrt(Math.max(0, 1 - Math.pow((t - 0.86) / 0.14, 2))) : 1;
+    const r = radius * (1.12 - 0.28 * t) * crown;
     pts.push(new THREE.Vector2(Math.max(0.01, r), t * height));
   }
-  const g = new THREE.LatheGeometry(pts, 14);
-  // knock the round lathe into an irregular rock column
+  const g = new THREE.LatheGeometry(pts, radial);
   const pos = g.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
     const y = pos.getY(i);
-    const n = Math.sin(x * 0.7 + y * 0.3) * 0.09 + Math.cos(z * 0.8 - y * 0.21) * 0.09 + Math.sin(y * 1.7) * 0.04;
-    pos.setX(i, x * (1 + n));
-    pos.setZ(i, z * (1 + n));
+    const th = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * radial; // 0..radial, wraps
+    const t = y / height;
+    // vertical fluting carved by rain, broad irregular lobes, horizontal strata ledges
+    const flute = (vnoise(th * 1.0, t * 3 + off, radial) - 0.5) * 0.22 + (vnoise(th * 2.0, t * 9 + off, radial * 2) - 0.5) * 0.1;
+    const lobes = (vnoise(th / 5, off, Math.ceil(radial / 5)) - 0.5) * 0.35;
+    const strata = Math.pow(Math.abs(Math.sin(t * Math.PI * 7 + off)), 6) * 0.06;
+    const k = 1 + flute + lobes + strata;
+    pos.setX(i, x * k);
+    pos.setZ(i, z * k);
   }
   g.computeVertexNormals();
   return g;
@@ -166,8 +192,7 @@ export function KarstPeaks({
     const hazeC = new THREE.Color(haze);
     const rockC = new THREE.Color(rock);
     const lightC = new THREE.Color(light);
-    const L = new THREE.Vector3(...lightDir).normalize();
-    const n = new THREE.Vector3();
+    const moss = new THREE.Color('#3f5a3a');
     for (const layer of layers) {
       for (let k = 0; k < layer.count; k++) {
         let a = (k / layer.count) * Math.PI * 2 + rand() * 0.35;
@@ -180,16 +205,23 @@ export function KarstPeaks({
         const pos = geo.attributes.position as THREE.BufferAttribute;
         const nor = geo.attributes.normal as THREE.BufferAttribute;
         const cols = new Float32Array(pos.count * 3);
+        const hz = new Float32Array(pos.count);
         const c = new THREE.Color();
+        const light2 = rockC.clone().multiplyScalar(1.7).lerp(lightC, pines ? 0.25 : 0.05);
         for (let i = 0; i < pos.count; i++) {
           const t = pos.getY(i) / h;
-          n.set(nor.getX(i), 0, nor.getZ(i)).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).normalize();
-          const rim = Math.pow(Math.max(0, n.dot(L)), 2) * rimStrength * (1 - layer.haze);
-          c.copy(rockC).lerp(hazeC, Math.min(1, layer.haze + Math.pow(Math.max(0, 1 - t), 1.5) * 0.6));
-          c.lerp(lightC, rim);
+          // streaked sandstone: lighter and darker vertical bands, moss and shrubs on the ledges
+          const band = vnoise(Math.atan2(pos.getZ(i), pos.getX(i)) * 6, t * 2);
+          c.copy(rockC).lerp(light2, band * 0.7);
+          c.multiplyScalar(0.8 + 0.35 * vnoise(t * 30, band * 5));
+          const up = nor.getY(i);
+          if (pines && up > 0.35) c.lerp(moss, Math.min(1, (up - 0.35) * 2) * (layer.haze < 0.6 ? 0.85 : 0.4));
           cols.set([c.r, c.g, c.b], i * 3);
+          // aerial perspective: distant layers and the misty feet dissolve into the haze
+          hz[i] = Math.min(1, layer.haze + Math.pow(Math.max(0, 1 - t), 2) * 0.55);
         }
         geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+        geo.setAttribute('aHaze', new THREE.BufferAttribute(hz, 1));
         out.push({
           geo,
           pos: [Math.cos(a) * d, baseY, Math.sin(a) * d],
@@ -197,7 +229,7 @@ export function KarstPeaks({
           h,
           r,
           pine: pines && layer.haze < 0.5,
-          pineColor: rockC.clone().lerp(hazeC, layer.haze).multiplyScalar(0.8),
+          pineColor: moss.clone().multiplyScalar(0.6).lerp(hazeC, layer.haze),
         });
       }
     }
@@ -207,17 +239,41 @@ export function KarstPeaks({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify({ seed, layers, baseY, haze, rock, light, lightDir, pines, exclude, rimStrength })]);
   React.useEffect(() => () => items.forEach((it) => it.geo.dispose()), [items]);
-  const mat = useMemo(() => new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }), []);
+  // lit by the scene (so the sun side glows and the shadow side reads), then hazed after lighting
+  const mat = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, fog: false });
+    const sun = new THREE.Vector3(...lightDir).normalize();
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.uHaze = { value: new THREE.Color(haze) };
+      sh.uniforms.uSun = { value: sun };
+      sh.uniforms.uRim = { value: new THREE.Color(light).multiplyScalar(rimStrength * 0.7) };
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aHaze;\nvarying float vHaze;\nvarying vec3 vWN;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHaze = aHaze;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 uHaze; uniform vec3 uSun; uniform vec3 uRim;\nvarying float vHaze;\nvarying vec3 vWN;')
+        .replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+          // warm rim where the low sun grazes the rock
+          float rim = pow(max(dot(normalize(vec3(vWN.x, 0.0, vWN.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0), 3.0);
+          gl_FragColor.rgb += uRim * rim * (1.0 - vHaze);
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, vHaze);`
+        );
+    };
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [haze, light, rimStrength, JSON.stringify(lightDir)]);
   return (
     <group>
       {items.map((it, i) => (
         <group key={i} position={it.pos} rotation={[0, it.rot, 0]}>
           <mesh geometry={it.geo} material={mat} />
           {it.pine &&
-            [0, 1, 2, 3].map((p) => (
-              <mesh key={p} position={[Math.cos(p * 1.7) * it.r * 0.45, it.h * 0.97 - (p % 2) * 0.6, Math.sin(p * 1.7) * it.r * 0.45]}>
-                <coneGeometry args={[it.r * 0.18, it.r * 0.55, 7]} />
-                <meshBasicMaterial color={it.pineColor} fog={false} />
+            [0, 1, 2, 3, 4, 5].map((p) => (
+              <mesh key={p} position={[Math.cos(p * 1.7) * it.r * 0.5, it.h * 0.96 - (p % 3) * 0.5, Math.sin(p * 1.7) * it.r * 0.5]}>
+                <coneGeometry args={[it.r * 0.16, it.r * 0.6, 7]} />
+                <meshLambertMaterial color={it.pineColor} fog={false} />
               </mesh>
             ))}
         </group>
