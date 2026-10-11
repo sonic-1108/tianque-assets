@@ -299,51 +299,102 @@ function AlpineRange() {
 // ---------------------------------------------------------------
 // snow-laden spruces: one merged, vertex-coloured tree, instanced
 // ---------------------------------------------------------------
+/** Needle texture for the branch tiers: grey brush strokes (the vertex colour gives the hue), ragged lower fringe */
+let needleTex: THREE.Texture | null = null;
+function needleTexture() {
+  if (needleTex) return needleTex;
+  const W = 256;
+  const H = 256;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const rand = seeded(29);
+  g.clearRect(0, 0, W, H);
+  // solid base so the tier reads as a mass of foliage, a little transparent at the very bottom
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, 'rgba(150,150,150,1)');
+  grd.addColorStop(0.8, 'rgba(120,120,120,1)');
+  grd.addColorStop(1, 'rgba(90,90,90,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, W, H * 0.78);
+  // needle sprays falling outward and down
+  for (let i = 0; i < 2600; i++) {
+    const x = rand() * W;
+    const y = rand() * H * 0.95;
+    const len = 6 + rand() * 18;
+    const v = 120 + rand() * 135;
+    g.strokeStyle = `rgba(${v},${v},${v},${0.5 + rand() * 0.5})`;
+    g.lineWidth = 1 + rand() * 1.5;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + (rand() - 0.5) * 6, y + len);
+    g.stroke();
+  }
+  // a corner patch of solid grey for the trunk's UVs
+  g.fillStyle = 'rgb(140,140,140)';
+  g.fillRect(0, 0, 10, 10);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  needleTex = t;
+  return t;
+}
+
 function spruceGeometry() {
   const parts: THREE.BufferGeometry[] = [];
   const rand = seeded(17);
-  const needle = new THREE.Color('#183024');
-  const needleLight = new THREE.Color('#2b4a35');
+  const needle = new THREE.Color('#1c3628');
+  const needleLight = new THREE.Color('#2f5038');
   const snow = new THREE.Color('#f3f6fa');
   const bark = new THREE.Color('#3a2a1f');
-  const tiers = 7;
+  const tiers = 9;
   for (let t = 0; t < tiers; t++) {
     const f = t / (tiers - 1);
-    const r = 1.35 * (1 - f * 0.8);
-    const h = 1.15 - f * 0.45;
-    const y = 0.7 + t * 0.62;
-    const g = new THREE.ConeGeometry(r, h, 11, 2, true);
-    const p = g.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < p.count; i++) {
-      const vx = p.getX(i);
-      const vy = p.getY(i);
-      const vz = p.getZ(i);
-      const rr = Math.hypot(vx, vz);
-      // ragged, drooping branch tips
-      const j = 1 + (rand() - 0.5) * 0.35;
-      const droop = rr > r * 0.8 ? -0.18 - rand() * 0.12 : 0;
-      p.setXYZ(i, vx * j, vy + droop, vz * j);
+    // two skirts per tier, slightly offset, so the foliage has depth instead of one smooth cone
+    for (const layer of [0, 1]) {
+      const r = 1.45 * (1 - f * 0.82) * (layer ? 0.8 : 1);
+      const h = (1.0 - f * 0.4) * (layer ? 0.9 : 1);
+      const y = 0.6 + t * 0.5 + layer * 0.12;
+      const g = new THREE.ConeGeometry(r, h, 18, 3, true);
+      g.rotateY(rand() * 6);
+      const p = g.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < p.count; i++) {
+        const vx = p.getX(i);
+        const vy = p.getY(i);
+        const vz = p.getZ(i);
+        const rr = Math.hypot(vx, vz);
+        const ang = Math.atan2(vz, vx);
+        // branches poke out in lobes, and sag at the tips
+        const lobe = 1 + Math.sin(ang * 7 + t * 1.3) * 0.12 + (rand() - 0.5) * 0.08;
+        const droop = rr > r * 0.7 ? -0.22 * ((rr / r - 0.7) / 0.3) : 0;
+        p.setXYZ(i, vx * lobe, vy + droop, vz * lobe);
+      }
+      const uv = g.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 3);
+      g.translate(0, y, 0);
+      g.computeVertexNormals();
+      const n = g.attributes.normal as THREE.BufferAttribute;
+      const cols = new Float32Array(p.count * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < p.count; i++) {
+        c.copy(needle).lerp(needleLight, 0.3 + rand() * 0.3).multiplyScalar(layer ? 0.8 : 1);
+        // snow on the upper face of each skirt, heavier on the outer layer
+        const up = n.getY(i);
+        if (!layer && up > 0.3) c.lerp(snow, Math.min(0.8, (up - 0.3) * 1.8) * (0.55 + rand() * 0.4));
+        cols.set([c.r, c.g, c.b], i * 3);
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+      parts.push(g.toNonIndexed());
     }
-    g.translate(0, y, 0);
-    g.computeVertexNormals();
-    const n = g.attributes.normal as THREE.BufferAttribute;
-    const cols = new Float32Array(p.count * 3);
-    const c = new THREE.Color();
-    for (let i = 0; i < p.count; i++) {
-      c.copy(needle).lerp(needleLight, rand() * 0.5);
-      // snow lies on the upper face of each tier, heavier toward the trunk
-      const up = n.getY(i);
-      const rr = Math.hypot(p.getX(i), p.getZ(i)) / r;
-      if (up > 0.35 && rand() < 0.85) c.lerp(snow, Math.min(1, (up - 0.35) * 2.2) * (1 - rr * 0.3));
-      cols.set([c.r, c.g, c.b], i * 3);
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    parts.push(g.toNonIndexed());
   }
-  const trunk = new THREE.CylinderGeometry(0.08, 0.16, 1.2, 6).translate(0, 0.6, 0).toNonIndexed();
+  const trunk = new THREE.CylinderGeometry(0.08, 0.17, 1.4, 8).translate(0, 0.7, 0).toNonIndexed();
   const tc = new Float32Array((trunk.attributes.position as THREE.BufferAttribute).count * 3);
   for (let i = 0; i < tc.length; i += 3) tc.set([bark.r, bark.g, bark.b], i);
   trunk.setAttribute('color', new THREE.BufferAttribute(tc, 3));
+  const tuv = trunk.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < tuv.count; i++) tuv.setXY(i, 0.01, 0.99);
   parts.push(trunk);
   // merge by hand
   let count = 0;
@@ -351,25 +402,28 @@ function spruceGeometry() {
   const pos = new Float32Array(count * 3);
   const nor = new Float32Array(count * 3);
   const col = new Float32Array(count * 3);
+  const uvs = new Float32Array(count * 2);
   let o = 0;
   for (const g of parts) {
     const p = g.attributes.position as THREE.BufferAttribute;
     pos.set(p.array as Float32Array, o * 3);
     nor.set((g.attributes.normal as THREE.BufferAttribute).array as Float32Array, o * 3);
     col.set((g.attributes.color as THREE.BufferAttribute).array as Float32Array, o * 3);
+    uvs.set((g.attributes.uv as THREE.BufferAttribute).array as Float32Array, o * 2);
     o += p.count;
   }
   const m = new THREE.BufferGeometry();
   m.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   m.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   m.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  m.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   return m;
 }
 
 function Spruces({ spots }: { spots: [number, number, number][] }) {
   const mesh = useMemo(() => {
     const geo = spruceGeometry();
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, map: needleTexture(), alphaTest: 0.45, roughness: 0.9, side: THREE.DoubleSide });
     const im = new THREE.InstancedMesh(geo, mat, spots.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -680,7 +734,7 @@ export function GlacierMap() {
     // valley edges
     for (let k = 0; k < 60; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 34 + rand() * 5;
+      const r = 38 + rand() * 3;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
       if (Math.hypot(x - sx, z - sz) < GLACIER.footR + 2) continue;
