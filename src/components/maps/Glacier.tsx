@@ -55,18 +55,22 @@ function ridged(x: number, y: number) {
 // ---------------------------------------------------------------
 const SNOW_GLSL = /* glsl */ `
   ${GLSL_NOISE}
+  // three-octave fbm: plenty for terrain detail and a fraction of the cost
+  float fbm3(vec2 p){ return noise(p) * 0.5 + noise(p * 2.03) * 0.25 + noise(p * 4.1) * 0.125; }
   // wind-carved snow ripples (sastrugi): stretched noise running across the wind
   float snowH(vec3 p){
-    return fbm(vec2(p.x * 0.9 + p.z * 0.35, p.z * 2.6 - p.x * 0.6)) * 0.6 + noise(p.xz * 7.0) * 0.12;
+    return fbm3(vec2(p.x * 0.9 + p.z * 0.35, p.z * 2.6 - p.x * 0.6)) * 0.6 + noise(p.xz * 7.0) * 0.12;
   }
-  // fbm projected three ways and blended by the surface normal, so steep faces are not smeared
+  // fbm projected along the dominant axis of the normal (two projections blended), so steep faces are not smeared
   float tri(vec3 p, vec3 n, float sc){
-    vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
-    return fbm(p.zy * sc) * w.x + fbm(p.xz * sc) * w.y + fbm(p.xy * sc) * w.z;
+    vec3 a = abs(n);
+    float side = a.x > a.z ? fbm3(p.zy * sc) : fbm3(p.xy * sc);
+    float top = fbm3(p.xz * sc);
+    return mix(side, top, smoothstep(0.55, 0.8, a.y));
   }
-  // broken rock: blocky facets and cracks
+  // broken rock: blocky facets
   float rockH(vec3 p){
-    float a = fbm(vec2(p.y * 2.2 + p.x * 0.3, (p.x - p.z) * 1.1));
+    float a = fbm3(vec2(p.y * 2.2 + p.x * 0.3, (p.x - p.z) * 1.1));
     float b = noise(vec2(p.y * 6.0, (p.x + p.z) * 3.0));
     return a * 0.8 + b * 0.25;
   }
@@ -99,24 +103,24 @@ function makeTerrainMaterial() {
         {
           vec3 nW = normalize(vWN);
           float slope = 1.0 - nW.y;
-          float jitter = (tri(vWP, nW, 0.3) - 0.5) * 0.34 + (tri(vWP, nW, 2.2) - 0.5) * 0.14;
+          float jitter = (tri(vWP, nW, 0.3) - 0.5) * 0.34 + (noise(vWP.xz * 2.2 + vWP.y * 1.7) - 0.5) * 0.14;
           // snow clings to anything gentler than the steep risers; crisp edges, like real snow on rock
           gSnow = 1.0 - smoothstep(0.4, 0.43, slope + jitter);
           // exposed glacier ice on some risers of the upper mountain
-          float iceMask = smoothstep(0.63, 0.7, fbm(vWP.xz * 0.15 + 9.0));
+          float iceMask = smoothstep(0.63, 0.7, fbm3(vWP.xz * 0.15 + 9.0));
           gIce = (1.0 - gSnow) * smoothstep(6.0, 9.0, vWP.y) * iceMask;
           gRock = 1.0 - gSnow - gIce;
           float rh = rockH(vWP);
           float rt = tri(vWP, nW, 1.3);
           vec3 rock = mix(vec3(0.11, 0.115, 0.13), vec3(0.3, 0.29, 0.28), smoothstep(0.3, 0.75, rt));
-          rock *= 0.8 + 0.4 * tri(vWP, nW, 5.0);
+          rock *= 0.8 + 0.4 * noise(vWP.xy * 5.0 + vWP.zy * 3.0);
           // snow caught on little ledges of the rock
           rock = mix(rock, vec3(0.84, 0.87, 0.92), smoothstep(0.6, 0.66, tri(vWP + 3.0, nW, 2.6)) * 0.85);
           vec3 snow = vec3(0.84, 0.86, 0.9);
           // faces turned from the sun go cool blue, like real snow in shade
           snow = mix(snow, vec3(0.7, 0.8, 0.95), smoothstep(0.25, -0.35, dot(nW, uSun)) * 0.45);
           // a few dirty streaks on the valley floor
-          snow *= 1.0 - smoothstep(0.6, 0.9, fbm(vWP.xz * 0.08)) * 0.06 * (1.0 - smoothstep(0.0, 3.0, vWP.y));
+          snow *= 1.0 - smoothstep(0.6, 0.9, noise(vWP.xz * 0.08)) * 0.06 * (1.0 - smoothstep(0.0, 3.0, vWP.y));
           vec3 ice = mix(vec3(0.28, 0.48, 0.62), vec3(0.6, 0.78, 0.9), tri(vWP, nW, 1.2));
           vec3 col = snow * gSnow + rock * gRock + ice * gIce;
           // the road: packed, slightly grey snow with two brown wheel ruts
@@ -140,16 +144,16 @@ function makeTerrainMaterial() {
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
         {
-          // detail normals from the procedural height, in world space, then back to view space
+          // bump mapping from one procedural height, using screen-space derivatives (two evaluations, not eight)
           vec3 nW = normalize(vWN);
-          float e = 0.04;
-          float hs0 = snowH(vWP), hsx = snowH(vWP + vec3(e, 0.0, 0.0)), hsz = snowH(vWP + vec3(0.0, 0.0, e));
-          float hr0 = rockH(vWP), hrx = rockH(vWP + vec3(e, 0.0, 0.0)), hrz = rockH(vWP + vec3(0.0, 0.0, e)), hry = rockH(vWP + vec3(0.0, e, 0.0));
-          vec3 gS = vec3(hsx - hs0, 0.0, hsz - hs0) / e * 0.06;
-          vec3 gR = vec3(hrx - hr0, hry - hr0, hrz - hr0) / e * 0.16;
-          vec3 g = gS * gSnow * (1.0 - vInfo.x * 0.7) + gR * gRock + gS * 0.3 * gIce;
-          g -= nW * dot(g, nW);
-          vec3 nP = normalize(nW - g);
+          float H = (snowH(vWP) * 0.06 * (gSnow * (1.0 - vInfo.x * 0.7) + gIce * 0.3) + rockH(vWP) * 0.16 * gRock);
+          vec3 sx = dFdx(vWP);
+          vec3 sy = dFdy(vWP);
+          vec3 r1 = cross(sy, nW);
+          vec3 r2 = cross(nW, sx);
+          float det = dot(sx, r1);
+          vec3 grad = sign(det) * (dFdx(H) * r1 + dFdy(H) * r2);
+          vec3 nP = normalize(abs(det) * nW - grad * 3.2);
           normal = normalize((viewMatrix * vec4(nP, 0.0)).xyz);
         }`
       )
