@@ -19,6 +19,8 @@ export class WuxiaSound {
   private sfxIn!: GainNode;
   private verbIn!: GainNode;
   private ambIn!: GainNode;
+  private musicVol!: GainNode;
+  private vol = { sfx: 0.9, music: 0.8, amb: 0.8 };
   private musicIn!: GainNode;
   private noise!: AudioBuffer;
   private pinkNoise!: AudioBuffer;
@@ -45,7 +47,7 @@ export class WuxiaSound {
     comp.connect(sfxDest);
 
     this.sfxIn = ctx.createGain();
-    this.sfxIn.gain.value = 0.9;
+    this.sfxIn.gain.value = this.vol.sfx;
     this.sfxIn.connect(comp);
 
     // shared hall reverb (generated impulse)
@@ -60,18 +62,31 @@ export class WuxiaSound {
 
     // ambience and music bypass the sfx mute but share the master volume
     this.ambIn = ctx.createGain();
-    this.ambIn.gain.value = 0.5;
+    this.ambIn.gain.value = 0.5 * (this.vol.amb / 0.8);
     this.ambIn.connect(sfxDest); // ambience mutes with the sound effects
     this.musicIn = ctx.createGain();
     this.musicIn.gain.value = 0;
     const musicVerb = ctx.createGain();
     musicVerb.gain.value = 0.5;
-    this.musicIn.connect(master);
-    this.musicIn.connect(musicVerb);
+    this.musicVol = ctx.createGain();
+    this.musicVol.gain.value = this.vol.music / 0.8;
+    this.musicIn.connect(this.musicVol);
+    this.musicVol.connect(master);
+    this.musicVol.connect(musicVerb);
     musicVerb.connect(conv);
 
     this.noise = this.makeNoise(2, false);
     this.pinkNoise = this.makeNoise(4, true);
+  }
+
+  /** player volume sliders (0..1). The defaults (0.9 / 0.8 / 0.8) give the original mix. */
+  setVolumes(sfx: number, music: number, amb: number) {
+    this.vol = { sfx, music, amb };
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.sfxIn.gain.setTargetAtTime(sfx, t, 0.05);
+    this.ambIn.gain.setTargetAtTime(0.5 * (amb / 0.8), t, 0.05);
+    this.musicVol.gain.setTargetAtTime(music / 0.8, t, 0.05);
   }
 
   private makeNoise(seconds: number, pink: boolean) {

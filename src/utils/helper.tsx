@@ -8,6 +8,7 @@ import React, {
   type RefObject,
 } from 'react';
 import { WuxiaSound, AmbienceId } from './wuxiaSound';
+import { getSettings, onSettings } from '../settings';
 
 /**  --- Overlay component ---
  * A full-screen UI overlay component used to display game states
@@ -764,6 +765,14 @@ class GameAudio {
 // added as play* methods so online play can replay them on the guest by name.
 // ---------------------------------------------------------------------------
 export const wuxia = new WuxiaSound();
+{
+  const applyVol = () => {
+    const st = getSettings();
+    wuxia.setVolumes(st.sfx, st.music, st.amb);
+  };
+  applyVol();
+  onSettings(applyVol);
+}
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 interface GameAudio {
   playSwingLight(): void;

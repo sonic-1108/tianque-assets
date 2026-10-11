@@ -1,3 +1,4 @@
+import { getSettings } from './settings';
 import * as THREE from 'three';
 
 export class CameraController {
@@ -46,8 +47,9 @@ export class CameraController {
 
   update(playerPos: THREE.Vector3, dt: number) {
     // consume mouse input ONCE, then reset it
-    this.yaw -= this.pendingDX * this.sensitivity;
-    this.pitch += this.pendingDY * this.sensitivity;
+    const sens = this.sensitivity * getSettings().sens;
+    this.yaw -= this.pendingDX * sens;
+    this.pitch += this.pendingDY * sens;
     this.pendingDX = 0;
     this.pendingDY = 0;
     this.pitch = THREE.MathUtils.clamp(this.pitch, 0.05, 1.15);

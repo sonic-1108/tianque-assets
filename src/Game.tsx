@@ -10,6 +10,7 @@ import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
+import { useSettings, QUALITY } from './settings';
 import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { CameraController } from './CameraController';
@@ -149,6 +150,15 @@ export function Game({
   onLoadProgress,
 }: GameSceneProps) {
   const { camera, gl, scene, size } = useThree();
+  const { quality } = useSettings();
+  // a new shadow-map size only takes effect once the old map is thrown away
+  useEffect(() => {
+    const l = keyLightRef.current;
+    if (l && l.shadow.map) {
+      l.shadow.map.dispose();
+      (l.shadow as any).map = null;
+    }
+  }, [quality]);
 
   const playerGroupRef = useRef<THREE.Group>(null);
   const enemyGroupRef = useRef<THREE.Group>(null);
@@ -2891,8 +2901,8 @@ export function Game({
         ref={keyLightRef}
         color={map.keyColor}
         intensity={map.keyIntensity}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
+        castShadow={QUALITY[quality].shadows}
+        shadow-mapSize={[QUALITY[quality].shadowSize, QUALITY[quality].shadowSize]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
         shadow-camera-left={-16}
@@ -2926,7 +2936,7 @@ export function Game({
       <primitive object={vfx.root} />
 
       <EffectComposer multisampling={4}>
-        <Bloom mipmapBlur intensity={map.bloom ?? 0.9} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
+        <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
       </EffectComposer>

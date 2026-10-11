@@ -748,7 +748,6 @@ function Courtyards() {
       {items.map(({ x, z }, i) => (
         <group key={i} position={[x, ROOF.street, z]}>
           <PlumTree seed={i * 13 + 5} />
-          <pointLight position={[0, 3.5, 0]} color="#ffb070" intensity={30} distance={10} decay={1.6} />
           {/* stone lantern */}
           <mesh position={[1.6, 0.6, 1.6]}>
             <boxGeometry args={[0.5, 1.2, 0.5]} />

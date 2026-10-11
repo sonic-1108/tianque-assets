@@ -6,6 +6,8 @@ import { MenuOverlay, gameAudio, useIsMobile } from './utils/helper';
 import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId } from './maps';
+import { SettingsPanel } from './components/SettingsPanel';
+import { useSettings, QUALITY } from './settings';
 import type { CharacterClassId } from './types';
 import { NetSession, makeRoomCode, NetMessage } from './net';
 import { UnitFrame, UnitStats } from './components/UnitFrame';
@@ -138,6 +140,7 @@ function CanvasLoadingScreen({ progress, error, onRetry }: CanvasLoadingScreenPr
 }
 
 export default function App() {
+  const settings = useSettings();
   const { sdk } = usePlayground();
   const isMobile = useIsMobile();
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -866,7 +869,7 @@ export default function App() {
         >
           <Canvas
             shadows
-            dpr={[1, 2]}
+            dpr={QUALITY[settings.quality].dpr}
             gl={{ antialias: false, powerPreference: 'high-performance' }}
             camera={STATIC_CANVAS_CAMERA}
             className="w-full h-full block"
@@ -1435,6 +1438,7 @@ export default function App() {
                 <Info className="w-4 h-4" />
                 查看按键与技能指南 (H)
               </button>
+              <SettingsPanel />
             </div>
           </div>
         </MenuOverlay>
