@@ -8,6 +8,7 @@ import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId } from './maps';
 import type { CharacterClassId } from './types';
 import { NetSession, makeRoomCode, NetMessage } from './net';
+import { UnitFrame, UnitStats } from './components/UnitFrame';
 import {
   GameState,
   CombatantState,
@@ -154,6 +155,29 @@ export default function App() {
   const [skillCard, setSkillCard] = useState<string | null>(null);
   const [mapId, setMapId] = useState<MapId>('temple');
   const [isMapSelectOpen, setIsMapSelectOpen] = useState(true);
+  // 江湖名号: asked once, remembered in this browser
+  const [nickname, setNickname] = useState<string>(() => {
+    try {
+      return localStorage.getItem('tq_nickname') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [nameDraft, setNameDraft] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const nicknameRef = useRef(nickname);
+  nicknameRef.current = nickname;
+  const saveNickname = (n: string) => {
+    const v = n.trim().slice(0, 12);
+    if (!v) return;
+    setNickname(v);
+    setEditingName(false);
+    try {
+      localStorage.setItem('tq_nickname', v);
+    } catch {
+      /* private mode: keep it for this session only */
+    }
+  };
   const [playerClass, setPlayerClass] = useState<CharacterClassId>('Berserker');
   const [enemyClass, setEnemyClass] = useState<CharacterClassId>('Berserker');
   const playerClassRef = useRef<CharacterClassId>('Berserker');
@@ -174,7 +198,7 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const cfgKeyRef = useRef('');
   const online = !!net && net.status === 'connected';
-  const enemyShadow = online ? `${CLASS_CONFIGS[enemyClass].defaultCharacter}（对手）` : `${CLASS_CONFIGS[enemyClass].defaultCharacter}影`;
+  const enemyShadow = online ? net?.remoteName || "对手" : `${CLASS_CONFIGS[enemyClass].defaultCharacter}影`;
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
@@ -191,6 +215,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const tg = e.target as HTMLElement | null;
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA')) return;
       if (e.code === 'KeyP') toggleAI();
       if (e.code === 'KeyM') {
         if (document.pointerLockElement) document.exitPointerLock?.();
@@ -227,7 +253,7 @@ export default function App() {
           aiEnabledRef.current = true;
           setAiEnabled(true);
           setScore({ player: 0, enemy: 0 });
-          if (n.role === 'guest') n.send({ t: 'hello', cls: playerClassRef.current });
+          if (n.role === 'guest') n.send({ t: 'hello', cls: playerClassRef.current, name: nicknameRef.current });
         }
         if (n.status === 'closed' && netRef.current === n) {
           setToast((t) => ({ n: t.n + 1, text: '联机已断开，回到单机模式' }));
@@ -238,6 +264,7 @@ export default function App() {
       });
       n.onMessage = (m: NetMessage) => {
         if (m.t === 'cfg' && n.role === 'guest') {
+          if (m.hostName) n.remoteName = m.hostName.slice(0, 12);
           setMapId(m.map);
           setPlayerClass(m.guestCls);
           setEnemyClass(m.hostCls);
@@ -267,17 +294,17 @@ export default function App() {
   useEffect(() => () => netRef.current?.close(), []);
   // guest: tell the host which class we picked
   useEffect(() => {
-    if (net && net.role === 'guest' && net.status === 'connected') net.send({ t: 'hello', cls: playerClass });
-  }, [net, net?.status, playerClass]);
+    if (net && net.role === 'guest' && net.status === 'connected') net.send({ t: 'hello', cls: playerClass, name: nickname });
+  }, [net, net?.status, playerClass, nickname]);
   // host: the guest's pick is our opponent; push the match config whenever we start / change it
   useEffect(() => {
     if (!net || net.role !== 'host' || net.status !== 'connected') return;
     if (net.remoteClass && net.remoteClass !== enemyClass) setEnemyClass(net.remoteClass);
     const guestCls = net.remoteClass || enemyClass;
-    const key = `${mapId}|${playerClass}|${guestCls}|${isMapSelectOpen}`;
+    const key = `${mapId}|${playerClass}|${guestCls}|${isMapSelectOpen}|${nickname}`;
     if (!isMapSelectOpen && key !== cfgKeyRef.current) {
       cfgKeyRef.current = key;
-      net.send({ t: 'cfg', map: mapId, hostCls: playerClass, guestCls, seq: Date.now() });
+      net.send({ t: 'cfg', map: mapId, hostCls: playerClass, guestCls, seq: Date.now(), hostName: nickname });
     }
     if (isMapSelectOpen) cfgKeyRef.current = '';
   });
@@ -449,6 +476,21 @@ export default function App() {
     cdSkill4: 0,
     cdUlt: 0,
     cdSpecial: 0,
+    p1Stamina: 100,
+    p1Poisoned: false,
+    p1Rooted: false,
+    dMaxHp: 1600,
+    dMp: 100,
+    dMaxMp: 100,
+    dStamina: 100,
+    dClass: 'Berserker' as CharacterClassId,
+    dRage: false,
+    dArmor: false,
+    dPoisoned: false,
+    dRooted: false,
+    dProtect: false,
+    dBlocking: false,
+    dPoisonBuff: 0,
     cdBreak: 0,
     protect: false,
     poisonBuff: 0,
@@ -488,6 +530,21 @@ export default function App() {
         cdSkill4: p1.cooldowns.skill4 || 0,
         cdUlt: p1.cooldowns.ultimate || 0,
         cdSpecial: p1.cooldowns.special || 0,
+        p1Stamina: p1.stamina ?? 100,
+        p1Poisoned: (p1.poisonTimer || 0) > 0,
+        p1Rooted: (p1.rootTimer || 0) > 0,
+        dMaxHp: dummy.maxHp,
+        dMp: dummy.mp,
+        dMaxMp: dummy.maxMp,
+        dStamina: dummy.stamina ?? 100,
+        dClass: dummy.classId,
+        dRage: dummy.buffs.some((b) => b.type === 'blood_rage'),
+        dArmor: dummy.hasSuperArmor,
+        dPoisoned: (dummy.poisonTimer || 0) > 0,
+        dRooted: (dummy.rootTimer || 0) > 0,
+        dProtect: (dummy.protectTimer || 0) > 0,
+        dBlocking: dummy.isBlocking,
+        dPoisonBuff: dummy.poisonBuff || 0,
         cdBreak: p1.cooldowns.breakout || 0,
         protect: (p1.protectTimer || 0) > 0,
         poisonBuff: p1.poisonBuff || 0,
@@ -549,12 +606,65 @@ export default function App() {
         </div>
       )}
 
+      {/* NICKNAME: asked before the first match */}
+      {(!nickname || editingName) && !modelProgress.isLoading && (
+        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveNickname(nameDraft);
+            }}
+            className="w-full max-w-md bg-zinc-950 border border-amber-500/50 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4"
+          >
+            <div className="text-4xl font-black text-amber-300 tracking-[0.4em]" style={{ fontFamily: '"Noto Serif SC", "Songti SC", serif' }}>
+              天阙
+            </div>
+            <div className="text-sm text-zinc-300">初入江湖，报上你的名号</div>
+            <input
+              autoFocus
+              value={nameDraft}
+              maxLength={12}
+              onChange={(e) => setNameDraft(e.target.value)}
+              placeholder="例如：一剑西来"
+              className="w-full bg-black border border-zinc-700 focus:border-amber-400 outline-none rounded-xl px-4 py-3 text-center text-lg font-bold text-white"
+            />
+            <div className="text-[11px] text-zinc-500">最多 12 个字，会显示在血条和联机对手的屏幕上</div>
+            <div className="flex gap-2 w-full">
+              {editingName && nickname && (
+                <button type="button" onClick={() => setEditingName(false)} className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 text-sm font-bold">
+                  取消
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={!nameDraft.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-black text-sm font-black tracking-widest"
+              >
+                进入江湖
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* MAP SELECT */}
       {isMapSelectOpen && !modelProgress.isLoading && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm overflow-y-auto flex justify-center p-4">
           <div className="w-full max-w-5xl my-auto">
             <div className="text-center mb-5">
               <h2 className="text-3xl font-black text-amber-300 tracking-widest">选择战场</h2>
+              <div className="mt-1 text-xs text-zinc-300">
+                名号：<span className="font-bold text-amber-200">{nickname || '未设置'}</span>
+                <button
+                  onClick={() => {
+                    setNameDraft(nickname);
+                    setEditingName(true);
+                  }}
+                  className="ml-2 text-[11px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded px-1.5"
+                >
+                  改名
+                </button>
+              </div>
               <p className="text-xs text-zinc-400 mt-1">每张地图都有自己的机制和主场职业，主场职业在该地图伤害 +10%</p>
             </div>
             {/* ONLINE 1v1 */}
@@ -808,100 +918,78 @@ export default function App() {
         </div>
       )}
 
-      {/* TOP COMBAT HUD */}
-      <div className="absolute top-0 inset-x-0 p-4 pointer-events-none flex flex-col gap-1.5 z-20">
-        <div className="flex items-center justify-between gap-4 max-w-4xl mx-auto w-full">
-          {/* Player HP / MP & Stance Bar */}
-          <div className="flex-1 flex flex-col gap-1 bg-zinc-950/85 p-3 rounded-2xl border border-zinc-800 backdrop-blur-md shadow-xl">
-            <div className="flex items-center justify-between text-xs font-bold text-amber-300">
-              <span className="flex items-center gap-1.5">
-                <Sword className="w-4 h-4 text-red-500" />
-                {berserkerConfig.name} · {berserkerConfig.defaultCharacter}
-                {hudMirror.isBloodRage && (
-                  <span className="text-[10px] bg-red-600/30 text-red-300 px-1.5 py-0.5 rounded border border-red-500 animate-pulse font-black">
-                    血怒狂暴 (伤+35% / 附带吸血)
-                  </span>
-                )}
-                {hudMirror.hasSuperArmor && !hudMirror.isBloodRage && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/40">
-                    霸体
-                  </span>
-                )}
-                {hudMirror.poisonBuff > 0 && (
-                  <span className="text-[10px] bg-green-600/25 text-green-300 px-1.5 py-0.5 rounded border border-green-500/50">
-                    淬毒 {hudMirror.poisonBuff.toFixed(1)}s
-                  </span>
-                )}
-                {hudMirror.pierceNext && (
-                  <span className="text-[10px] bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded border border-amber-400 animate-pulse font-black">
-                    袖里乾坤：下一镖穿透
-                  </span>
-                )}
-                {hudMirror.isBlocking && (
-                  <span className="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/40">
-                    格挡防御中 (减伤60%)
-                  </span>
-                )}
-              </span>
-              <span className="font-mono">
-                {Math.round(hudMirror.p1Hp)} / {hudMirror.p1MaxHp}
-              </span>
-            </div>
+      {/* LEFT UNIT FRAMES: you on top, your opponent below */}
+      <div className="absolute top-3 left-3 z-20 pointer-events-none flex flex-col gap-2">
+        {(() => {
+          const pc = CLASS_CONFIGS[playerClass];
+          const meChips: UnitStats['chips'] = [];
+          if (hudMirror.isBloodRage) meChips.push({ text: '血怒 伤+35% 吸血', tone: 'red', pulse: true });
+          if (hudMirror.hasSuperArmor) meChips.push({ text: '霸体', tone: 'amber' });
+          if (hudMirror.isBlocking) meChips.push({ text: '格挡', tone: 'sky' });
+          if (hudMirror.poisonBuff > 0) meChips.push({ text: `淬毒 ${hudMirror.poisonBuff.toFixed(1)}s`, tone: 'green' });
+          if (hudMirror.pierceNext) meChips.push({ text: '袖里乾坤 下一镖穿透', tone: 'gold', pulse: true });
+          if (hudMirror.protect) meChips.push({ text: '保护', tone: 'slate' });
+          if (hudMirror.p1Poisoned) meChips.push({ text: '中毒', tone: 'green', pulse: true });
+          if (hudMirror.p1Rooted) meChips.push({ text: '定身', tone: 'teal', pulse: true });
+          meChips.push(hudMirror.cdBreak > 0 ? { text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' } : { text: '受身 就绪', tone: 'slate' });
+          const me: UnitStats = {
+            name: nickname || '无名侠客',
+            classId: playerClass,
+            className: `${pc.name} · ${pc.defaultCharacter}`,
+            hp: hudMirror.p1Hp,
+            maxHp: hudMirror.p1MaxHp,
+            mp: hudMirror.p1Mp,
+            maxMp: hudMirror.p1MaxMp,
+            stamina: hudMirror.p1Stamina,
+            maxStamina: 100,
+            chips: meChips,
+          };
+          const ec = CLASS_CONFIGS[hudMirror.dClass] ?? CLASS_CONFIGS[enemyClass];
+          const foeChips: UnitStats['chips'] = [];
+          if (hudMirror.dRage) foeChips.push({ text: '血怒', tone: 'red', pulse: true });
+          if (hudMirror.dArmor) foeChips.push({ text: '霸体', tone: 'amber' });
+          if (hudMirror.dBlocking) foeChips.push({ text: '格挡', tone: 'sky' });
+          if (hudMirror.dPoisonBuff > 0) foeChips.push({ text: '淬毒', tone: 'green' });
+          if (hudMirror.dProtect) foeChips.push({ text: '保护', tone: 'slate' });
+          if (hudMirror.dPoisoned) foeChips.push({ text: '中毒', tone: 'green', pulse: true });
+          if (hudMirror.dRooted) foeChips.push({ text: '定身', tone: 'teal', pulse: true });
+          const foe: UnitStats = {
+            name: online ? net?.remoteName || '对手' : aiEnabled ? `${ec.defaultCharacter}影` : '演武木桩',
+            classId: hudMirror.dClass,
+            className: `${ec.name} · ${online ? '玩家' : aiEnabled ? 'AI' : '木桩'}`,
+            hp: hudMirror.dummyHp,
+            maxHp: hudMirror.dMaxHp,
+            mp: hudMirror.dMp,
+            maxMp: hudMirror.dMaxMp,
+            stamina: hudMirror.dStamina,
+            maxStamina: 100,
+            chips: foeChips,
+          };
+          return (
+            <>
+              <UnitFrame s={me} me />
+              <UnitFrame s={foe} me={false} />
+            </>
+          );
+        })()}
+      </div>
 
-            {/* Health Bar */}
-            <div className="w-full h-4 bg-zinc-900 rounded-full border border-amber-500/40 overflow-hidden p-0.5">
-              <div
-                className="h-full bg-gradient-to-r from-red-600 via-amber-500 to-yellow-400 rounded-full transition-all duration-100"
-                style={{ width: `${(hudMirror.p1Hp / hudMirror.p1MaxHp) * 100}%` }}
-              />
-            </div>
-
-            {/* MP Bar & Dodge Cooldown */}
-            <div className="flex items-center justify-between gap-2 text-[10px]">
-              <div className="flex items-center gap-1 flex-1">
-                <span className="text-sky-400 font-bold">MP</span>
-                <div className="w-full h-2 bg-zinc-900 rounded-full border border-sky-500/40 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-sky-500 to-cyan-400 rounded-full transition-all duration-100"
-                    style={{ width: `${(hudMirror.p1Mp / hudMirror.p1MaxMp) * 100}%` }}
-                  />
-                </div>
-                <span className="font-mono text-sky-300 ml-1">
-                  {Math.round(hudMirror.p1Mp)}/{hudMirror.p1MaxMp}
-                </span>
-              </div>
-
-              {hudMirror.protect && <span className="text-slate-100 font-bold">保护中</span>}
-              {hudMirror.cdBreak > 0 ? (
-                <span className="text-zinc-500 font-mono">受身 {hudMirror.cdBreak.toFixed(0)}s</span>
-              ) : (
-                <span className="text-slate-200 font-bold" title="被打僵直、击飞、倒地时按 Shift 脱身">受身就绪</span>
-              )}
-              {hudMirror.dodgeCd > 0 ? (
-                <span className="text-zinc-500 font-mono">
-                  闪避冷却: {hudMirror.dodgeCd.toFixed(1)}s
-                </span>
-              ) : (
-                <span className="text-emerald-400 font-bold">闪避就绪 (Shift)</span>
-              )}
-            </div>
-          </div>
-
-          {/* Top Center Arena Badge */}
-          <div className="flex flex-col items-center justify-center bg-zinc-900/85 px-4 py-2 rounded-2xl border border-zinc-700 shadow-md min-w-[120px]">
-            <span className="text-[10px] text-zinc-400 font-semibold tracking-wider">
-              {MAPS[mapId].icon} {MAPS[mapId].name}
-            </span>
-            <span className="text-sm font-black text-amber-400 tracking-wider">
-              {aiEnabled ? `对决 ${score.player} : ${score.enemy}` : '自由试炼'}
-            </span>
-            <span className="text-[9px] text-amber-200/80">主场：{MAPS[mapId].homeClassName} · {MAPS[mapId].homeBonus.split('（')[0]}</span>
-            <span className="text-[9px] text-zinc-500">P 切换{aiEnabled ? '木桩' : '对战'}模式 · M 换地图</span>
-          </div>
+      {/* TOP CENTER: arena and score */}
+      <div className="absolute top-3 inset-x-0 z-20 pointer-events-none flex flex-col items-center gap-1.5">
+        <div className="flex flex-col items-center bg-zinc-950/75 px-5 py-1.5 rounded-xl border border-zinc-700/70 shadow-md backdrop-blur-md">
+          <span className="text-[10px] text-zinc-400 font-semibold tracking-wider">
+            {MAPS[mapId].icon} {MAPS[mapId].name}
+          </span>
+          <span className="text-lg font-black text-amber-300 tracking-[0.25em] leading-tight">
+            {aiEnabled || online ? `${score.player} : ${score.enemy}` : '自由试炼'}
+          </span>
+          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`}</span>
         </div>
+      </div>
 
-        {/* Combo Banner & Tips */}
-        <div className="max-w-4xl mx-auto w-full flex items-center justify-between px-2">
+      <div className="absolute top-24 right-4 z-20 pointer-events-none flex flex-col items-end gap-1.5">
+        {/* Combo banner & tips (right side) */}
+        <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
             <span className="bg-black/60 px-2 py-0.5 rounded text-[10px] text-zinc-400 font-mono border border-zinc-800">
               活跃特效数: <span className="text-amber-400 font-bold">{vfxCount}</span>

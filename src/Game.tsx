@@ -318,6 +318,9 @@ export function Game({
       if ((c.rootTimer ?? 0) > 0) c.rootTimer = (c.rootTimer ?? 0) - dt;
       if ((c.doubleJumpTimer ?? 0) > 0) c.doubleJumpTimer = (c.doubleJumpTimer ?? 0) - dt;
       if ((c.protectTimer ?? 0) > 0) c.protectTimer = (c.protectTimer ?? 0) - dt;
+      // 体力 regenerates after a short pause
+      if ((c.staminaDelay ?? 0) > 0) c.staminaDelay = (c.staminaDelay ?? 0) - dt;
+      else c.stamina = Math.min(c.maxStamina ?? 100, (c.stamina ?? 100) + dt * (c.classId === 'Ranger' ? 32 : 24));
       const stunnedNow = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown' || c.actionState === 'buried';
       if (!stunnedNow && (c.stunLoad ?? 0) > 0) c.stunLoad = Math.max(0, (c.stunLoad ?? 0) - dt * 4);
       if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
@@ -951,6 +954,12 @@ export function Game({
           return true; // berserker: right click is block (held), nothing to cast
         case 'dodge': {
           if (c.dodgeCooldownTimer > 0 || !canDodge) return report('闪避', '无法闪避'), false;
+          if ((c.stamina ?? 100) < 25) {
+            if (isPlayer) vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '体力不足', false, '#a3a3a3');
+            return report('闪避', '体力不足'), false;
+          }
+          c.stamina = (c.stamina ?? 100) - 25;
+          c.staminaDelay = 0.7;
           const dir = vA.copy(intent.move);
           if (dir.lengthSq() < 0.01) dir.copy(fwdOf(intent.faceYaw));
           dir.y = 0;
@@ -963,7 +972,7 @@ export function Game({
           c.vel[0] = dir.x * (ranger ? 18 : 15);
           c.vel[2] = dir.z * (ranger ? 18 : 15);
           c.dodgeIframeTimer = ranger ? 0.42 : 0.35;
-          c.dodgeCooldownTimer = ranger ? 0.6 : 0.9;
+          c.dodgeCooldownTimer = ranger ? 0.3 : 0.45; // stamina is the real limit now
           c.perfectDodgeUsed = false;
           vfx.dustPuff(vB.set(c.pos[0], 0, c.pos[2]), 10, 0.4, 2, 0.55);
           gameAudio.playDodge();
@@ -973,7 +982,9 @@ export function Game({
         case 'jump': {
           // 暗器: second jump in mid-air (with a somersault)
           const airOk = cur === 'jump' || cur === 'idle' || cur === 'run' || (cur.startsWith('attack_') && phase === 'recovery') || (cur.startsWith('skill_') && phase === 'recovery');
-          if (ranger && !c.isGrounded && !c.doubleJumped && airOk) {
+          if (ranger && !c.isGrounded && !c.doubleJumped && airOk && (c.stamina ?? 100) >= 15) {
+            c.stamina = (c.stamina ?? 100) - 15;
+            c.staminaDelay = 0.5;
             c.doubleJumped = true;
             c.doubleJumpTimer = 0.45;
             c.vel[1] = jumpVel * 0.95;
@@ -1881,14 +1892,14 @@ export function Game({
           // too close: get out
           if (ready('skill3') && me.mp >= 15 && r < 0.45) ask('skill3');
           else if (ready('special') && r < 0.75) ask('special');
-          else if (me.dodgeCooldownTimer <= 0 && foeAttacking) {
+          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25 && foeAttacking) {
             ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
             ask('dodge');
           }
           ai.plan = 'retreat';
           ai.planTimer = 0.6;
           ai.strafe = Math.random() < 0.5 ? -1 : 1;
-        } else if (foeAttacking && dist < 5 && me.dodgeCooldownTimer <= 0 && r < 0.4) {
+        } else if (foeAttacking && dist < 5 && me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25 && r < 0.4) {
           ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
           ask('dodge');
         } else if (dist > 13) {
@@ -1963,6 +1974,8 @@ export function Game({
         c.isGrounded = true;
         c.juggleCount = 0;
         c.dodgeIframeTimer = 0.6;
+        c.maxStamina = 100;
+        c.stamina = 100;
         c.rootTimer = 0;
         c.poisonStacks = 0;
         c.poisonDps = 0;
@@ -2447,7 +2460,7 @@ export function Game({
           ai.planTimer = 0.6;
           ai.strafe = Math.random() < 0.5 ? -1 : 1;
         } else if (foeAttacking && dist < 3.6 && r < 0.45) {
-          if (r < 0.25 && me.dodgeCooldownTimer <= 0) {
+          if (r < 0.25 && me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
             ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
             ask('dodge');
             ai.plan = 'circle';

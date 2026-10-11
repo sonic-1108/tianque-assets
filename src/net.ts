@@ -19,8 +19,8 @@ export interface RemoteInput {
 }
 
 export type NetMessage =
-  | { t: 'hello'; cls: CharacterClassId }
-  | { t: 'cfg'; map: MapId; hostCls: CharacterClassId; guestCls: CharacterClassId; seq: number }
+  | { t: 'hello'; cls: CharacterClassId; name?: string }
+  | { t: 'cfg'; map: MapId; hostCls: CharacterClassId; guestCls: CharacterClassId; seq: number; hostName?: string }
   | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; req: string | null }
   | { t: 's'; f: any[]; p: any[]; m: any; ev: any[] }
   | { t: 're'; e: any }
@@ -51,6 +51,7 @@ export class NetSession {
   /** guest: events waiting to be replayed by the game loop */
   inbox: any[] = [];
   remoteClass: CharacterClassId | null = null;
+  remoteName = '';
   pingMs = 0;
   private listeners = new Set<() => void>();
   onMessage: ((m: NetMessage) => void) | null = null;
@@ -139,6 +140,7 @@ export class NetSession {
     }
     if (m.t === 'hello') {
       this.remoteClass = m.cls;
+      if (m.name) this.remoteName = m.name.slice(0, 12);
       this.changed();
     }
     this.onMessage?.(m);

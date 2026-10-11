@@ -134,6 +134,9 @@ export function useGameInput(options: {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // typing in a text box (nickname, room code) is not game input
+      const tg = e.target as HTMLElement | null;
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable)) return;
       const code = e.code || '';
       pressedKeyCodes.add(code);
       updateDebugKeys(code);
