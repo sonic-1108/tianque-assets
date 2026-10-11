@@ -1146,6 +1146,30 @@ function SeaMap() {
   const sheetRef = useRef<THREE.Mesh>(null);
   const sheetMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#b9d6e6', roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, emissive: new THREE.Color('#1c3442') }), []);
   const deckMat = useRef<THREE.MeshStandardMaterial>(null);
+  // stern castle roof: a trapezoid section swept across the ship's beam, eaves overhanging the walls
+  const roofGeo = useMemo(() => {
+    const sh = new THREE.Shape();
+    sh.moveTo(-2.0, 0);
+    sh.lineTo(2.0, 0);
+    sh.lineTo(1.0, 0.95);
+    sh.lineTo(-1.0, 0.95);
+    sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: hx * 2 + 1.8, bevelEnabled: false });
+    g.rotateY(Math.PI / 2); // profile in the z-y plane, extruded along +x
+    return g;
+  }, [hx]);
+  const bowGeo = useMemo(() => {
+    const W = hx + 0.6;
+    const L = 7;
+    const sh = new THREE.Shape();
+    sh.moveTo(-W, 0);
+    sh.lineTo(W, 0);
+    sh.quadraticCurveTo(W * 0.95, -L * 0.6, 0, -L);
+    sh.quadraticCurveTo(-W * 0.95, -L * 0.6, -W, 0);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 2.9, bevelEnabled: false, curveSegments: 16 });
+    g.rotateX(Math.PI / 2); // shape -Y (the point) -> -Z, extrusion goes down from the deck
+    return g;
+  }, [hx]);
   // a curled half-pipe of water lying along the ship's length
   const sheetGeo = useMemo(() => {
     const g = new THREE.CylinderGeometry(2.2, 2.2, hz * 2 + 2, 24, 1, true, 0, Math.PI * 0.9);
@@ -1180,12 +1204,12 @@ function SeaMap() {
     const roll = Math.atan2(swellHeight(hx + 0.6, 0, t) - swellHeight(-hx - 0.6, 0, t), hx * 2 + 1.2);
     const pitch = Math.atan2(swellHeight(0, -hz, t) - swellHeight(0, hz, t), hz * 2);
     const rogue = mapRuntime.waveSide * Math.min(1, mapRuntime.waveRise) * 0.08;
-    mapRuntime.shipRoll = roll * 0.8 + rogue;
-    mapRuntime.shipPitch = pitch * 0.8;
+    mapRuntime.shipRoll = roll * 0.9 + rogue;
+    mapRuntime.shipPitch = pitch * 0.9;
     if (worldRef.current) {
       // the ship is our frame of reference: tilt and lift the whole world the other way
       worldRef.current.rotation.set(-mapRuntime.shipPitch, 0, -mapRuntime.shipRoll);
-      worldRef.current.position.y = -h0 * 0.85;
+      worldRef.current.position.y = -h0 * 0.92;
     }
     // rogue wave crash: a sheet of water sweeps across the deck, then the planks stay wet for a while
     const c = crash.current;
@@ -1262,7 +1286,7 @@ function SeaMap() {
       <DistantShip position={[70, -1, 40]} rot={2.4} />
 
       <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.5, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.9, 0]}>
         <planeGeometry args={[520, 520, 320, 320]} />
         <primitive object={ocean} attach="material" />
       </mesh>
@@ -1288,11 +1312,12 @@ function SeaMap() {
           </mesh>
         ))}
         {/* upswept bow */}
-        <mesh position={[0, -0.9, -(hz + 0.8)]} rotation={[0, Math.PI, 0]} scale={[1, 1, 1.9]} castShadow>
-          <cylinderGeometry args={[hx + 0.62, hx * 0.3, 3.6, 3, 1]} />
-          <meshStandardMaterial map={hullTex} color="#6a5040" roughness={0.85} />
+        {/* pointed bow: one solid piece whose top is flush with the deck and sits entirely past its end */}
+        <mesh position={[0, 0, -(hz + 0.8)]} geometry={bowGeo} castShadow receiveShadow>
+          <meshStandardMaterial attach="material-0" map={planks} roughness={0.55} color="#8a7a6a" />
+          <meshStandardMaterial attach="material-1" map={hullTex} color="#6a5040" roughness={0.85} />
         </mesh>
-        <mesh position={[0, 0.25, -(hz + 5.8)]} rotation={[-0.5, 0, 0]}>
+        <mesh position={[0, 0.25, -(hz + 0.8) - 7.5]} rotation={[-0.5, 0, 0]}>
           <cylinderGeometry args={[0.12, 0.2, 6, 8]} />
           <meshStandardMaterial color={wood} roughness={0.8} />
         </mesh>
@@ -1301,12 +1326,11 @@ function SeaMap() {
           <boxGeometry args={[hx * 2 + 1.2, 2.6, 3.2]} />
           <meshStandardMaterial map={hullTex} color="#5a4232" roughness={0.85} />
         </mesh>
-        <mesh position={[0, 2.95, hz + 2.6]} rotation={[0, Math.PI / 4, 0]} scale={[1.35, 1, 0.55]} castShadow>
-          <cylinderGeometry args={[0.5, 4.2, 0.9, 4, 1]} />
-          <meshStandardMaterial color="#0f1517" roughness={0.6} />
+        <mesh position={[-(hx + 0.9), 2.6, hz + 2.2]} geometry={roofGeo} castShadow>
+          <meshStandardMaterial color="#141c1e" roughness={0.6} />
         </mesh>
         {[-2.2, 0, 2.2].map((x) => (
-          <mesh key={x} position={[x, 1.6, hz + 0.58]}>
+          <mesh key={x} position={[x, 1.6, hz + 0.57]} rotation={[0, Math.PI, 0]}>
             <planeGeometry args={[0.8, 0.6]} />
             <meshBasicMaterial color={new THREE.Color(2.0, 1.0, 0.35)} toneMapped={false} />
           </mesh>
