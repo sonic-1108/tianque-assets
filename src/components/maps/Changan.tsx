@@ -956,6 +956,23 @@ function City() {
     lights.frustumCulled = false;
     return { bodies, roofs, lights };
   }, []);
+  const groundMat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: /* glsl */ `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+        fragmentShader: /* glsl */ `
+          varying vec3 vW;
+          void main(){
+            float ave = smoothstep(9.0, 2.0, abs(vW.x));
+            float grid = smoothstep(4.0, 0.0, abs(mod(vW.x + 23.0, 46.0) - 23.0)) + smoothstep(4.0, 0.0, abs(mod(vW.z + 23.0, 46.0) - 23.0));
+            vec3 col = vec3(0.05, 0.035, 0.04) + vec3(0.5, 0.2, 0.06) * (ave * 0.5 + min(grid, 1.0) * 0.18);
+            float d = length(vW.xz);
+            col = mix(col, vec3(0.1, 0.078, 0.15), smoothstep(80.0, 450.0, d));
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+      }),
+    []
+  );
   useFrame((st) => {
     (bodies.material as THREE.ShaderMaterial).uniforms.uTime.value = st.clock.elapsedTime;
     (lights.material as THREE.ShaderMaterial).uniforms.uTime.value = st.clock.elapsedTime;
@@ -968,24 +985,7 @@ function City() {
       {/* the ground: dark paving with the avenue glowing down the middle */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, ROOF.street - 0.05, 0]}>
         <circleGeometry args={[520, 48]} />
-        <shaderMaterial
-          args={[
-            {
-              uniforms: {},
-              vertexShader: /* glsl */ `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-              fragmentShader: /* glsl */ `
-                varying vec3 vW;
-                void main(){
-                  float ave = smoothstep(9.0, 2.0, abs(vW.x));
-                  float grid = smoothstep(4.0, 0.0, abs(mod(vW.x + 23.0, 46.0) - 23.0)) + smoothstep(4.0, 0.0, abs(mod(vW.z + 23.0, 46.0) - 23.0));
-                  vec3 col = vec3(0.05, 0.035, 0.04) + vec3(0.5, 0.2, 0.06) * (ave * 0.5 + min(grid, 1.0) * 0.18);
-                  float d = length(vW.xz);
-                  col = mix(col, vec3(0.1, 0.078, 0.15), smoothstep(80.0, 450.0, d));
-                  gl_FragColor = vec4(col, 1.0);
-                }`,
-            },
-          ]}
-        />
+        <primitive object={groundMat} attach="material" />
       </mesh>
     </group>
   );

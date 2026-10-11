@@ -202,7 +202,11 @@ export function KarstPeaks({
       }
     }
     return out;
-  }, [seed, layers, baseY, haze, rock, light, lightDir, pines, exclude, rimStrength]);
+    // keyed on the values, not the array identities: callers pass inline arrays, and rebuilding
+    // these meshes on every re-render leaked GPU memory until the tab crashed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify({ seed, layers, baseY, haze, rock, light, lightDir, pines, exclude, rimStrength })]);
+  React.useEffect(() => () => items.forEach((it) => it.geo.dispose()), [items]);
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }), []);
   return (
     <group>
@@ -309,7 +313,8 @@ export function CloudPuffs({ count = 18, inner = 24, outer = 70, y = [-8, 3] as 
       const d = inner + rand() * (outer - inner);
       return { a, d, y: y[0] + rand() * (y[1] - y[0]), s: 14 + rand() * 18, speed: 0.004 + rand() * 0.006 };
     });
-  }, [count, inner, outer, y, seed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count, inner, outer, y[0], y[1], seed]);
   const mat = useMemo(() => new THREE.SpriteMaterial({ map: cloudPuffTexture(), color, transparent: true, depthWrite: false, opacity: 0.85, fog: false }), [color]);
   const ref = React.useRef<THREE.Group>(null);
   useFrame((st) => {

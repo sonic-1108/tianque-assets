@@ -568,26 +568,23 @@ function SunRays() {
   );
 }
 
+// module-level constants: KarstPeaks rebuilds its meshes whenever these props change identity
+const SUN_DIR: [number, number, number] = [0.4, 0.22, -1];
+const PEAK_LAYERS = [
+  { dist: 120, count: 9, height: [30, 55] as [number, number], radius: [6, 11] as [number, number], haze: 0.25 },
+  { dist: 210, count: 14, height: [40, 80] as [number, number], radius: [10, 18] as [number, number], haze: 0.55 },
+];
+const PEAK_EXCLUDE: [number, number] = [-1.9, -1.2];
+const PUFF_Y: [number, number] = [-24, -9];
+
 export function SummitMap() {
   return (
     <group>
-      <Sky zenith="#4f7fc9" horizon="#f6e2c4" below="#efe6da" sunDir={[0.4, 0.22, -1]} sunColor="#ffe2b0" sunSize={1.3} streaks={0.8} streakColor="#fff6ea" />
-      <CloudSea y={-26} color="#fffaf2" shadow="#b8b6c8" horizon="#f3e3cc" sunDir={[0.4, 0.22, -1]} />
-      <KarstPeaks
-        seed={21}
-        baseY={-40}
-        haze="#efe2cf"
-        rock="#6f7a74"
-        light="#ffe2b0"
-        lightDir={[0.4, 0.22, -1]}
-        layers={[
-          { dist: 120, count: 9, height: [30, 55], radius: [6, 11], haze: 0.25 },
-          { dist: 210, count: 14, height: [40, 80], radius: [10, 18], haze: 0.55 },
-        ]}
-        exclude={[-1.9, -1.2]}
-      />
+      <Sky zenith="#4f7fc9" horizon="#f6e2c4" below="#efe6da" sunDir={SUN_DIR} sunColor="#ffe2b0" sunSize={1.3} streaks={0.8} streakColor="#fff6ea" />
+      <CloudSea y={-26} color="#fffaf2" shadow="#b8b6c8" horizon="#f3e3cc" sunDir={SUN_DIR} />
+      <KarstPeaks seed={21} baseY={-40} haze="#efe2cf" rock="#6f7a74" light="#ffe2b0" lightDir={SUN_DIR} layers={PEAK_LAYERS} exclude={PEAK_EXCLUDE} />
       <GateTowers />
-      <CloudPuffs count={30} inner={26} outer={110} y={[-24, -9]} color="#fffaf3" seed={33} />
+      <CloudPuffs count={30} inner={26} outer={110} y={PUFF_Y} color="#fffaf3" seed={33} />
       <SunRays />
       <FloatingFloor />
       <JadePosts />
