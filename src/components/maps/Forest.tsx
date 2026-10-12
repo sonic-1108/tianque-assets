@@ -1339,7 +1339,7 @@ function FallingLeaves() {
       d.x += dt * (Math.sin(t * 0.8 + d.s * 20) * 0.6 + gust * 6);
       d.z += dt * (Math.cos(t * 0.6 + d.s * 13) * 0.4 + gust * 2.5);
       d.spin += dt * (2 + d.s * 3 + gust * 8);
-      if (d.y < Math.max(floorAt(d.x, d.z), FOREST.waterY) + 0.03 || Math.hypot(d.x, d.z) > R + 8 || (Math.hypot(d.x - FOREST.hill.x, d.z - FOREST.hill.z) < 9 && d.y < FOREST.hill.h + 10)) {
+      if (d.y < Math.max(floorAt(d.x, d.z), FOREST.waterY) + 0.03 || Math.hypot(d.x, d.z) > R + 8 || (Math.hypot(d.x - FOREST.hill.x, d.z - FOREST.hill.z) < 11 && d.y < FOREST.hill.h + 14)) {
         const a = Math.random() * Math.PI * 2;
         const r = Math.sqrt(Math.random()) * (R + 2);
         d.x = Math.cos(a) * r;
@@ -1490,9 +1490,9 @@ function Rain() {
           vec2 d = p.xz - uTemple.xy;
           float c = cos(uTemple.z), s = sin(uTemple.z);
           vec2 l = vec2(d.x * c - d.y * s, d.x * s + d.y * c);
-          float under = p.y < uTemple.w + 9.5 ? 1.0 : 0.0;
-          if (under > 0.5 && abs(l.x) < ${(FOREST.temple.w / 2 + 1.8).toFixed(2)} && abs(l.y) < ${(FOREST.temple.d / 2 + 1.7).toFixed(2)}) vA = 0.0;
-          if (under > 0.5 && abs(l.x + 5.3) < 1.8 && abs(l.y - 6.3) < 1.8) vA = 0.0;
+          float under = p.y < uTemple.w + 13.5 ? 1.0 : 0.0;
+          if (under > 0.5 && abs(l.x) < ${(FOREST.temple.w / 2 + 2.2).toFixed(2)} && abs(l.y) < ${(FOREST.temple.d / 2 + 2.1).toFixed(2)}) vA = 0.0;
+          if (under > 0.5 && abs(l.x + 7.2) < 2.0 && abs(l.y - 8.6) < 2.0) vA = 0.0;
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
@@ -1649,35 +1649,130 @@ function hipRoof(w: number, d: number, rise: number, ridge: number, sweep: numbe
   return g;
 }
 
+/** one seated Buddha: lotus throne, crossed legs, robed body, head with ushnisha, a halo and a flame-shaped mandorla */
+function Buddha({ mats, scale = 1 }: { mats: Record<string, any>; scale?: number }) {
+  const petals = useMemo(() => Array.from({ length: 16 }, (_, k) => (k / 16) * Math.PI * 2), []);
+  const mandorla = useMemo(() => {
+    const sh = new THREE.Shape();
+    sh.moveTo(0, 0);
+    sh.bezierCurveTo(1.7, 0.2, 1.9, 2.6, 0.9, 3.6);
+    sh.bezierCurveTo(0.5, 4.0, 0.15, 4.2, 0, 4.7);
+    sh.bezierCurveTo(-0.15, 4.2, -0.5, 4.0, -0.9, 3.6);
+    sh.bezierCurveTo(-1.9, 2.6, -1.7, 0.2, 0, 0);
+    return new THREE.ShapeGeometry(sh, 24);
+  }, []);
+  return (
+    <group scale={scale}>
+      {/* plinth and lotus throne */}
+      <mesh position={[0, 0.3, 0]} material={mats.lacquer} castShadow>
+        <cylinderGeometry args={[1.25, 1.35, 0.6, 8]} />
+      </mesh>
+      <mesh position={[0, 0.66, 0]} material={mats.gold}>
+        <cylinderGeometry args={[1.15, 1.2, 0.12, 24]} />
+      </mesh>
+      {petals.map((a, k) => (
+        <mesh key={k} position={[Math.cos(a) * 1.0, 0.85, Math.sin(a) * 1.0]} rotation={[0, -a, 0.55]} scale={[0.22, 0.32, 0.14]} material={mats.gold}>
+          <sphereGeometry args={[1, 10, 8]} />
+        </mesh>
+      ))}
+      {/* crossed legs, torso, arms, hands in the lap */}
+      <mesh position={[0, 1.15, 0.05]} scale={[1.05, 0.38, 0.75]} material={mats.gold} castShadow>
+        <sphereGeometry args={[1, 20, 14]} />
+      </mesh>
+      <mesh position={[0, 1.95, -0.05]} scale={[0.66, 0.85, 0.5]} material={mats.gold} castShadow>
+        <sphereGeometry args={[1, 20, 16]} />
+      </mesh>
+      {[-1, 1].map((sx) => (
+        <mesh key={sx} position={[sx * 0.62, 1.75, 0.05]} rotation={[0.3, 0, sx * 0.25]} scale={[0.2, 0.6, 0.22]} material={mats.gold}>
+          <sphereGeometry args={[1, 12, 10]} />
+        </mesh>
+      ))}
+      <mesh position={[0, 1.42, 0.45]} scale={[0.36, 0.12, 0.2]} material={mats.gold}>
+        <sphereGeometry args={[1, 12, 8]} />
+      </mesh>
+      {/* head: face, long ears, the ushnisha */}
+      <mesh position={[0, 2.95, 0]} scale={[0.36, 0.42, 0.36]} material={mats.gold} castShadow>
+        <sphereGeometry args={[1, 20, 16]} />
+      </mesh>
+      {[-1, 1].map((sx) => (
+        <mesh key={'e' + sx} position={[sx * 0.36, 2.88, -0.02]} scale={[0.06, 0.2, 0.09]} material={mats.gold}>
+          <sphereGeometry args={[1, 8, 8]} />
+        </mesh>
+      ))}
+      <mesh position={[0, 3.37, -0.02]} scale={[0.22, 0.2, 0.22]} material={mats.gold}>
+        <sphereGeometry args={[1, 14, 10]} />
+      </mesh>
+      <mesh position={[0, 3.05, 0.34]} material={mats.ruby}>
+        <sphereGeometry args={[0.035, 8, 6]} />
+      </mesh>
+      {/* halo and mandorla */}
+      <mesh position={[0, 3.0, -0.45]} material={mats.gold}>
+        <torusGeometry args={[0.62, 0.05, 8, 40]} />
+      </mesh>
+      <mesh position={[0, 0.85, -0.6]} geometry={mandorla} material={mats.mandorla} />
+    </group>
+  );
+}
+
+/** a tiered candle rack, full of lit candles */
+function CandleRack({ mats, flames, base }: { mats: Record<string, any>; flames: React.MutableRefObject<(THREE.Sprite | null)[]>; base: number }) {
+  const candles = useMemo(() => {
+    const rand = seeded(13);
+    const out: { p: [number, number, number]; h: number }[] = [];
+    for (let tier = 0; tier < 3; tier++)
+      for (let k = 0; k < 7 - tier; k++) out.push({ p: [-0.62 + tier * 0.1 + k * 0.2, 0.62 + tier * 0.28, 0.18 - tier * 0.18], h: 0.1 + rand() * 0.12 });
+    return out;
+  }, []);
+  return (
+    <group>
+      {[0, 1, 2].map((t) => (
+        <mesh key={t} position={[0, 0.3 + t * 0.28, 0.18 - t * 0.18]} material={mats.bronze} castShadow>
+          <boxGeometry args={[1.6 - t * 0.2, 0.06, 0.3]} />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.3, -0.1]} material={mats.bronze}>
+        <boxGeometry args={[1.6, 0.6, 0.06]} />
+      </mesh>
+      {candles.map((cd, i) => (
+        <group key={i} position={cd.p}>
+          <mesh position={[0, cd.h / 2, 0]} material={mats.wax}>
+            <cylinderGeometry args={[0.022, 0.026, cd.h, 6]} />
+          </mesh>
+          <sprite ref={(el) => (flames.current[base + i] = el)} position={[0, cd.h + 0.045, 0]} material={mats.flame} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
 function Temple() {
   const H = FOREST.hill;
   const T = FOREST.temple;
   const mats = useMemo(() => {
-    const plaque = canvasTex(320, 120, (g) => {
+    const plaque = canvasTex(400, 150, (g) => {
       g.fillStyle = '#16233a';
-      g.fillRect(0, 0, 320, 120);
+      g.fillRect(0, 0, 400, 150);
       g.strokeStyle = '#c9a14a';
-      g.lineWidth = 10;
-      g.strokeRect(6, 6, 308, 108);
-      g.fillStyle = '#e8c45a';
-      g.font = 'bold 74px "Noto Serif SC","Songti SC","STSong","SimSun",serif';
+      g.lineWidth = 12;
+      g.strokeRect(7, 7, 386, 136);
+      g.fillStyle = '#ecc95c';
+      g.font = 'bold 92px "Noto Serif SC","Songti SC","STSong","SimSun",serif';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText('青冥寺', 160, 64);
+      g.fillText('青冥寺', 200, 80);
     });
     const wall = canvasTex(256, 256, (g) => {
-      g.fillStyle = '#b8352a';
+      g.fillStyle = '#b4332a';
       g.fillRect(0, 0, 256, 256);
       const rand = seeded(5);
       for (let i = 0; i < 900; i++) {
         g.fillStyle = `rgba(60,10,5,${rand() * 0.12})`;
         g.fillRect(rand() * 256, rand() * 256, 2 + rand() * 8, 1 + rand() * 4);
       }
-      // stone dado along the bottom
       g.fillStyle = '#7d786c';
-      g.fillRect(0, 214, 256, 42);
+      g.fillRect(0, 222, 256, 34);
       g.strokeStyle = 'rgba(40,36,30,0.6)';
-      for (let x = 0; x < 256; x += 64) g.strokeRect(x, 214, 64, 42);
+      for (let x = 0; x < 256; x += 64) g.strokeRect(x, 222, 64, 34);
     });
     const lattice = canvasTex(128, 256, (g) => {
       g.fillStyle = '#2a1410';
@@ -1696,7 +1791,7 @@ function Temple() {
       g.lineWidth = 6;
       g.strokeRect(4, 4, 120, 248);
       g.fillStyle = '#5a1d14';
-      g.fillRect(4, 170, 120, 82);
+      g.fillRect(4, 176, 120, 76);
     });
     const tiles = canvasTex(256, 256, (g) => {
       g.fillStyle = '#26302e';
@@ -1711,7 +1806,7 @@ function Temple() {
       }
     });
     tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
-    tiles.repeat.set(6, 3);
+    tiles.repeat.set(8, 3);
     const stoneTex = canvasTex(256, 128, (g) => {
       g.fillStyle = '#9a958a';
       g.fillRect(0, 0, 256, 128);
@@ -1731,58 +1826,141 @@ function Temple() {
       }
     });
     stoneTex.wrapS = stoneTex.wrapT = THREE.RepeatWrapping;
-    stoneTex.repeat.set(4, 1);
+    stoneTex.repeat.set(5, 1);
+    // painted coffered ceiling (藻井): green-and-gold squares with a lotus in each
+    const ceiling = canvasTex(512, 512, (g) => {
+      g.fillStyle = '#1e3a33';
+      g.fillRect(0, 0, 512, 512);
+      for (let y = 0; y < 4; y++)
+        for (let x = 0; x < 4; x++) {
+          const cx = x * 128 + 64;
+          const cy = y * 128 + 64;
+          g.strokeStyle = '#c9a14a';
+          g.lineWidth = 6;
+          g.strokeRect(x * 128 + 6, y * 128 + 6, 116, 116);
+          g.fillStyle = '#2f5d4f';
+          g.fillRect(x * 128 + 14, y * 128 + 14, 100, 100);
+          for (let k = 0; k < 8; k++) {
+            const a = (k / 8) * Math.PI * 2;
+            g.fillStyle = k % 2 ? '#d4aa4f' : '#b8352a';
+            g.beginPath();
+            g.ellipse(cx + Math.cos(a) * 22, cy + Math.sin(a) * 22, 18, 8, a, 0, Math.PI * 2);
+            g.fill();
+          }
+          g.fillStyle = '#ecc95c';
+          g.beginPath();
+          g.arc(cx, cy, 12, 0, Math.PI * 2);
+          g.fill();
+        }
+    });
+    ceiling.wrapS = ceiling.wrapT = THREE.RepeatWrapping;
+    ceiling.repeat.set(2, 1.5);
+    const floorTex = canvasTex(256, 256, (g) => {
+      g.fillStyle = '#2b2a28';
+      g.fillRect(0, 0, 256, 256);
+      g.strokeStyle = '#1a1918';
+      g.lineWidth = 3;
+      for (let k = 0; k <= 256; k += 64) {
+        g.beginPath();
+        g.moveTo(k, 0);
+        g.lineTo(k, 256);
+        g.moveTo(0, k);
+        g.lineTo(256, k);
+        g.stroke();
+      }
+    });
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(5, 4);
+    const banner = canvasTex(64, 256, (g) => {
+      const grd = g.createLinearGradient(0, 0, 0, 256);
+      grd.addColorStop(0, '#d4aa4f');
+      grd.addColorStop(0.15, '#a51d1d');
+      grd.addColorStop(1, '#7a1414');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 64, 256);
+      g.fillStyle = '#ecc95c';
+      g.font = 'bold 34px "Noto Serif SC","Songti SC","STSong","SimSun",serif';
+      g.textAlign = 'center';
+      ['南', '无', '阿', '弥', '陀'].forEach((ch, i) => g.fillText(ch, 32, 72 + i * 38));
+      g.fillStyle = '#d4aa4f';
+      for (let k = 0; k < 4; k++) g.fillRect(4 + k * 16, 244, 8, 12);
+    });
     return {
       stone: new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.88 }),
       plain: new THREE.MeshStandardMaterial({ color: '#8f8a7e', roughness: 0.9 }),
       pave: new THREE.MeshStandardMaterial({ color: '#7a766c', roughness: 0.85 }),
+      inner: new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.35, metalness: 0.1 }),
       lacquer: new THREE.MeshStandardMaterial({ color: '#8a1d15', roughness: 0.38 }),
       green: new THREE.MeshStandardMaterial({ color: '#2f5d4f', roughness: 0.5 }),
-      wall: new THREE.MeshStandardMaterial({ map: wall, roughness: 0.92 }),
+      wall: new THREE.MeshStandardMaterial({ map: wall, roughness: 0.92, side: THREE.DoubleSide }),
       lattice: new THREE.MeshStandardMaterial({ map: lattice, roughness: 0.6 }),
       tile: new THREE.MeshStandardMaterial({ map: tiles, roughness: 0.55, side: THREE.DoubleSide }),
       ridge: new THREE.MeshStandardMaterial({ color: '#1f2624', roughness: 0.5 }),
-      gold: new THREE.MeshStandardMaterial({ color: '#d4aa4f', metalness: 0.9, roughness: 0.28 }),
+      gold: new THREE.MeshStandardMaterial({ color: '#d9b04f', metalness: 0.9, roughness: 0.25, emissive: '#3a2600', emissiveIntensity: 0.4 }),
+      mandorla: new THREE.MeshStandardMaterial({ color: '#c9a14a', metalness: 0.8, roughness: 0.35, side: THREE.DoubleSide, emissive: '#5a3a08', emissiveIntensity: 0.5 }),
+      ruby: new THREE.MeshStandardMaterial({ color: '#c81e1e', roughness: 0.2, emissive: '#600' }),
       bronze: new THREE.MeshStandardMaterial({ color: '#5b4a2c', metalness: 0.7, roughness: 0.45 }),
-      cloth: new THREE.MeshStandardMaterial({ color: '#9a1f1f', roughness: 0.8, side: THREE.DoubleSide }),
-      wax: new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.6 }),
-      paper: new THREE.MeshStandardMaterial({ color: '#efe0b8', roughness: 0.9, side: THREE.DoubleSide }),
-      lantern: new THREE.MeshStandardMaterial({ color: '#c0281c', emissive: '#ff4a20', emissiveIntensity: 0.6, roughness: 0.7 }),
+      cloth: new THREE.MeshStandardMaterial({ color: '#a8221e', roughness: 0.8, side: THREE.DoubleSide }),
+      cushion: new THREE.MeshStandardMaterial({ color: '#c08a2a', roughness: 0.9 }),
+      fruit: new THREE.MeshStandardMaterial({ color: '#e07a1f', roughness: 0.5 }),
+      wax: new THREE.MeshStandardMaterial({ color: '#f2e8d4', roughness: 0.55 }),
+      paper: new THREE.MeshStandardMaterial({ color: '#f3e2b8', roughness: 0.9, side: THREE.DoubleSide, emissive: '#5a3a10', emissiveIntensity: 0.25 }),
+      lantern: new THREE.MeshStandardMaterial({ color: '#c0281c', emissive: '#ff4a20', emissiveIntensity: 0.7, roughness: 0.7 }),
       plaque: new THREE.MeshStandardMaterial({ map: plaque, roughness: 0.5 }),
-      flame: new THREE.SpriteMaterial({ color: new THREE.Color(2.4, 1.6, 0.7), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
-    };
+      ceiling: new THREE.MeshStandardMaterial({ map: ceiling, roughness: 0.7, side: THREE.DoubleSide }),
+      banner: new THREE.MeshStandardMaterial({ map: banner, roughness: 0.85, side: THREE.DoubleSide }),
+      flame: new THREE.SpriteMaterial({
+        map: canvasTex(32, 64, (g) => {
+          const grd = g.createRadialGradient(16, 40, 1, 16, 36, 16);
+          grd.addColorStop(0, 'rgba(255,255,230,1)');
+          grd.addColorStop(0.35, 'rgba(255,200,90,0.95)');
+          grd.addColorStop(1, 'rgba(255,120,20,0)');
+          g.fillStyle = grd;
+          g.beginPath();
+          g.ellipse(16, 38, 10, 24, 0, 0, Math.PI * 2);
+          g.fill();
+        }),
+        color: new THREE.Color(2.4, 1.7, 0.9),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    } as Record<string, any>;
   }, []);
   const P = T.podium;
-  const C = T.col; // column height above the podium
-  const top = P + C; // underside of the eaves
-  const roofLow = useMemo(() => hipRoof(T.w + 3.6, T.d + 3.4, 1.2, T.w + 1.2, 0.55), [T]);
-  const roofHigh = useMemo(() => hipRoof(T.w + 1.6, T.d + 1.4, 2.0, T.w * 0.5, 0.5), [T]);
-  const bellRoof = useMemo(() => hipRoof(3.6, 3.6, 1.3, 0.3, 0.35), []);
-  // stone steps down the front of the hill
+  const C = T.col;
+  const top = P + C;
+  const roofLow = useMemo(() => hipRoof(T.w + 4.4, T.d + 4.2, 1.6, T.w + 1.6, 0.75), [T]);
+  const roofHigh = useMemo(() => hipRoof(T.w + 2.0, T.d + 1.8, 2.8, T.w * 0.5, 0.65), [T]);
+  const bellRoof = useMemo(() => hipRoof(3.8, 3.8, 1.4, 0.3, 0.4), []);
   const steps = useMemo(() => {
-    const out: { p: [number, number, number] }[] = [];
-    for (let lz = T.d / 2 + 4.2; lz < H.r + 1; lz += 0.55) {
+    const out: [number, number, number][] = [];
+    for (let lz = T.d / 2 + 5.5; lz < H.r + 1; lz += 0.55) {
       const [x, z] = templeToWorld(0, lz);
-      out.push({ p: [0, forestFloor(x, z) - H.h, lz] });
+      out.push([0, forestFloor(x, z) - H.h, lz]);
     }
     return out;
   }, [H, T]);
-  const candles = useMemo(() => {
-    const rand = seeded(9);
-    return Array.from({ length: 11 }, (_, i) => ({ x: -0.75 + (i % 6) * 0.3 + (rand() - 0.5) * 0.06, z: -0.12 + Math.floor(i / 6) * 0.26, h: 0.12 + rand() * 0.14 }));
-  }, []);
+  const altarCandles = useMemo(() => [[-0.7, 0.32], [0.7, 0.32]] as [number, number][], []);
   const flames = useRef<(THREE.Sprite | null)[]>([]);
-  const altarLight = useRef<THREE.PointLight>(null);
+  const lights = useRef<(THREE.PointLight | null)[]>([]);
   const shadeRef = useRef<THREE.Group>(null);
   const glint = useRef<THREE.Sprite>(null);
+  const banners = useRef<(THREE.Mesh | null)[]>([]);
   useFrame((st) => {
     const t = st.clock.elapsedTime;
     flames.current.forEach((f, i) => {
       if (!f) return;
       const k = 0.8 + 0.2 * Math.sin(t * 19 + i * 2.1) * Math.sin(t * 6.1 + i);
-      f.scale.set(0.06 * k, 0.15 * k, 1);
+      f.scale.set(0.055 * k, 0.14 * k, 1);
     });
-    if (altarLight.current) altarLight.current.intensity = (3 + mapRuntime.night * 10) * (0.92 + 0.08 * Math.sin(t * 13));
+    lights.current.forEach((l, i) => {
+      if (l) l.intensity = (i === 0 ? 4 : 2.5) * (1 + mapRuntime.night * 2.5) * (0.92 + 0.08 * Math.sin(t * 13 + i));
+    });
+    banners.current.forEach((b, i) => {
+      if (b) b.rotation.y = Math.sin(t * 0.7 + i) * 0.08;
+    });
     const spot = mapRuntime.shadeSpot;
     if (shadeRef.current) {
       shadeRef.current.visible = spot >= 0;
@@ -1793,220 +1971,335 @@ function Temple() {
       }
     }
     if (glint.current) {
-      const ph = (t * 0.4) % 1;
-      glint.current.material.opacity = spot >= 0 && ph < 0.08 ? Math.sin((ph / 0.08) * Math.PI) : 0;
+      const ph = (t * 0.45) % 1;
+      glint.current.material.opacity = spot >= 0 && ph < 0.1 ? Math.sin((ph / 0.1) * Math.PI) : 0;
     }
   });
   const colX = [-T.w / 2, -T.w / 6, T.w / 6, T.w / 2];
   return (
     <group position={[H.x, H.h, H.z]} rotation={[0, TEMPLE_YAW, 0]}>
       {/* forecourt paving */}
-      <mesh position={[0, -0.04, 1.6]} material={mats.pave} receiveShadow>
-        <boxGeometry args={[T.w + 5, 0.12, T.d + 7.5]} />
+      <mesh position={[0, -0.04, 2.6]} material={mats.pave} receiveShadow>
+        <boxGeometry args={[T.w + 6, 0.12, T.d + 11]} />
       </mesh>
-      {/* stone podium with a carved band and a moulded cap */}
+      {/* stone podium */}
       <mesh position={[0, P / 2, 0]} material={mats.stone} castShadow receiveShadow>
         <boxGeometry args={[T.w + 2.8, P, T.d + 2.8]} />
       </mesh>
       <mesh position={[0, P + 0.03, 0]} material={mats.plain} receiveShadow>
         <boxGeometry args={[T.w + 3.0, 0.08, T.d + 3.0]} />
       </mesh>
-      {/* front stairs up the podium */}
       {[0, 1, 2].map((k) => (
-        <mesh key={'ps' + k} position={[0, P * (k + 0.5) / 3, T.d / 2 + 1.4 + 0.35 * (3 - k)]} material={mats.plain} castShadow receiveShadow>
-          <boxGeometry args={[3.2, P * (k + 1) / 3, 0.7]} />
+        <mesh key={'ps' + k} position={[0, (P * (k + 1)) / 3 / 2, T.d / 2 + 1.4 + 0.4 * (3 - k)]} material={mats.plain} castShadow receiveShadow>
+          <boxGeometry args={[4.4, (P * (k + 1)) / 3, 0.8]} />
         </mesh>
       ))}
-      {/* columns on carved bases */}
+      {/* polished floor inside the hall */}
+      <mesh position={[0, P + 0.075, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.inner} receiveShadow>
+        <planeGeometry args={[T.w, T.d]} />
+      </mesh>
+      {/* columns */}
       {colX.map((x) =>
         [-T.d / 2, T.d / 2].map((z) => (
           <group key={x + ':' + z} position={[x, P, z]}>
             <mesh position={[0, C / 2, 0]} material={mats.lacquer} castShadow>
-              <cylinderGeometry args={[0.26, 0.3, C, 14]} />
+              <cylinderGeometry args={[0.32, 0.36, C, 16]} />
             </mesh>
-            <mesh position={[0, 0.12, 0]} material={mats.plain}>
-              <cylinderGeometry args={[0.42, 0.48, 0.24, 14]} />
+            <mesh position={[0, 0.15, 0]} material={mats.plain}>
+              <cylinderGeometry args={[0.52, 0.58, 0.3, 16]} />
             </mesh>
           </group>
         ))
       )}
       {/* walls */}
-      <mesh position={[0, P + C / 2, -T.d / 2 - 0.1]} material={mats.wall} castShadow receiveShadow>
-        <boxGeometry args={[T.w, C, 0.35]} />
+      <mesh position={[0, P + C / 2, -T.d / 2 - 0.12]} material={mats.wall} castShadow receiveShadow>
+        <boxGeometry args={[T.w, C, 0.4]} />
       </mesh>
       {[-1, 1].map((sx) => (
-        <mesh key={sx} position={[sx * (T.w / 2 + 0.1), P + C / 2, 0]} rotation={[0, Math.PI / 2, 0]} material={mats.wall} castShadow receiveShadow>
-          <boxGeometry args={[T.d, C, 0.35]} />
+        <mesh key={sx} position={[sx * (T.w / 2 + 0.12), P + C / 2, 0]} rotation={[0, Math.PI / 2, 0]} material={mats.wall} castShadow receiveShadow>
+          <boxGeometry args={[T.d, C, 0.4]} />
         </mesh>
       ))}
-      {/* lattice screens in the outer front bays; the middle bay stands open */}
       {[-1, 1].map((sx) => (
-        <mesh key={'lt' + sx} position={[sx * ((T.w / 2 + T.w / 6) / 2), P + (C - 0.5) / 2, T.d / 2]} material={mats.lattice} castShadow>
-          <boxGeometry args={[T.w / 2 - T.w / 6 - 0.5, C - 0.5, 0.12]} />
+        <mesh key={'lt' + sx} position={[sx * ((T.w / 2 + T.w / 6) / 2), P + (C - 0.8) / 2, T.d / 2]} material={mats.lattice} castShadow>
+          <boxGeometry args={[T.w / 2 - T.w / 6 - 0.6, C - 0.8, 0.14]} />
         </mesh>
       ))}
-      {/* architrave, green-painted beams and a row of brackets (斗拱) under the eaves */}
-      <mesh position={[0, top + 0.12, 0]} material={mats.green} castShadow>
-        <boxGeometry args={[T.w + 0.8, 0.32, T.d + 0.8]} />
+      {/* coffered ceiling */}
+      <mesh position={[0, top - 0.05, 0]} rotation={[Math.PI / 2, 0, 0]} material={mats.ceiling}>
+        <planeGeometry args={[T.w, T.d]} />
       </mesh>
-      {Array.from({ length: 13 }, (_, k) => -T.w / 2 - 0.2 + k * ((T.w + 0.4) / 12)).flatMap((x) =>
+      {/* beams, brackets */}
+      <mesh position={[0, top + 0.16, 0]} material={mats.green} castShadow>
+        <boxGeometry args={[T.w + 1.0, 0.42, T.d + 1.0]} />
+      </mesh>
+      {Array.from({ length: 15 }, (_, k) => -T.w / 2 - 0.3 + k * ((T.w + 0.6) / 14)).flatMap((x) =>
         [-1, 1].map((sz) => (
-          <mesh key={'br' + x + sz} position={[x, top + 0.42, sz * (T.d / 2 + 0.45)]} material={mats.lacquer}>
-            <boxGeometry args={[0.28, 0.28, 0.5]} />
+          <mesh key={'br' + x + sz} position={[x, top + 0.55, sz * (T.d / 2 + 0.6)]} material={mats.lacquer}>
+            <boxGeometry args={[0.34, 0.34, 0.6]} />
           </mesh>
         ))
       )}
-      {Array.from({ length: 9 }, (_, k) => -T.d / 2 - 0.2 + k * ((T.d + 0.4) / 8)).flatMap((z) =>
+      {Array.from({ length: 11 }, (_, k) => -T.d / 2 - 0.3 + k * ((T.d + 0.6) / 10)).flatMap((z) =>
         [-1, 1].map((sx) => (
-          <mesh key={'bs' + z + sx} position={[sx * (T.w / 2 + 0.45), top + 0.42, z]} material={mats.lacquer}>
-            <boxGeometry args={[0.5, 0.28, 0.28]} />
+          <mesh key={'bs' + z + sx} position={[sx * (T.w / 2 + 0.6), top + 0.55, z]} material={mats.lacquer}>
+            <boxGeometry args={[0.6, 0.34, 0.34]} />
           </mesh>
         ))
       )}
-      {/* lower eave */}
-      <mesh geometry={roofLow} position={[0, top + 0.55, 0]} material={mats.tile} castShadow receiveShadow />
-      {/* clerestory between the eaves */}
-      <mesh position={[0, top + 1.55, 0]} material={mats.wall} castShadow>
-        <boxGeometry args={[T.w * 0.78, 1.1, T.d * 0.72]} />
+      {/* double eaves */}
+      <mesh geometry={roofLow} position={[0, top + 0.72, 0]} material={mats.tile} castShadow receiveShadow />
+      <mesh position={[0, top + 2.0, 0]} material={mats.wall} castShadow>
+        <boxGeometry args={[T.w * 0.8, 1.5, T.d * 0.74]} />
       </mesh>
-      <mesh position={[0, top + 2.05, 0]} material={mats.green}>
-        <boxGeometry args={[T.w * 0.82, 0.22, T.d * 0.76]} />
+      <mesh position={[0, top + 2.75, 0]} material={mats.green}>
+        <boxGeometry args={[T.w * 0.84, 0.28, T.d * 0.78]} />
       </mesh>
-      {/* upper eave and ridge */}
-      <mesh geometry={roofHigh} position={[0, top + 2.15, 0]} material={mats.tile} castShadow receiveShadow />
-      <mesh position={[0, top + 4.2, 0]} material={mats.ridge} castShadow>
-        <boxGeometry args={[T.w * 0.5 + 0.3, 0.32, 0.36]} />
+      <mesh geometry={roofHigh} position={[0, top + 2.88, 0]} material={mats.tile} castShadow receiveShadow />
+      <mesh position={[0, top + 5.75, 0]} material={mats.ridge} castShadow>
+        <boxGeometry args={[T.w * 0.5 + 0.4, 0.42, 0.46]} />
       </mesh>
-      {/* chiwei at the ridge ends and a gilded pearl in the middle */}
       {[-1, 1].map((sx) => (
-        <mesh key={'cw' + sx} position={[sx * (T.w * 0.25 + 0.15), top + 4.6, 0]} rotation={[0, 0, -sx * 0.35]} material={mats.ridge}>
-          <coneGeometry args={[0.22, 0.9, 6]} />
+        <mesh key={'cw' + sx} position={[sx * (T.w * 0.25 + 0.2), top + 6.3, 0]} rotation={[0, 0, -sx * 0.35]} material={mats.ridge}>
+          <coneGeometry args={[0.3, 1.2, 6]} />
         </mesh>
       ))}
-      <mesh position={[0, top + 4.55, 0]} material={mats.gold}>
-        <sphereGeometry args={[0.2, 12, 10]} />
+      <mesh position={[0, top + 6.2, 0]} material={mats.gold}>
+        <sphereGeometry args={[0.28, 14, 10]} />
       </mesh>
-      {/* plaque between the eaves */}
-      <mesh position={[0, top + 1.55, T.d * 0.36 + 0.02]} material={mats.plaque}>
-        <planeGeometry args={[2.6, 0.98]} />
+      <mesh position={[0, top + 2.05, T.d * 0.37 + 0.02]} material={mats.plaque}>
+        <planeGeometry args={[3.4, 1.28]} />
       </mesh>
-      {/* red lanterns under the front eave */}
-      {[-T.w / 6, T.w / 6].map((x) => (
-        <group key={'lan' + x} position={[x, top - 0.6, T.d / 2 + 0.7]}>
-          <mesh material={mats.lantern} scale={[1, 1.25, 1]}>
-            <sphereGeometry args={[0.3, 14, 10]} />
+      {/* lanterns: two under the front eave, two inside */}
+      {[[-T.w / 6, T.d / 2 + 0.9], [T.w / 6, T.d / 2 + 0.9], [-2.2, 1.6], [2.2, 1.6]].map(([x, z], i) => (
+        <group key={'lan' + i} position={[x, top - 0.9, z]}>
+          <mesh material={mats.lantern} scale={[1, 1.3, 1]}>
+            <sphereGeometry args={[0.36, 14, 10]} />
           </mesh>
-          <mesh position={[0, 0.55, 0]} material={mats.bronze}>
-            <cylinderGeometry args={[0.012, 0.012, 0.6, 4]} />
+          <mesh position={[0, 0.7, 0]} material={mats.bronze}>
+            <cylinderGeometry args={[0.012, 0.012, 0.9, 4]} />
           </mesh>
         </group>
       ))}
-      {/* altar with candles */}
-      <group position={[0, P, -1.6]}>
-        <mesh position={[0, 0.5, 0]} material={mats.lacquer} castShadow>
-          <boxGeometry args={[2.0, 1.0, 1.0]} />
+      {/* banners hanging from the ceiling */}
+      {[-4.6, -1.4, 1.4, 4.6].map((x, i) => (
+        <mesh key={'bn' + i} ref={(el) => (banners.current[i] = el)} position={[x, top - 1.9, -T.d / 2 + 1.6]} material={mats.banner}>
+          <planeGeometry args={[0.55, 3.2]} />
         </mesh>
-        <mesh position={[0, 0.66, 0.51]} material={mats.cloth}>
-          <planeGeometry args={[1.8, 0.66]} />
+      ))}
+      {/* the three Buddhas */}
+      <group position={[0, P, -4.0]}>
+        <Buddha mats={mats} scale={1.15} />
+      </group>
+      {[-3.7, 3.7].map((x) => (
+        <group key={'sb' + x} position={[x, P, -4.0]}>
+          <Buddha mats={mats} scale={0.72} />
+        </group>
+      ))}
+      {/* altar: red lacquer, gold trim, offerings, an incense bowl and two great candles */}
+      <group position={[0, P, -2.4]}>
+        <mesh position={[0, 0.55, 0]} material={mats.lacquer} castShadow>
+          <boxGeometry args={[2.6, 1.1, 1.1]} />
         </mesh>
-        {candles.map((cd, i) => (
-          <group key={i} position={[cd.x, 1.0, cd.z]}>
-            <mesh position={[0, cd.h / 2, 0]} material={mats.wax}>
-              <cylinderGeometry args={[0.025, 0.025, cd.h, 6]} />
+        <mesh position={[0, 1.12, 0]} material={mats.gold}>
+          <boxGeometry args={[2.7, 0.05, 1.2]} />
+        </mesh>
+        <mesh position={[0, 0.66, 0.56]} material={mats.cloth}>
+          <planeGeometry args={[2.3, 0.85]} />
+        </mesh>
+        {[-0.35, 0.35].map((x) => (
+          <group key={'fr' + x} position={[x, 1.15, 0.1]}>
+            <mesh position={[0, 0.03, 0]} material={mats.bronze}>
+              <cylinderGeometry args={[0.2, 0.12, 0.06, 14]} />
             </mesh>
-            <sprite ref={(el) => (flames.current[i] = el)} position={[0, cd.h + 0.05, 0]} material={mats.flame} />
+            {[[0, 0.1, 0], [0.07, 0.1, 0.05], [-0.07, 0.1, 0.04], [0, 0.18, 0.02]].map((p, k) => (
+              <mesh key={k} position={p as [number, number, number]} material={mats.fruit}>
+                <sphereGeometry args={[0.065, 10, 8]} />
+              </mesh>
+            ))}
           </group>
         ))}
-        <pointLight ref={altarLight} position={[0, 1.8, 0.8]} color="#ffb05a" intensity={3} distance={16} decay={1.4} />
+        <mesh position={[0, 1.22, -0.15]} material={mats.bronze}>
+          <cylinderGeometry args={[0.16, 0.12, 0.16, 12]} />
+        </mesh>
+        {altarCandles.map(([x, z], i) => (
+          <group key={'ac' + i} position={[x, 1.15, z - 0.4]}>
+            <mesh position={[0, 0.05, 0]} material={mats.bronze}>
+              <cylinderGeometry args={[0.1, 0.12, 0.1, 12]} />
+            </mesh>
+            <mesh position={[0, 0.3, 0]} material={mats.wax}>
+              <cylinderGeometry args={[0.055, 0.06, 0.42, 10]} />
+            </mesh>
+            <sprite ref={(el) => (flames.current[i] = el)} position={[0, 0.58, 0]} material={mats.flame} />
+          </group>
+        ))}
+        <pointLight ref={(el) => (lights.current[0] = el)} position={[0, 2.2, 1.0]} color="#ffb05a" intensity={4} distance={18} decay={1.4} />
       </group>
-      {/* seated Buddha on a lotus throne, with a halo */}
-      <group position={[0, P, -2.8]}>
-        <mesh position={[0, 0.45, 0]} material={mats.gold}>
-          <cylinderGeometry args={[0.95, 1.1, 0.9, 20]} />
+      {/* candle racks either side */}
+      {[-2.6, 2.6].map((x, i) => (
+        <group key={'cr' + x} position={[x, P, -1.5]}>
+          <CandleRack mats={mats} flames={flames} base={2 + i * 18} />
+          <pointLight ref={(el) => (lights.current[1 + i] = el)} position={[0, 1.6, 0.4]} color="#ffb05a" intensity={2.5} distance={9} decay={1.6} />
+        </group>
+      ))}
+      {/* prayer cushions */}
+      {[-2.4, -0.8, 0.8, 2.4].map((x) => (
+        <mesh key={'cu' + x} position={[x, P + 0.1, 0.6]} scale={[1, 0.35, 1]} material={mats.cushion}>
+          <cylinderGeometry args={[0.38, 0.42, 0.4, 16]} />
         </mesh>
-        <mesh position={[0, 1.4, 0]} scale={[1, 1, 0.78]} material={mats.gold}>
-          <sphereGeometry args={[0.85, 18, 14]} />
+      ))}
+      {/* incense burner */}
+      <group position={[0, 0, 8.4]}>
+        <mesh position={[0, 0.8, 0]} material={mats.bronze} castShadow>
+          <cylinderGeometry args={[0.6, 0.5, 0.65, 16]} />
         </mesh>
-        <mesh position={[0, 2.5, 0]} material={mats.gold}>
-          <sphereGeometry args={[0.4, 16, 12]} />
-        </mesh>
-        <mesh position={[0, 2.88, 0]} material={mats.gold}>
-          <sphereGeometry args={[0.15, 10, 8]} />
-        </mesh>
-        <mesh position={[0, 2.4, -0.35]} material={mats.gold}>
-          <torusGeometry args={[0.8, 0.06, 8, 32]} />
-        </mesh>
-      </group>
-      {/* bronze incense burner in the forecourt */}
-      <group position={[0, 0, 6.3]}>
-        <mesh position={[0, 0.75, 0]} material={mats.bronze} castShadow>
-          <cylinderGeometry args={[0.55, 0.45, 0.6, 16]} />
-        </mesh>
-        <mesh position={[0, 1.1, 0]} material={mats.bronze}>
-          <torusGeometry args={[0.52, 0.05, 6, 20]} />
+        <mesh position={[0, 1.18, 0]} material={mats.bronze}>
+          <torusGeometry args={[0.57, 0.05, 6, 20]} />
         </mesh>
         {[0, 1, 2].map((k) => (
-          <mesh key={k} position={[Math.cos((k / 3) * Math.PI * 2) * 0.38, 0.25, Math.sin((k / 3) * Math.PI * 2) * 0.38]} material={mats.bronze}>
-            <cylinderGeometry args={[0.07, 0.05, 0.5, 6]} />
+          <mesh key={k} position={[Math.cos((k / 3) * Math.PI * 2) * 0.4, 0.27, Math.sin((k / 3) * Math.PI * 2) * 0.4]} material={mats.bronze}>
+            <cylinderGeometry args={[0.08, 0.06, 0.55, 6]} />
           </mesh>
         ))}
       </group>
       {/* bell pavilion */}
-      <group position={[-5.3, 0, 6.3]}>
+      <group position={[-7.2, 0, 8.6]}>
         <mesh position={[0, 0.15, 0]} material={mats.plain} receiveShadow>
-          <boxGeometry args={[2.6, 0.3, 2.6]} />
+          <boxGeometry args={[2.8, 0.3, 2.8]} />
         </mesh>
         {[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, z], k) => (
-          <mesh key={k} position={[x, 1.9, z]} material={mats.lacquer} castShadow>
-            <cylinderGeometry args={[0.12, 0.13, 3.8, 10]} />
+          <mesh key={k} position={[x, 2.1, z]} material={mats.lacquer} castShadow>
+            <cylinderGeometry args={[0.13, 0.14, 4.2, 10]} />
           </mesh>
         ))}
-        <mesh position={[0, 3.85, 0]} material={mats.green}>
-          <boxGeometry args={[2.4, 0.2, 2.4]} />
+        <mesh position={[0, 4.25, 0]} material={mats.green}>
+          <boxGeometry args={[2.5, 0.22, 2.5]} />
         </mesh>
-        <mesh geometry={bellRoof} position={[0, 3.95, 0]} material={mats.tile} castShadow />
-        <mesh position={[0, 2.25, 0]} material={mats.bronze} castShadow>
-          <cylinderGeometry args={[0.38, 0.52, 1.1, 18, 1, true]} />
+        <mesh geometry={bellRoof} position={[0, 4.36, 0]} material={mats.tile} castShadow />
+        <mesh position={[0, 2.5, 0]} material={mats.bronze} castShadow>
+          <cylinderGeometry args={[0.42, 0.58, 1.25, 18, 1, true]} />
         </mesh>
-        <mesh position={[0, 2.8, 0]} material={mats.bronze}>
-          <sphereGeometry args={[0.38, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <mesh position={[0, 3.12, 0]} material={mats.bronze}>
+          <sphereGeometry args={[0.42, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
         </mesh>
       </group>
-      {/* stone lanterns at the head of the stairs */}
-      {[-2.2, 2.2].map((x) => (
-        <group key={'l' + x} position={[x, 0, T.d / 2 + 3.6]}>
-          <mesh position={[0, 0.6, 0]} material={mats.plain}>
-            <cylinderGeometry args={[0.14, 0.2, 1.2, 6]} />
+      {[-2.8, 2.8].map((x) => (
+        <group key={'l' + x} position={[x, 0, T.d / 2 + 4.6]}>
+          <mesh position={[0, 0.7, 0]} material={mats.plain}>
+            <cylinderGeometry args={[0.16, 0.22, 1.4, 6]} />
           </mesh>
-          <mesh position={[0, 1.35, 0]} material={mats.plain}>
-            <boxGeometry args={[0.5, 0.4, 0.5]} />
+          <mesh position={[0, 1.55, 0]} material={mats.plain}>
+            <boxGeometry args={[0.56, 0.44, 0.56]} />
           </mesh>
-          <mesh position={[0, 1.35, 0.26]}>
-            <planeGeometry args={[0.22, 0.24]} />
+          <mesh position={[0, 1.55, 0.29]}>
+            <planeGeometry args={[0.24, 0.26]} />
             <meshBasicMaterial color="#ffcf7a" toneMapped={false} />
           </mesh>
-          <mesh position={[0, 1.72, 0]} material={mats.plain}>
-            <coneGeometry args={[0.45, 0.36, 4]} />
+          <mesh position={[0, 1.95, 0]} material={mats.plain}>
+            <coneGeometry args={[0.5, 0.4, 4]} />
           </mesh>
         </group>
       ))}
-      {steps.map((st, i) => (
-        <mesh key={'s' + i} position={st.p} material={mats.plain} receiveShadow>
-          <boxGeometry args={[2.8, 0.22, 0.6]} />
+      {steps.map((p, i) => (
+        <mesh key={'s' + i} position={p} material={mats.plain} receiveShadow>
+          <boxGeometry args={[3.2, 0.22, 0.6]} />
         </mesh>
       ))}
-      {/* the candle-shade, hidden somewhere in the temple grounds */}
+      {/* the candle-shade: a paper shade in a bronze frame, hidden somewhere in the temple grounds */}
       <group ref={shadeRef}>
-        <mesh position={[0, 0.16, 0]} material={mats.paper} castShadow>
-          <cylinderGeometry args={[0.13, 0.16, 0.32, 12, 1, true]} />
+        <mesh position={[0, 0.06, 0]} material={mats.bronze}>
+          <cylinderGeometry args={[0.2, 0.22, 0.06, 16]} />
         </mesh>
-        <mesh position={[0, 0.33, 0]} material={mats.bronze}>
-          <torusGeometry args={[0.13, 0.015, 6, 16]} />
+        <mesh position={[0, 0.3, 0]} material={mats.paper} castShadow>
+          <cylinderGeometry args={[0.17, 0.2, 0.42, 16, 1, true]} />
         </mesh>
-        <sprite ref={glint} position={[0.1, 0.3, 0.1]} scale={[0.35, 0.35, 1]}>
+        {[0, 1, 2, 3].map((k) => (
+          <mesh key={k} position={[Math.cos((k / 4) * Math.PI * 2) * 0.185, 0.3, Math.sin((k / 4) * Math.PI * 2) * 0.185]} material={mats.bronze}>
+            <cylinderGeometry args={[0.012, 0.012, 0.44, 4]} />
+          </mesh>
+        ))}
+        <mesh position={[0, 0.53, 0]} material={mats.bronze}>
+          <torusGeometry args={[0.17, 0.02, 6, 18]} />
+        </mesh>
+        <sprite ref={glint} position={[0.12, 0.5, 0.12]} scale={[0.45, 0.45, 1]}>
           <spriteMaterial color={new THREE.Color(3, 2.6, 1.6)} transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
         </sprite>
       </group>
+    </group>
+  );
+}
+
+/** Floating F key caps over everything F works on, shown only while the local player is close */
+function FMarkers() {
+  const items = useMemo(() => {
+    const keyTex = (label: string) =>
+      canvasTex(256, 160, (g) => {
+        g.clearRect(0, 0, 256, 160);
+        g.fillStyle = 'rgba(0,0,0,0.55)';
+        g.beginPath();
+        g.roundRect(8, 96, 240, 56, 14);
+        g.fill();
+        g.fillStyle = '#fbbf24';
+        g.beginPath();
+        g.roundRect(88, 4, 80, 80, 14);
+        g.fill();
+        g.fillStyle = '#7c4a03';
+        g.fillRect(92, 70, 72, 10);
+        g.fillStyle = '#111';
+        g.font = 'bold 62px sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText('F', 128, 44);
+        g.fillStyle = '#fde68a';
+        g.font = 'bold 34px "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif';
+        g.fillText(label, 128, 125);
+      });
+    const out: { key: string; x: number; y: number; z: number; tex: THREE.Texture; range: number; shade?: number }[] = [];
+    const P = FOREST.hill.h + FOREST.temple.podium;
+    const candleTex = keyTex('取蜡烛 / 点燃');
+    for (const [lx, lz] of [[0, -2.4], [-2.6, -1.5], [2.6, -1.5]] as [number, number][]) {
+      const [x, z] = templeToWorld(lx, lz + 0.9);
+      out.push({ key: 'c' + lx, x, y: P + 2.3, z, tex: candleTex, range: 6 });
+    }
+    const shadeTex = keyTex('拿起灯罩');
+    FOREST.shadeSpots.forEach(([lx, lz], k) => {
+      const [x, z] = templeToWorld(lx, lz);
+      out.push({ key: 's' + k, x, y: forestFloor(x, z) + 1.1, z, tex: shadeTex, range: 3.5, shade: k });
+    });
+    const ladderTex = keyTex('按住 爬梯子');
+    let n = 0;
+    for (const [x, z, r, deck] of FOREST.trees) {
+      if (deck <= 0) continue;
+      const a = ladderAngle(n++);
+      const R = r * 1.08 + 0.45;
+      const lx = x + Math.cos(a) * R;
+      const lz = z + Math.sin(a) * R;
+      out.push({ key: 'l' + n, x: lx, y: forestFloor(lx, lz) + 2.4, z: lz, tex: ladderTex, range: 5 });
+    }
+    return out;
+  }, []);
+  const refs = useRef<(THREE.Sprite | null)[]>([]);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    items.forEach((it, i) => {
+      const s = refs.current[i];
+      if (!s) return;
+      const d = Math.hypot(mapRuntime.viewX - it.x, mapRuntime.viewZ - it.z);
+      const show = d < it.range && Math.abs(mapRuntime.viewY - it.y) < 4.5 && (it.shade === undefined || it.shade === mapRuntime.shadeSpot);
+      s.visible = show;
+      if (show) {
+        s.position.set(it.x, it.y + Math.sin(t * 3 + i) * 0.06, it.z);
+        (s.material as THREE.SpriteMaterial).opacity = Math.min(1, (it.range - d) * 1.5);
+      }
+    });
+  });
+  return (
+    <group>
+      {items.map((it, i) => (
+        <sprite key={it.key} ref={(el) => (refs.current[i] = el)} scale={[1.1, 0.69, 1]} visible={false} renderOrder={30}>
+          <spriteMaterial map={it.tex} transparent depthTest={false} depthWrite={false} toneMapped={false} />
+        </sprite>
+      ))}
     </group>
   );
 }
@@ -2045,6 +2338,7 @@ export function ForestMap() {
       <FallingLeaves />
       <StormSky />
       <Temple />
+      <FMarkers />
       <Rain />
       <Lightning />
     </group>

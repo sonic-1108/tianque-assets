@@ -368,6 +368,9 @@ export default function App() {
     screenX: 0,
     screenY: 0,
   });
+  // the HUD poller below runs in a long-lived interval: read the map through a ref, never a stale closure
+  const mapIdRef = useRef(mapId);
+  mapIdRef.current = mapId;
   const dummyScreenPosRef = useRef(dummyScreenPos);
   dummyScreenPosRef.current = dummyScreenPos;
 
@@ -587,15 +590,15 @@ export default function App() {
         p1Climb: !!p1.climbing,
         p1Swim: !!p1.swimming,
         p1Ladder: !!p1.nearLadder,
-        p1Grip: mapId === 'forest' ? p1.grip ?? 1 : 1,
-        p1Hint: mapId === 'forest' ? p1.interactHint ?? '' : '',
-        p1Candle: mapId === 'forest' ? p1.candle ?? 0 : 0,
+        p1Grip: mapIdRef.current === 'forest' ? p1.grip ?? 1 : 1,
+        p1Hint: mapIdRef.current === 'forest' ? p1.interactHint ?? '' : '',
+        p1Candle: mapIdRef.current === 'forest' ? p1.candle ?? 0 : 0,
         p1Shade: !!p1.shade,
-        night: mapId === 'forest' ? mapRuntime.night : 0,
+        night: mapIdRef.current === 'forest' ? mapRuntime.night : 0,
         foeHidden: !!dummyScreenPosRef.current.hidden,
-        p1Slip: mapId === 'forest' ? p1.slip ?? 0 : 0,
-        rain: mapId === 'forest' ? mapRuntime.rain : 0,
-        storm: mapId === 'forest' ? mapRuntime.storm : 0,
+        p1Slip: mapIdRef.current === 'forest' ? p1.slip ?? 0 : 0,
+        rain: mapIdRef.current === 'forest' ? mapRuntime.rain : 0,
+        storm: mapIdRef.current === 'forest' ? mapRuntime.storm : 0,
         p1Slide: !!p1.sliding,
         dMaxHp: dummy.maxHp,
         dMp: dummy.mp,

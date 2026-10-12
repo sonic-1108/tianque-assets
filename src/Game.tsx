@@ -12,7 +12,7 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, altarPos } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, CANDLE_POINTS } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -683,6 +683,10 @@ export function Game({
       keyLightRef.current.target.updateMatrixWorld();
     }
     if (map.id === 'forest') {
+      // where the local player is, for the F markers in the scenery
+      mapRuntime.viewX = p1.pos[0];
+      mapRuntime.viewY = p1.pos[1];
+      mapRuntime.viewZ = p1.pos[2];
       // the sun goes in as the rain comes; lightning lights everything up for an instant
       const rain = mapRuntime.rain;
       const night = mapRuntime.night;
@@ -3328,8 +3332,10 @@ export function Game({
       c.intPrev = !!intent?.interact;
       c.interactHint = c.nearLadder ? '按住 F 爬梯子' : '';
       if (c.hp <= 0) return;
-      const [ax, az] = altarPos();
-      const nearAltar = Math.hypot(c.pos[0] - ax, c.pos[2] - az) < 2.4 && Math.abs(c.pos[1] - FOREST.hill.h) < 2;
+      const nearAltar = CANDLE_POINTS.some(([lx, lz]) => {
+        const [ax, az] = templeToWorld(lx, lz);
+        return Math.hypot(c.pos[0] - ax, c.pos[2] - az) < 2.0;
+      }) && Math.abs(c.pos[1] - FOREST.hill.h) < 2.5;
       if (nearAltar && c.candle !== 2) {
         c.interactHint = c.candle === 1 ? '按 F 重新点燃蜡烛' : '按 F 取一支蜡烛';
         if (pressed) {
@@ -3342,7 +3348,7 @@ export function Game({
       if (spot >= 0 && !c.shade) {
         const [lx, lz] = FOREST.shadeSpots[spot];
         const [sx, sz] = templeToWorld(lx, lz);
-        if (Math.hypot(c.pos[0] - sx, c.pos[2] - sz) < 1.5 && Math.abs(c.pos[1] - FOREST.hill.h) < 2) {
+        if (Math.hypot(c.pos[0] - sx, c.pos[2] - sz) < 1.8 && Math.abs(c.pos[1] - FOREST.hill.h) < 2.5) {
           c.interactHint = '按 F 拿起灯罩';
           if (pressed) {
             c.shade = true;
@@ -3363,9 +3369,10 @@ export function Game({
     }
 
     function updateGrip(i: number, c: CombatantState) {
-      const rain = mapRuntime.rain;
+      // under the temple roof the stone floor is dry, whatever the weather
+      const rain = underTempleRoof(c.pos[0], c.pos[2], c.pos[1]) ? 0 : mapRuntime.rain;
       let g = GRIP[c.classId] ?? 0.85;
-      g *= 1 - rain * 0.36 - mapRuntime.storm * 0.2;
+      g *= 1 - rain * 0.36 - (rain > 0 ? mapRuntime.storm * 0.2 : 0);
       const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
       const onDeck = c.pos[1] > floor + 2;
       if (!onDeck && Math.abs(c.pos[2] - riverZ(c.pos[0])) < FOREST.bankHalf + 2.5) g *= 1 - 0.18 * (0.4 + rain * 0.6); // river mud
@@ -4081,8 +4088,9 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
   const group = useRef<THREE.Group>(null);
   const flame = useRef<THREE.Sprite>(null);
   const light = useRef<THREE.PointLight>(null);
-  const shadeRef = useRef<THREE.Mesh>(null);
+  const shadeRef = useRef<THREE.Group>(null);
   const candleBody = useRef<THREE.Group>(null);
+  const halo = useRef<THREE.Sprite>(null);
   const flameTex = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = 32;
@@ -4126,7 +4134,11 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
     const fl = 0.85 + 0.15 * Math.sin(t * 23 + c.pos[0]) * Math.sin(t * 7.3);
     if (flame.current) {
       flame.current.visible = lit;
-      flame.current.scale.set(0.09 * fl, 0.2 * fl, 1);
+      flame.current.scale.set(0.035 * fl, 0.09 * fl, 1);
+    }
+    if (halo.current) {
+      halo.current.visible = lit;
+      halo.current.scale.set(0.16 * fl, 0.22 * fl, 1);
     }
     if (light.current) light.current.intensity = lit ? 7 * fl : 0;
     if (shadeRef.current) shadeRef.current.visible = !!c.shade;
@@ -4134,23 +4146,53 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
   return (
     <group ref={group} visible={false}>
       <group ref={candleBody}>
-      <mesh position={[0, -0.09, 0]}>
-        <cylinderGeometry args={[0.03, 0.03, 0.18, 8]} />
-        <meshStandardMaterial color="#efe6d2" roughness={0.6} />
-      </mesh>
-      <mesh position={[0, -0.19, 0]}>
-        <cylinderGeometry args={[0.06, 0.05, 0.03, 10]} />
-        <meshStandardMaterial color="#8a6a3a" metalness={0.6} roughness={0.4} />
-      </mesh>
+        {/* bronze holder: a dish with a ring handle */}
+        <mesh position={[0, -0.2, 0]}>
+          <cylinderGeometry args={[0.075, 0.06, 0.025, 16]} />
+          <meshStandardMaterial color="#8a6a3a" metalness={0.8} roughness={0.3} />
+        </mesh>
+        <mesh position={[0.085, -0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.03, 0.007, 6, 12]} />
+          <meshStandardMaterial color="#8a6a3a" metalness={0.8} roughness={0.3} />
+        </mesh>
+        {/* the candle, a little tapered, with a run of wax down one side */}
+        <mesh position={[0, -0.1, 0]}>
+          <cylinderGeometry args={[0.026, 0.03, 0.2, 12]} />
+          <meshStandardMaterial color="#f4ead6" roughness={0.45} emissive="#3a2408" emissiveIntensity={0.3} />
+        </mesh>
+        <mesh position={[0.026, -0.07, 0]} scale={[0.4, 1, 0.5]}>
+          <capsuleGeometry args={[0.012, 0.08, 4, 6]} />
+          <meshStandardMaterial color="#f7efdf" roughness={0.4} />
+        </mesh>
+        <mesh position={[0, 0.006, 0]}>
+          <cylinderGeometry args={[0.003, 0.003, 0.018, 4]} />
+          <meshStandardMaterial color="#1a1208" />
+        </mesh>
       </group>
-      <sprite ref={flame} position={[0, 0.06, 0]}>
-        <spriteMaterial map={flameTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} color={new THREE.Color(2.2, 1.6, 0.9)} />
+      {/* flame: a soft orange halo and a bright core */}
+      <sprite ref={halo} position={[0, 0.045, 0]}>
+        <spriteMaterial map={flameTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} color={new THREE.Color(1.2, 0.55, 0.15)} opacity={0.6} />
       </sprite>
-      {/* paper shade */}
-      <mesh ref={shadeRef} position={[0, 0.02, 0]} visible={false}>
-        <cylinderGeometry args={[0.09, 0.11, 0.26, 12, 1, true]} />
-        <meshStandardMaterial color="#f3e2b8" emissive="#ffb04a" emissiveIntensity={0.9} transparent opacity={0.75} side={THREE.DoubleSide} roughness={0.9} />
-      </mesh>
+      <sprite ref={flame} position={[0, 0.04, 0]}>
+        <spriteMaterial map={flameTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} color={new THREE.Color(2.4, 1.8, 1.1)} />
+      </sprite>
+      {/* paper shade in a bronze frame */}
+      <group ref={shadeRef as any} visible={false}>
+        <mesh position={[0, 0.02, 0]}>
+          <cylinderGeometry args={[0.085, 0.1, 0.24, 14, 1, true]} />
+          <meshStandardMaterial color="#f3e2b8" emissive="#ffb04a" emissiveIntensity={0.9} transparent opacity={0.78} side={THREE.DoubleSide} roughness={0.9} />
+        </mesh>
+        {[0, 1, 2, 3].map((k) => (
+          <mesh key={k} position={[Math.cos((k / 4) * Math.PI * 2) * 0.092, 0.02, Math.sin((k / 4) * Math.PI * 2) * 0.092]}>
+            <cylinderGeometry args={[0.006, 0.006, 0.25, 4]} />
+            <meshStandardMaterial color="#6b5230" metalness={0.7} roughness={0.4} />
+          </mesh>
+        ))}
+        <mesh position={[0, 0.15, 0]}>
+          <torusGeometry args={[0.085, 0.01, 6, 16]} />
+          <meshStandardMaterial color="#6b5230" metalness={0.7} roughness={0.4} />
+        </mesh>
+      </group>
       <pointLight ref={light} color="#ffb867" intensity={0} distance={11} decay={1.6} position={[0, 0.1, 0]} />
     </group>
   );
