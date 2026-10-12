@@ -501,10 +501,15 @@ export function Game({
       const hovering = c.classId === 'Ranger' && c.actionState === 'ultimate' && c.stateTimer > 0.45 && c.stateTimer < 2.45;
       if (hovering) c.vel[1] = 0;
       if (!c.isGrounded && c.actionState !== 'buried' && !hovering) {
+        const y0 = c.pos[1];
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
         const gh = groundHeight(c);
-        if (c.vel[1] <= 0 && c.pos[1] <= gh && (c.pos[1] > gh - 0.6 || map.terrain)) {
+        // land if we crossed the floor this frame (a fast fall on a laggy frame can move > 0.6 m),
+        // or if we somehow ended up under a floor that exists here
+        const crossed = y0 >= gh - 0.6 && c.pos[1] <= gh;
+        const underFloor = gh > -50 && c.pos[1] < gh;
+        if (c.vel[1] <= 0 && c.pos[1] <= gh && (crossed || underFloor || map.terrain)) {
           c.pos[1] = gh;
           const impact = -c.vel[1];
           c.vel[1] = 0;
@@ -2090,7 +2095,7 @@ export function Game({
         const owner = fighters[g.slot];
         const def = fighters[1 - g.slot];
         g.age += step;
-        const tgt = vC.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]);
+        const tgt = new THREE.Vector3(def.pos[0], def.pos[1] + 1.15, def.pos[2]);
         glyphSteer(g.pos, g.vel, tgt, g.age, step);
         if (g.age > 2.4 || def.hp <= 0 || owner.hp <= 0) {
           list.splice(n, 1);
