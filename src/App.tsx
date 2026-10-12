@@ -423,6 +423,15 @@ export default function App() {
   });
 
   // Trigger Blood Rage Edge Flash
+  // the opponent's name tag follows their head every frame by moving the element directly (no React render)
+  const foeTagRef = useRef<HTMLDivElement>(null);
+  const moveFoeTag = useCallback((x: number, y: number) => {
+    const el = foeTagRef.current;
+    if (el) {
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+    }
+  }, []);
   const handleBloodRageFlash = useCallback(() => {
     setBloodRageFlash(true);
     setTimeout(() => setBloodRageFlash(false), 380);
@@ -519,6 +528,8 @@ export default function App() {
     p1Ladder: false,
     p1Grip: 1,
     p1Hint: '',
+    fps: 0,
+    ping: 0,
     p1Candle: 0,
     p1Shade: false,
     night: 0,
@@ -592,6 +603,8 @@ export default function App() {
         p1Swim: !!p1.swimming,
         p1Ladder: !!p1.nearLadder,
         p1Grip: mapIdRef.current === 'forest' ? p1.grip ?? 1 : 1,
+        fps: (globalThis as any).__TQ_PERF?.fps ?? 0,
+        ping: Math.round(netRef.current?.pingMs ?? 0),
         p1Hint: mapIdRef.current === 'forest' ? p1.interactHint ?? '' : '',
         p1Candle: mapIdRef.current === 'forest' ? p1.candle ?? 0 : 0,
         p1Shade: !!p1.shade,
@@ -972,11 +985,12 @@ export default function App() {
               net={online ? net : null}
               onRoundEvent={handleRoundEvent}
               onVfxCountChange={setVfxCount}
-              onDebugUpdate={setDebugData}
+              onDebugUpdate={isDebugOpen ? setDebugData : undefined}
               onAutoDpr={setAutoDpr}
               onDummyScreenPosUpdate={setDummyScreenPos}
               onBloodRageFlash={handleBloodRageFlash}
-              onAnimationDebug={setAnimDebugInfo}
+              onAnimationDebug={isDebugOpen ? setAnimDebugInfo : undefined}
+              onFoeTagMove={moveFoeTag}
               onLoadProgress={setModelProgress}
             />
           </Canvas>
@@ -1007,7 +1021,8 @@ export default function App() {
         {/* Projected Screen Space Healthbar for Dummy */}
         {dummyScreenPos.visible && !isGameMenuOpen && !isHowToPlayOpen && (
           <div
-            className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-full z-20 flex flex-col items-center gap-1 transition-all duration-75"
+            ref={foeTagRef}
+            className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-full z-20 flex flex-col items-center gap-1"
             style={{
               left: `${dummyScreenPos.screenX}px`,
               top: `${dummyScreenPos.screenY}px`,
@@ -1131,7 +1146,10 @@ export default function App() {
           <span className="text-lg font-black text-amber-300 tracking-[0.25em] leading-tight">
             {aiEnabled || online ? `${score.player} : ${score.enemy}` : '自由试炼'}
           </span>
-          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`} · 版本 {__BUILD__}</span>
+          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`} · 版本 {__BUILD__}
+            {hudMirror.fps > 0 && <span className={hudMirror.fps < 45 ? ' text-red-400' : ''}> · {hudMirror.fps} 帧</span>}
+            {online && hudMirror.ping > 0 && <span className={hudMirror.ping > 200 ? ' text-red-400' : ''}> · 延迟 {hudMirror.ping}ms{net?.via === 'relay' ? '（中转）' : ''}</span>}
+          </span>
         </div>
       </div>
 

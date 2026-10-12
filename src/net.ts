@@ -128,7 +128,7 @@ export class NetSession {
   }
   private pinger = 0;
   private changed(status?: NetStatus, err?: string) {
-    if (status === 'connected' && this.role === 'guest' && !this.pinger)
+    if (status === 'connected' && !this.pinger)
       this.pinger = window.setInterval(() => this.status === 'connected' && this.send({ t: 'pi', c: performance.now() }), 1000);
     if (status) this.status = status;
     if (err !== undefined) this.error = err;

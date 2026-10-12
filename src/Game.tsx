@@ -44,6 +44,8 @@ interface GameSceneProps {
   onVfxCountChange?: (count: number) => void;
   /** automatic quality: the device pixel ratio the canvas should render at */
   onAutoDpr?: (dpr: number) => void;
+  /** every frame: where the opponent's name tag goes on screen (moved directly, not through React state) */
+  onFoeTagMove?: (x: number, y: number) => void;
   onDebugUpdate?: (data: {
     playerPos: [number, number, number];
     cameraPos: [number, number, number];
@@ -173,7 +175,7 @@ interface AIMemory {
 const yawTo = (from: number[], to: number[]) => Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
 const fwdOf = (yaw: number) => vD.set(-Math.sin(yaw), 0, -Math.cos(yaw));
 
-export function Game({
+function GameImpl({
   gameState,
   inputRef,
   p1RefState,
@@ -189,6 +191,7 @@ export function Game({
   onVfxCountChange,
   onDebugUpdate,
   onAutoDpr,
+  onFoeTagMove,
   onDummyScreenPosUpdate,
   onBloodRageFlash,
   onAnimationDebug,
@@ -292,6 +295,7 @@ export function Game({
   const glyphRef = useRef<{ idx: number; slot: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
   const lastSnapRef = useRef<unknown>(null);
+  const screenRepRef = useRef({ visible: false, hidden: false, t: 0 });
   /** guest: locally predicted position of our own fighter */
   const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
@@ -806,14 +810,22 @@ export function Game({
     // 青冥古林 at night: you can't see your opponent unless they carry a lit candle or are inside your light
     const enDist = Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]);
     const hiddenInDark = map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? 10 : 4.5);
-    onDummyScreenPosUpdate?.({
-      visible: !hiddenInDark && headProj.z < 1 && Math.abs(headProj.x) < 1.1 && Math.abs(headProj.y) < 1.1,
-      hidden: hiddenInDark,
-      screenX: (headProj.x * 0.5 + 0.5) * size.width,
-      screenY: (-headProj.y * 0.5 + 0.5) * size.height,
-      angle: Math.atan2(vD.x, -vD.z),
-      dist: Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]),
-    });
+    {
+      // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
+      // itself is moved every frame without a re-render
+      const visible = !hiddenInDark && headProj.z < 1 && Math.abs(headProj.x) < 1.1 && Math.abs(headProj.y) < 1.1;
+      const sx = (headProj.x * 0.5 + 0.5) * size.width;
+      const sy = (-headProj.y * 0.5 + 0.5) * size.height;
+      onFoeTagMove?.(sx, sy);
+      const R = screenRepRef.current;
+      const t = performance.now();
+      if (visible !== R.visible || hiddenInDark !== R.hidden || (!visible && t - R.t > 120) || t - R.t > 1000) {
+        R.visible = visible;
+        R.hidden = hiddenInDark;
+        R.t = t;
+        onDummyScreenPosUpdate?.({ visible, hidden: hiddenInDark, screenX: sx, screenY: sy, angle: Math.atan2(vD.x, -vD.z), dist: enDist });
+      }
+    }
     const nowMs = performance.now();
     if (nowMs - lastReportRef.current > 150) {
       lastReportRef.current = nowMs;
@@ -4387,3 +4399,6 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
     </group>
   );
 }
+
+/** the HUD re-renders the app many times a second; the 3D scene only re-renders when its own props change */
+export const Game = React.memo(GameImpl);
