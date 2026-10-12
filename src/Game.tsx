@@ -12,7 +12,7 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, inStream } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -449,6 +449,7 @@ export function Game({
     } else if (aiOn && !round.over && en.hp > 0) {
       runAI(en, p1, enemyIntent, dt);
       if (map.id === 'glacier') routeUpMountain(en, p1, enemyIntent);
+      if (map.id === 'forest') leaveLookout(en, p1, enemyIntent);
     }
     else if (!aiOn) {
       enemyIntent.faceYaw = en.targetRotY;
@@ -504,7 +505,7 @@ export function Game({
           c.stateDuration = 0;
         }
       }
-      const hovering = c.classId === 'Ranger' && c.actionState === 'ultimate' && c.stateTimer > 0.45 && c.stateTimer < 2.45;
+      const hovering = (c.classId === 'Ranger' && c.actionState === 'ultimate' && c.stateTimer > 0.45 && c.stateTimer < 2.45) || c.treeClimb !== undefined;
       if (hovering) c.vel[1] = 0;
       if (!c.isGrounded && c.actionState !== 'buried' && !hovering) {
         const y0 = c.pos[1];
@@ -550,14 +551,15 @@ export function Game({
         c.vel[2] *= k;
       }
       applyBounds(i, c);
-      if (map.terrain && c.isGrounded && c.actionState !== 'buried') {
+      if (map.id === 'forest') updateWater(c);
+      if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
       } else if (!c.isGrounded && map.terrain && c.actionState !== 'buried') {
         const gh2 = groundHeight(c);
         if (c.pos[1] < gh2 - 0.05 && c.vel[1] <= 0) c.pos[1] = gh2; // never fall through a slope
       }
-      if (c.isGrounded && (c.pos[1] > 0.01 || map.terrain) && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - (map.terrain ? 0.6 : 0.05)) {
+      if (c.isGrounded && c.treeClimb === undefined && (c.pos[1] > 0.01 || map.terrain) && c.actionState !== 'buried' && groundHeight(c) < c.pos[1] - (map.terrain ? 0.6 : 0.05)) {
         c.isGrounded = false;
         c.vel[1] = Math.min(c.vel[1], 0);
         if (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'block') c.actionState = 'jump';
@@ -929,6 +931,43 @@ export function Game({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
+      if (c.treeClimb !== undefined) {
+        if (req !== 'jump') return report('出招', '攀爬中，先跳下来'), false;
+        // kick off the trunk, away from it
+        const pl = (map.pillars || [])[c.treeClimb];
+        const ox = c.pos[0] - pl.x;
+        const oz = c.pos[2] - pl.z;
+        const od = Math.hypot(ox, oz) || 1;
+        c.treeClimb = undefined;
+        c.climbing = false;
+        c.isGrounded = false;
+        c.vel = [(ox / od) * 6, 7, (oz / od) * 6];
+        c.actionState = 'jump';
+        c.stateDuration = 0;
+        c.rotY = c.targetRotY = Math.atan2(-ox, -oz) + Math.PI;
+        gameAudio.playJump();
+        return true;
+      }
+      if (c.swimming && req !== 'dodge' && req !== 'jump') return report('出招', '游泳中无法出招'), false;
+      if (c.swimming && req === 'jump') {
+        // scramble out onto a bank or a stepping stone if one is within reach, otherwise just bob
+        const f = fwdOf(intent.move.lengthSq() > 0.01 ? Math.atan2(-intent.move.x, -intent.move.z) : c.rotY);
+        let reach = false;
+        for (let d = 0.6; d <= 2.0 && !reach; d += 0.35) {
+          const x = c.pos[0] + f.x * d;
+          const z = c.pos[2] + f.z * d;
+          if (groundAt(x, z, c.pos[1] + 2.5) > FOREST.swimY + 0.55) reach = true;
+        }
+        if (!reach) return report('跳跃', '水太深，游到岸边再跳'), false;
+        c.isGrounded = false;
+        c.swimming = false;
+        c.vel = [f.x * 4, 8, f.z * 4];
+        c.actionState = 'jump';
+        c.stateDuration = 0;
+        vfx.dustPuff(vB.set(c.pos[0], FOREST.waterY + 0.05, c.pos[2]), 10, 0.5, 2, 0.5, '#dbeafe');
+        gameAudio.playJump();
+        return true;
+      }
       // 受身: dodge out of hitstun / launch / knockdown (long cooldown)
       const stunned = cur === 'hitstun' || cur === 'launched' || cur === 'knockdown' || cur === 'buried';
       if (stunned) {
@@ -1238,6 +1277,7 @@ export function Game({
       const rZ = -Math.sin(c.rotY);
       c.localMove = [intent.move.x * rX + intent.move.z * rZ, intent.move.x * f.x + intent.move.z * f.z];
 
+      if (map.id === 'forest' && treeClimb(c, intent)) return;
       const canMove = !dodging && !charge && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || whirl || rangerThrow);
       if (canMove) {
         if (intent.move.lengthSq() > 0.01) {
@@ -1249,13 +1289,15 @@ export function Game({
           if (c.actionState === 'block') mult = 0.25;
           if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
           if (inZen(c)) mult *= 0.5;
-          if (map.id === 'forest' && c.pos[1] < 0.3 && inStream(c.pos[0], c.pos[2])) mult *= 0.62; // wading
+          if (c.swimming) mult *= 0.55;
+          else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= 0.65; // wading
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
           const accel = c.isGrounded ? 18 : 6;
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], vA.x * spd, accel, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], vA.z * spd, accel, dt);
-          if (!whirl) c.targetRotY = intent.faceYaw;
+          if (c.swimming) c.targetRotY = Math.atan2(-vA.x, -vA.z); // swim the way you're going
+          else if (!whirl) c.targetRotY = intent.faceYaw;
           if (c.isGrounded && c.actionState === 'idle') c.actionState = 'run';
         } else {
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 14, dt);
@@ -1264,7 +1306,100 @@ export function Game({
           if (c.actionState === 'idle' || c.actionState === 'block') c.targetRotY = intent.faceYaw;
         }
       }
-      if (map.terrain) climb(c, intent);
+      if (map.terrain && map.id !== 'forest') climb(c, intent);
+    }
+
+    /**
+     * 青冥古林 lookout trees: push into a trunk for a moment and you start climbing. Forward climbs, back lets go,
+     * left / right circle the trunk, jump kicks off. Climbing costs stamina; at the top you step onto the deck.
+     * Returns true while clinging (normal movement is skipped).
+     */
+    function treeClimb(c: CombatantState, intent: Intent) {
+      const pillars = map.pillars || [];
+      const i = fighters.indexOf(c);
+      const mv = intent.move;
+      if (c.treeClimb === undefined) {
+        const st = c.actionState;
+        if (c.hp <= 0 || c.swimming || !(st === 'idle' || st === 'run' || st === 'jump') || mv.lengthSq() < 0.25 || (c.stamina ?? 0) < 12) {
+          c.climbPush = 0;
+          return false;
+        }
+        let hit = -1;
+        pillars.forEach((pl, k) => {
+          if (!pl.climb || c.pos[1] > (pl.h ?? 0) - 0.6) return;
+          const dx = pl.x - c.pos[0];
+          const dz = pl.z - c.pos[2];
+          const d = Math.hypot(dx, dz);
+          if (d > pl.r + 0.62) return;
+          if ((mv.x * dx + mv.z * dz) / (d * Math.max(0.001, mv.length())) < 0.55) return;
+          // the AI only climbs to chase you up a tree
+          if (aiOn && i === 1 && !(fighters[0].pos[1] > (pl.h ?? 0) - 1 && Math.hypot(fighters[0].pos[0] - pl.x, fighters[0].pos[2] - pl.z) < (pl.deck ?? pl.r) + 0.5)) return;
+          hit = k;
+        });
+        if (hit < 0) {
+          c.climbPush = 0;
+          return false;
+        }
+        c.climbPush = (c.climbPush ?? 0) + dt;
+        if (c.climbPush < 0.22) return false;
+        c.climbPush = 0;
+        c.treeClimb = hit;
+        c.isGrounded = true;
+        c.vel = [0, 0, 0];
+        c.actionState = 'idle';
+        c.stateDuration = 0;
+      }
+      const pl = pillars[c.treeClimb!];
+      const ox = c.pos[0] - pl.x;
+      const oz = c.pos[2] - pl.z;
+      const od = Math.hypot(ox, oz) || 1;
+      const nx = ox / od; // outward from the trunk
+      const nz = oz / od;
+      const ml = mv.length();
+      const toward = ml > 0.1 ? -(mv.x * nx + mv.z * nz) / ml : 0; // +1 = pushing into the tree = up
+      const side = ml > 0.1 ? (mv.x * -nz + mv.z * nx) / ml : 0;
+      const up = toward > 0.3;
+      const vy = up ? 3.0 : toward < -0.3 ? -5 : -0.5;
+      c.stamina = Math.max(0, (c.stamina ?? 0) - dt * (up ? 13 : 5));
+      c.staminaDelay = 0.8;
+      c.climbing = true;
+      c.climbRate = up ? 1 : toward < -0.3 ? -1.4 : 0.15;
+      const R0 = pl.r + 0.47;
+      const ang = Math.atan2(oz, ox) + (Math.abs(side) > 0.3 ? (side * 2.2 * dt) / R0 : 0);
+      c.pos[0] = pl.x + Math.cos(ang) * R0;
+      c.pos[2] = pl.z + Math.sin(ang) * R0;
+      c.pos[1] += vy * dt;
+      c.vel = [0, 0, 0];
+      c.rotY = c.targetRotY = yawTo(c.pos, [pl.x, 0, pl.z]);
+      const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
+      const letGo = () => {
+        c.treeClimb = undefined;
+        c.climbing = false;
+        c.climbRate = 0;
+      };
+      if (c.pos[1] >= (pl.h ?? 0) - 0.05) {
+        // haul up onto the deck
+        letGo();
+        const Rd = pl.r + 0.75;
+        c.pos[0] = pl.x + Math.cos(ang) * Rd;
+        c.pos[2] = pl.z + Math.sin(ang) * Rd;
+        c.pos[1] = pl.h ?? 0;
+        c.isGrounded = true;
+        vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 4, 0.3, 1, 0.4, '#9a8a6a');
+        gameAudio.playLand();
+      } else if (c.pos[1] <= floor + 0.02 && !up) {
+        letGo();
+        c.pos[1] = floor;
+        c.isGrounded = true;
+      } else if ((c.stamina ?? 0) <= 0) {
+        // no grip left: drop
+        letGo();
+        c.isGrounded = false;
+        c.vel = [nx * 2, 0, nz * 2];
+        c.actionState = 'jump';
+        if (i === 0) onRoundEvent?.({ type: 'toast', text: '体力耗尽，抓不住了' });
+      }
+      return c.treeClimb !== undefined;
     }
 
     /**
@@ -1424,6 +1559,12 @@ export function Game({
       }
 
       def.hp = Math.max(0, def.hp - dmg);
+      if (def.treeClimb !== undefined) {
+        // knocked off the trunk
+        def.treeClimb = undefined;
+        def.climbing = false;
+        def.isGrounded = false;
+      }
       att.totalDamageDealt += dmg;
       att.comboCount += 1;
       att.comboDamage += dmg;
@@ -2209,7 +2350,7 @@ export function Game({
             }
             let wall = false;
             for (const pl of pillars) {
-              if (p.pos.y < (pl.h ?? 99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
+              if (p.pos.y < (pl.deck ? 99 : pl.h ?? 99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
                 wall = true;
                 break;
               }
@@ -2435,6 +2576,9 @@ export function Game({
         c.palmsThrown = 0;
         c.silenceTimer = 0;
         c.mantraShots = 0;
+        c.treeClimb = undefined;
+        c.climbing = false;
+        c.swimming = false;
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
@@ -2478,10 +2622,18 @@ export function Game({
     }
 
     function groundHeight(c: CombatantState) {
-      let g = map.terrain ? terrainHeight(map.id, c.pos[0], c.pos[2]) : overGround(c) ? 0 : -99;
+      if (!map.terrain && !overGround(c)) return groundAt(c.pos[0], c.pos[2], c.pos[1], -99);
+      return groundAt(c.pos[0], c.pos[2], c.pos[1]);
+    }
+
+    /** What a fighter at height y would stand on at (x, z): terrain (or the swimming level in deep water) and pillar tops */
+    function groundAt(x: number, z: number, y: number, base?: number) {
+      let g = base ?? (map.terrain ? terrainHeight(map.id, x, z) : 0);
+      if (map.id === 'forest') g = Math.max(g, FOREST.swimY); // deep water: you float
       for (const pl of map.pillars || []) {
-        if (pl.h === undefined) continue;
-        if (c.pos[1] >= pl.h - 0.45 && Math.hypot(c.pos[0] - pl.x, c.pos[2] - pl.z) < pl.r + 0.15) g = Math.max(g, pl.h);
+        if (pl.h === undefined || y < pl.h - 0.45) continue;
+        const d = Math.hypot(x - pl.x, z - pl.z);
+        if (d < (pl.deck ?? pl.r) + 0.15) g = Math.max(g, pl.h);
       }
       return g;
     }
@@ -2539,7 +2691,7 @@ export function Game({
       if (!map.terrain || !c.isGrounded) return;
       const s = c.actionState;
       if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || s === 'dodge' || c.hp <= 0) return;
-      const drop = (x: number, z: number) => terrainHeight(map.id, x, z) < c.pos[1] - 1.5;
+      const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;
       if (!drop(c.pos[0], c.pos[2])) return;
       if (!drop(c.pos[0], pz0)) {
         c.pos[2] = pz0;
@@ -2619,6 +2771,11 @@ export function Game({
       if (launch > 0 && c.dodgeIframeTimer > 0) return;
       c.hp = Math.max(0, c.hp - dmg);
       c.whiteFlashTimer = 0.06;
+      if (c.treeClimb !== undefined) {
+        c.treeClimb = undefined;
+        c.climbing = false;
+        c.isGrounded = false;
+      }
       vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), label ? `${label} ${dmg}` : dmg, false, '#ffb15a');
       if (launch > 0) {
         c.vel[1] = launch;
@@ -2698,7 +2855,7 @@ export function Game({
         if (map.id === 'rooftop' && c.pos[1] < -3.5) courtyardFall(i);
       }
       for (const pl of map.pillars || []) {
-        if (c.pos[1] >= (pl.h ?? 99) - 0.45) continue; // standing on (or above) it
+        if (!pl.deck && c.pos[1] >= (pl.h ?? 99) - 0.45) continue; // standing on (or above) it
         const dx = c.pos[0] - pl.x;
         const dz = c.pos[2] - pl.z;
         const dd = Math.hypot(dx, dz);
@@ -2997,12 +3154,37 @@ export function Game({
       }
     }
 
-    /** 青冥古林: splashes in the stream, and now and then a gust brings dead branches down */
+    /** 青冥古林 water: deep water floats you at the surface (swimming), shallow water just slows you */
+    function updateWater(c: CombatantState) {
+      const was = !!c.swimming;
+      const deep = waterDepth(c.pos[0], c.pos[2]) > FOREST.waterY - FOREST.swimY - 0.05;
+      c.swimming = deep && c.isGrounded && c.treeClimb === undefined && c.pos[1] <= FOREST.swimY + 0.12;
+      if (c.swimming && !was) {
+        const hard = Math.hypot(c.vel[0], c.vel[2]) > 6 || c.actionState === 'launched';
+        vfx.dustPuff(vB.set(c.pos[0], FOREST.waterY + 0.05, c.pos[2]), hard ? 22 : 10, 0.6, hard ? 4 : 2.5, 0.8, '#e0f2fe');
+        vfx.ring(vB, hard ? 2.4 : 1.6, '#e0f2fe', 0.6, 0.1, 0.4);
+        if (hard) gameAudio.playWaveCrash();
+      }
+      if (c.swimming) {
+        c.isBlocking = false;
+        if (c.actionState === 'block') c.actionState = 'idle';
+        // nobody lies flat on a river bed: a knockdown in deep water is just a dunk
+        if (c.actionState === 'knockdown') {
+          c.actionState = 'hitstun';
+          c.stateTimer = 0;
+          c.stateDuration = 0.35;
+        }
+      }
+    }
+
+    /** 青冥古林: splashes in the river, and now and then a gust brings dead branches down */
     function updateForest() {
       for (let i = 0; i < 2; i++) {
         const c = fighters[i];
-        if (c.isGrounded && c.pos[1] < 0.3 && inStream(c.pos[0], c.pos[2]) && Math.hypot(c.vel[0], c.vel[2]) > 1.5 && Math.random() < dt * 9)
-          vfx.dustPuff(vB.set(c.pos[0], 0.08, c.pos[2]), 3, 0.25, 1.4, 0.35, '#dbeafe');
+        const moving = Math.hypot(c.vel[0], c.vel[2]) > 1.2;
+        const wet = c.isGrounded && c.pos[1] < FOREST.waterY && waterDepth(c.pos[0], c.pos[2]) > 0.12;
+        if ((wet || c.swimming) && moving && Math.random() < dt * (c.swimming ? 6 : 9)) vfx.dustPuff(vB.set(c.pos[0], FOREST.waterY + 0.05, c.pos[2]), c.swimming ? 4 : 3, 0.3, 1.4, 0.4, '#e0f2fe');
+        if (c.swimming && Math.random() < dt * 1.5) vfx.ring(vB.set(c.pos[0], FOREST.waterY + 0.03, c.pos[2]), 1.2, '#e0f2fe', 0.9, 0.04, 0.25);
       }
       mapRuntime.gust = Math.max(0, mapRuntime.gust - dt * 0.35);
       const F = forestRef.current;
@@ -3053,7 +3235,7 @@ export function Game({
           const dp = Math.hypot(b.x - p1.pos[0], b.z - p1.pos[2]);
           controller?.addShake(Math.max(0.03, 0.4 - dp * 0.04));
           fighters.forEach((c, i) => {
-            if (Math.hypot(c.pos[0] - b.x, c.pos[2] - b.z) < 2.0 && c.pos[1] < 2.2) envHit(i, 100, 7, '落枝');
+            if (Math.hypot(c.pos[0] - b.x, c.pos[2] - b.z) < 2.0 && c.pos[1] < Math.max(fy(b.x, b.z), FOREST.waterY) + 2.2) envHit(i, 100, 7, '落枝');
           });
         }
         if (b.t > 2.2) list.splice(n, 1);
@@ -3213,6 +3395,19 @@ export function Game({
     // AI: 霍岩影. Thinks a few times per second, reacts to the
     // player's attacks, keeps spacing, combos, uses skills.
     // ------------------------------------------------------
+    /** 青冥古林 AI: up on a lookout deck while the target is down below: walk to the edge and jump off toward them */
+    function leaveLookout(me: CombatantState, foe: CombatantState, out: Intent) {
+      if (me.treeClimb !== undefined || !me.isGrounded || foe.pos[1] > me.pos[1] - 2) return;
+      const pl = (map.pillars || []).find((p) => p.deck && Math.abs(me.pos[1] - (p.h ?? 0)) < 0.3 && Math.hypot(me.pos[0] - p.x, me.pos[2] - p.z) < (p.deck ?? 0) + 0.2);
+      if (!pl) return;
+      // head out away from the trunk on the side facing the target
+      const tx = foe.pos[0] - pl.x;
+      const tz = foe.pos[2] - pl.z;
+      const tl = Math.hypot(tx, tz) || 1;
+      out.move.set(tx / tl, 0, tz / tl);
+      if (Math.hypot(me.pos[0] - pl.x, me.pos[2] - pl.z) > (pl.deck ?? 0) - 0.45) out.request = 'jump';
+    }
+
     /** 雪岭 AI: the face can't be climbed, so when the target is above, walk the road up instead */
     function routeUpMountain(me: CombatantState, foe: CombatantState, out: Intent) {
       if (foe.pos[1] - me.pos[1] < 1.5 || out.move.lengthSq() < 0.01) return;

@@ -4,7 +4,7 @@
  * and a generative guzheng score in D minor pentatonic.
  */
 
-export type AmbienceId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'rooftop' | 'summit' | 'none';
+export type AmbienceId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'rooftop' | 'summit' | 'forest' | 'none';
 
 interface Bus {
   ctx: AudioContext;
@@ -524,6 +524,43 @@ export class WuxiaSound {
         if (Math.random() < 0.18) this.metal(b, b.now, 392 * (Math.random() < 0.5 ? 1 : 1.5), 0.04, 3.5, [1, 2.76, 5.4], 0.8);
         if (Math.random() < 0.25) for (let k = 0; k < 4; k++) this.thump(b, b.now + k * 0.32, 110, 70, 0.35, 0.05, 0.15);
       }, 1600);
+    } else if (id === 'forest') {
+      // a babbling stream, leaves stirring, birds calling from the canopy, now and then a woodpecker
+      loopNoise(this.noise, 'bandpass', 1900, 0.9, 0.05, 0.9, 0.03);
+      loopNoise(this.pinkNoise, 'bandpass', 700, 1.1, 0.08, 1.7, 0.05);
+      loopNoise(this.pinkNoise, 'highpass', 3200, 0.5, 0.03, 0.08, 0.025);
+      const chirp = (t0: number, f0: number, f1: number, dur: number, vol: number) => {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f0, t0);
+        o.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g).connect(this.verbIn);
+        o.start(t0);
+        o.stop(t0 + dur + 0.02);
+      };
+      this.ambTimer = window.setInterval(() => {
+        const b = ambBus();
+        if (Math.random() < 0.55) {
+          // a songbird: a short run of quick rising and falling notes
+          const base = 2600 + Math.random() * 1600;
+          const n = 3 + Math.floor(Math.random() * 5);
+          for (let k = 0; k < n; k++) {
+            const t0 = b.now + Math.random() * 0.2 + k * (0.07 + Math.random() * 0.05);
+            const up = Math.random() < 0.5;
+            chirp(t0, base * (up ? 0.85 : 1.15), base * (up ? 1.2 : 0.8), 0.05 + Math.random() * 0.05, 0.012 + Math.random() * 0.01);
+          }
+        }
+        if (Math.random() < 0.18) {
+          // cuckoo-like two-note call far off
+          chirp(b.now + 0.1, 820, 780, 0.22, 0.01);
+          chirp(b.now + 0.45, 660, 620, 0.3, 0.01);
+        }
+        if (Math.random() < 0.08) for (let k = 0; k < 9; k++) this.burst(b, b.now + k * 0.055, 0.012, 'bandpass', 1800, 0.05);
+      }, 1500);
     } else if (id === 'summit') {
       // thin high wind above the clouds, a crane calling, distant chimes
       loopNoise(this.pinkNoise, 'bandpass', 900, 1.8, 0.14, 0.05, 0.1);
@@ -972,7 +1009,9 @@ interface MusicTheme {
   bpm: number;
   scale: number[];
 }
-const THEMES: Record<'temple' | 'lavacliff' | 'sea' | 'glacier' | 'rooftop' | 'summit', MusicTheme> = {
+const THEMES: Record<'temple' | 'lavacliff' | 'sea' | 'glacier' | 'rooftop' | 'summit' | 'forest', MusicTheme> = {
+  // 商调 on F: green, lilting, a little mysterious
+  forest: { root: 349.23, bpm: 88, scale: [0, 2, 5, 7, 10] },
   // 宫调 on G: bright and festive, a Tang court at the Lantern Festival
   rooftop: { root: 392, bpm: 100, scale: [0, 2, 4, 7, 9] },
   // 徵调 on C: wide and solemn, the gate of heaven

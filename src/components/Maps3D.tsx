@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { Sky, KarstPeaks, CloudSea, CloudPuffs, Banner, seeded, cloudPuffTexture } from './Scenery';
 import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
+import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
 import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
@@ -1456,6 +1457,7 @@ export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'glacier') return <GlacierMap />;
   if (mapId === 'rooftop') return <ChanganMap />;
   if (mapId === 'summit') return <SummitMap />;
+  if (mapId === 'forest') return <ForestMap />;
   return <TempleMap />;
 }
 

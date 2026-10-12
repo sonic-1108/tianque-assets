@@ -6,6 +6,8 @@ import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
 
 export const BERSERKER_MODEL_URL = `${import.meta.env.BASE_URL}berserker.glb`;
+/** swim / climb borrowed by models that were exported without them (same Mixamo skeleton, rotations only) */
+export const EXTRA_ANIMS_URL = `${import.meta.env.BASE_URL}anims_extra.glb`;
 export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   Berserker: BERSERKER_MODEL_URL,
   Ranger: `${import.meta.env.BASE_URL}ranger.glb`,
@@ -91,6 +93,8 @@ const CLIP_PLAN: Record<string, ClipSpec> = {
   knockdown: { match: ['fall', 'death', 'die', 'defeat'], start: 0.36, end: 0.75, fit: true },
   getup: { match: ['fall'], start: 0.4, end: 0.75, speed: -2.2 },
   cheer: { match: ['cheer', 'victory'], start: 0.0, end: 0.45, loop: true },
+  swim: { match: ['swim'], loop: true },
+  climb: { match: ['climb'], loop: true },
 };
 
 /** 暗器 overrides: throws, flips, light footwork */
@@ -146,9 +150,12 @@ function removeRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
     const n = track.name.toLowerCase();
     if (n.endsWith('.position') && (n.includes('hips') || n.includes('root') || n.includes('pelvis'))) {
       const v = track.values;
-      const x0 = v[0], z0 = v[2];
+      const x0 = v[0], y0 = v[1], z0 = v[2];
+      // climbing hauls the hips upward in place of root motion: keep them level, the game moves the body
+      const flatY = clip.name.toLowerCase().startsWith('climb');
       for (let i = 0; i < v.length; i += 3) {
         v[i] = x0;
+        if (flatY) v[i + 1] = y0;
         v[i + 2] = z0;
       }
     }
@@ -371,6 +378,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     progressListeners.add(listener);
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)
+      .then((a) => (a.raw.some((c) => c.name.toLowerCase().startsWith('swim')) ? a : loadGLB(EXTRA_ANIMS_URL).then((e) => ({ ...a, raw: [...a.raw, ...e.raw] })).catch(() => a)))
       .then((a) => {
         if (!alive) return;
         setRawAsset(a);
@@ -564,7 +572,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     let key = 'idle';
     const lm = c.localMove || [0, 0];
     let backward = false;
-    if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
+    if (c.treeClimb !== undefined && actionsRef.current.climb) {
+      key = 'climb';
+    } else if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
       key = 'r_kick';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
@@ -589,7 +599,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       backward = lm[1] < -0.35;
       key = backward ? 'walk' : 'run';
     }
-    if (getupRef.current > 0 && (key === 'idle' || key === 'run' || key === 'walk') && actionsRef.current.getup) key = 'getup';
+    if (c.swimming && (key === 'idle' || key === 'run' || key === 'walk' || key === 'jump') && actionsRef.current.swim) key = 'swim';
+    else if (getupRef.current > 0 && (key === 'idle' || key === 'run' || key === 'walk') && actionsRef.current.getup) key = 'getup';
     else if (c.celebrate && key === 'idle' && actionsRef.current.cheer) key = 'cheer';
     if (!actionsRef.current[key]) key = actionsRef.current.idle ? 'idle' : Object.keys(actionsRef.current)[0];
 
@@ -608,6 +619,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       cur.setEffectiveTimeScale(backward ? -ts : ts);
     }
     if (cur && currentKeyRef.current === 'skill_3') cur.setEffectiveTimeScale(2.0);
+    if (cur && currentKeyRef.current === 'swim') cur.setEffectiveTimeScale(speed > 0.6 ? THREE.MathUtils.clamp(speed / 3.5, 0.7, 1.4) : 0.45);
+    if (cur && currentKeyRef.current === 'climb') cur.setEffectiveTimeScale(c.climbRate ?? 0);
 
     mixer.update(delta);
 

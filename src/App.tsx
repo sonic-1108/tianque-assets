@@ -212,7 +212,7 @@ export default function App() {
     else gameAudio.startMusic();
   }, [isMusicMuted]);
   useEffect(() => {
-    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' ? mapId : 'temple');
+    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' || mapId === 'forest' ? mapId : 'temple');
   }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
@@ -509,6 +509,7 @@ export default function App() {
     p1Poisoned: false,
     p1Rooted: false,
     p1Climb: false,
+    p1Swim: false,
     p1Slide: false,
     dMaxHp: 1600,
     dMp: 100,
@@ -572,6 +573,7 @@ export default function App() {
         p1Poisoned: (p1.poisonTimer || 0) > 0,
         p1Rooted: (p1.rootTimer || 0) > 0,
         p1Climb: !!p1.climbing,
+        p1Swim: !!p1.swimming,
         p1Slide: !!p1.sliding,
         dMaxHp: dummy.maxHp,
         dMp: dummy.mp,
@@ -837,8 +839,14 @@ export default function App() {
                       m.available ? 'hover:scale-[1.02] hover:border-amber-400 cursor-pointer' : 'opacity-50 cursor-not-allowed'
                     } ${selected ? 'border-amber-400 ring-2 ring-amber-400/60' : 'border-zinc-700'}`}
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-xl font-black text-white">{m.icon} {m.name}</span>
+                      <span
+                        className={`ml-auto text-[10px] font-black px-2 py-0.5 rounded-full ${m.sizeClass === '50Q' ? 'bg-emerald-400 text-black' : 'bg-white/15 text-zinc-200'}`}
+                        title={m.sizeClass === '50Q' ? '大地图：面积约为 10Q 地图的五倍' : '小地图：竞技场'}
+                      >
+                        {m.sizeClass ?? '10Q'}
+                      </span>
                       {!m.available && <span className="text-[10px] bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-full">敬请期待</span>}
                       {selected && m.available && <span className="text-[10px] bg-amber-500 text-black font-bold px-2 py-0.5 rounded-full">当前</span>}
                     </div>
@@ -1011,6 +1019,7 @@ export default function App() {
           if (hudMirror.p1Rooted) meChips.push({ text: '定身', tone: 'teal', pulse: true });
           if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
           else if (hudMirror.p1Climb) meChips.push({ text: '攀爬中', tone: 'amber' });
+          if (hudMirror.p1Swim) meChips.push({ text: '游泳中 不能出招', tone: 'sky' });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',

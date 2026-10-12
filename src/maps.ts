@@ -8,6 +8,10 @@ export interface Circle {
   r: number;
   /** top height a fighter can stand on (undefined = too tall, solid) */
   h?: number;
+  /** a platform round a trunk: you stand on the ring between r and deck at height h, the trunk stays solid */
+  deck?: number;
+  /** can be climbed (青冥古林 lookout trees) */
+  climb?: boolean;
 }
 
 export interface MapDef {
@@ -40,6 +44,8 @@ export interface MapDef {
   terrain?: boolean;
   /** rectangular play area (half extents) instead of a circle */
   rect?: { hx: number; hz: number };
+  /** map size class: 10Q arenas, 50Q open battlefields */
+  sizeClass?: '10Q' | '50Q';
 }
 
 /** Distant volcano for 熔岩断崖 (crater position) */
@@ -55,48 +61,138 @@ const ring = (n: number, radius: number, r: number, offset = 0): Circle[] =>
   });
 
 // ----------------------------------------------------------------------
-// 青冥古林: a clearing among thousand-year-old trees, a stream across the middle.
+// 青冥古林 (50Q): a big clearing among thousand-year-old trees with a river
+// across the middle. Deep water is swum, the ford is waded, the bridge is
+// walked; some of the giants carry hunters' lookouts you can climb up to.
 // ----------------------------------------------------------------------
+function frand(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+/** the river's centre line: z as a function of x */
+export function riverZ(x: number) {
+  return 2 + 6 * Math.sin(x * 0.045 + 0.4) + 2 * Math.sin(x * 0.11 + 1.3);
+}
 export const FOREST = {
-  /** giant trees inside the arena: x, z, trunk radius */
-  trees: [
-    [-12, -2, 2.0],
-    [11.5, 4, 2.2],
-    [-6.5, -15, 1.7],
-    [7.5, -12.5, 1.8],
-    [-15, 12, 1.9],
-    [16.5, -9.5, 1.7],
-    [4, 19.5, 1.6],
-    [-20.5, -11, 1.8],
-    [19.5, 14, 1.9],
-  ] as [number, number, number][],
-  /** fallen logs you can jump onto: from, to */
-  logs: [
-    [-9.5, 7, -3.8, 9.8],
-    [5.5, -3.2, 11.5, -6.6],
-  ] as [number, number, number, number][],
+  radius: 58,
+  waterY: -0.55, // river surface
+  swimY: -1.5, // a swimmer's feet: body level with the surface
+  deepHalf: 4.2, // half width of the deep channel
+  bankHalf: 8.0, // where the banks meet the forest floor
+  bedY: -3.0,
+  ford: [-34, -24] as [number, number], // x range where the river runs shallow (waist-deep wading)
+  bridge: { x: 21, half: 1.6, deck: 0.7 }, // footbridge across the river at x = 21 (+-half), deck height at the middle
+  /** giant trees: x, z, trunk radius, lookout deck height (0 = no deck) */
+  trees: [] as [number, number, number, number][],
+  logs: [] as [number, number, number, number][],
   logR: 0.72,
   logH: 1.15,
-  streamHalf: 1.45,
-  /** stepping stones on the stream's centre line (x) */
-  stones: [-15, -7.5, 0.5, 8, 15.5],
+  /** stepping stones across the ford (x, z) */
+  stones: [] as [number, number][],
+  deckR: 1.25, // how far the lookout platform reaches beyond the trunk
 };
-/** the stream's centre line: z as a function of x */
-export function streamZ(x: number) {
-  return 1.2 + 3.2 * Math.sin(x * 0.13 + 0.6) + 1.1 * Math.sin(x * 0.31 + 2.0);
+(() => {
+  const rand = frand(1234);
+  const ok = (x: number, z: number, pad: number) => {
+    if (Math.hypot(x, z) > FOREST.radius - 4) return false;
+    if (Math.abs(z - riverZ(x)) < FOREST.bankHalf + pad) return false;
+    if (Math.hypot(x, z - 30) < 7 || Math.hypot(x, z + 28) < 7) return false; // spawns
+    if (Math.abs(x - FOREST.bridge.x) < 6 && Math.abs(z - riverZ(x)) < 14) return false; // bridge approaches
+    return true;
+  };
+  // hand-placed lookout trees first (both sides of the river, near the action), then fill
+  const lookouts: [number, number][] = [
+    [-14, 18],
+    [16, 22],
+    [-6, -17],
+    [24, -16],
+    [-32, -12],
+    [36, 12],
+    [-40, 22],
+  ];
+  for (const [x, z] of lookouts) FOREST.trees.push([x, z, 1.9 + rand() * 0.4, 7.5 + rand() * 2]);
+  for (let k = 0; k < 600 && FOREST.trees.length < 22; k++) {
+    const a = rand() * Math.PI * 2;
+    const d = 10 + Math.sqrt(rand()) * 44;
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    if (!ok(x, z, 1)) continue;
+    if (FOREST.trees.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 10)) continue;
+    FOREST.trees.push([x, z, 1.5 + rand() * 0.6, 0]);
+  }
+  for (let k = 0; k < 600 && FOREST.logs.length < 6; k++) {
+    const a = rand() * Math.PI * 2;
+    const d = 8 + Math.sqrt(rand()) * 42;
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    const ang = rand() * Math.PI;
+    const L = 5 + rand() * 3;
+    const x1 = x + Math.cos(ang) * L;
+    const z1 = z + Math.sin(ang) * L;
+    if (!ok(x, z, 0.5) || !ok(x1, z1, 0.5)) continue;
+    const near = (px: number, pz: number) => FOREST.trees.some(([tx, tz, r]) => Math.hypot(tx - px, tz - pz) < r + 3) || FOREST.logs.some(([a0, b0, a1, b1]) => Math.hypot((a0 + a1) / 2 - px, (b0 + b1) / 2 - pz) < 8);
+    if (near(x, z) || near(x1, z1) || near((x + x1) / 2, (z + z1) / 2)) continue;
+    FOREST.logs.push([x, z, x1, z1]);
+  }
+  // stepping stones zig-zag across the ford
+  const [f0, f1] = FOREST.ford;
+  const fx = (f0 + f1) / 2;
+  for (let k = -3; k <= 3; k++) FOREST.stones.push([fx + (k % 2 ? 1.1 : -1.1), riverZ(fx) + k * 2.1]);
+})();
+
+const sstepF = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+/** How deep the channel is cut here (0 = full depth, 1 = shallow ford) */
+function fordAmount(x: number) {
+  const [f0, f1] = FOREST.ford;
+  return sstepF(f0 - 6, f0, x) * (1 - sstepF(f1, f1 + 6, x));
 }
-/** 1 inside the stream, 0 on dry ground */
-export function inStream(x: number, z: number) {
-  return Math.abs(z - streamZ(x)) < FOREST.streamHalf ? 1 : 0;
+/** River bed / forest floor height (without the bridge) */
+export function forestFloor(x: number, z: number) {
+  const d = Math.abs(z - riverZ(x));
+  // gentle swells on the forest floor, flattened toward the river
+  let h = (Math.sin(x * 0.09 + 1.1) * Math.cos(z * 0.08 - 0.7) * 0.5 + Math.sin(x * 0.21 - z * 0.17) * 0.18) * sstepF(FOREST.bankHalf, FOREST.bankHalf + 6, d);
+  // the channel: steepest at mid-bank, a flat bed in the middle
+  const bed = FOREST.bedY + (FOREST.waterY - 0.35 - FOREST.bedY) * fordAmount(x);
+  const k = sstepF(FOREST.deepHalf - 1.2, FOREST.bankHalf, d);
+  h = bed + (h - bed) * k;
+  // the forest floor rises into the trees beyond the arena
+  const r = Math.hypot(x, z);
+  h += sstepF(FOREST.radius, FOREST.radius + 14, r) * 4;
+  return h;
+}
+/** Is (x, z) on the footbridge deck? Returns the deck height, or null */
+export function bridgeDeck(x: number, z: number) {
+  const B = FOREST.bridge;
+  if (Math.abs(x - B.x) > B.half) return null;
+  const d = z - riverZ(B.x);
+  const span = FOREST.bankHalf + 1.5;
+  if (Math.abs(d) > span) return null;
+  // a shallow arch from bank to bank
+  return Math.max(forestFloor(x, z), B.deck * Math.cos(((d / span) * Math.PI) / 2) + 0.05);
+}
+export function forestHeight(x: number, z: number) {
+  const b = bridgeDeck(x, z);
+  return b ?? forestFloor(x, z);
+}
+/** water depth at (x, z): 0 on dry land */
+export function waterDepth(x: number, z: number) {
+  if (bridgeDeck(x, z) !== null) return 0;
+  return Math.max(0, FOREST.waterY - forestFloor(x, z));
 }
 function forestPillars(): Circle[] {
-  const out: Circle[] = FOREST.trees.map(([x, z, r]) => ({ x, z, r }));
+  const out: Circle[] = FOREST.trees.map(([x, z, r, deck]) => (deck > 0 ? { x, z, r, h: deck, deck: r + FOREST.deckR, climb: true } : { x, z, r }));
   for (const [x0, z0, x1, z1] of FOREST.logs) {
     const L = Math.hypot(x1 - x0, z1 - z0);
     const n = Math.max(2, Math.round(L / 1.0));
-    for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH });
+    for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH + forestFloor(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n) });
   }
-  for (const x of FOREST.stones) out.push({ x, z: streamZ(x), r: 0.62, h: 0.42 });
+  for (const [x, z] of FOREST.stones) out.push({ x, z, r: 0.62, h: FOREST.waterY + 0.2 });
   return out;
 }
 
@@ -301,23 +397,26 @@ export const MAPS = {
 MAPS.forest = {
   id: 'forest',
   name: '青冥古林',
-  subtitle: '千年古树遮天蔽日，阳光从树冠缝里漏下来，一条山溪横穿林间空地',
+  subtitle: '千年古树遮天蔽日，一条大河横穿林间。第一张 50Q 大地图',
   icon: '🌲',
+  sizeClass: '50Q',
   mechanics: [
-    '九棵合抱古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕',
-    '山溪横穿中间，蹚水时移动变慢；溪里有五块踏脚石，站上去不减速',
-    '两根倒木可以跳上去，居高临下',
-    '山风一起，树上的枯枝会砸下来，落点先出现红圈，快躲开',
+    '50Q 大地图：面积是普通地图的五倍多，开局两人隔河相望',
+    '大河横穿中间：深水区要游泳（游得慢、不能出招，只能翻滚潜游），西边有浅滩可以蹚过去，东边有一座木桥',
+    '七棵古树上搭着猎人瞭望台：贴着树干往前推就会往上爬（耗体力），爬到顶站在台上居高临下，跳一下就下来',
+    '古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕；倒木可以跳上去',
+    '山风一起，枯枝会砸下来，落点先出现红圈',
   ],
   homeClass: 'Ranger',
   homeClassName: '暗器',
   homeBonus: '伤害 +10%',
   available: true,
-  radius: 25,
-  spawnPlayer: [0, 13],
-  spawnEnemy: [0, -13],
-  background: '#9db08a',
-  fog: [16, 120],
+  terrain: true,
+  radius: FOREST.radius,
+  spawnPlayer: [0, 30],
+  spawnEnemy: [0, -28],
+  background: '#9fae8c',
+  fog: [30, 170],
   hemi: ['#d9e8c0', '#2c3a22', 0.75],
   keyColor: '#ffe2a8',
   keyIntensity: 2.6,
@@ -327,8 +426,7 @@ MAPS.forest = {
   pillars: forestPillars(),
 };
 
-// 青冥古林 joins the list once its scenery is finished
-export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'rooftop', 'summit'];
+export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'forest', 'rooftop', 'summit'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {
@@ -556,12 +654,17 @@ export function roofHeight(x: number, z: number) {
 /** Floor height for maps with a height field (0 for flat maps) */
 export function terrainHeight(id: MapId, x: number, z: number) {
   if (id === 'glacier') return glacierHeight(x, z);
+  if (id === 'forest') return forestHeight(x, z);
   if (id === 'rooftop') return roofHeight(x, z);
   return 0;
 }
 /** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */
 export function terrainGradient(id: MapId, x: number, z: number): [number, number] {
   if (id === 'glacier') return glacierGradient(x, z);
+  if (id === 'forest') {
+    const e = 0.25;
+    return [(forestHeight(x + e, z) - forestHeight(x - e, z)) / (2 * e), (forestHeight(x, z + e) - forestHeight(x, z - e)) / (2 * e)];
+  }
   if (id !== 'rooftop') return [0, 0];
   const e = 0.25;
   const h0 = roofHeight(x, z);
