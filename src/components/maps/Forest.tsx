@@ -1,4 +1,5 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { loadBuddha, makeBuddhaMaterial } from './buddhaMesh';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
@@ -1649,9 +1650,14 @@ function hipRoof(w: number, d: number, rise: number, ridge: number, sweep: numbe
   return g;
 }
 
+const buddhaMat = makeBuddhaMaterial();
+
 /** one seated Buddha: lotus throne, crossed legs, robed body, head with ushnisha, a halo and a flame-shaped mandorla */
 function Buddha({ mats, scale = 1 }: { mats: Record<string, any>; scale?: number }) {
-  const petals = useMemo(() => Array.from({ length: 16 }, (_, k) => (k / 16) * Math.PI * 2), []);
+  const [geo, setGeo] = useState<THREE.BufferGeometry | null>(null);
+  useEffect(() => {
+    loadBuddha().then(setGeo).catch((e) => console.warn(e));
+  }, []);
   const mandorla = useMemo(() => {
     const sh = new THREE.Shape();
     sh.moveTo(0, 0);
@@ -1670,43 +1676,10 @@ function Buddha({ mats, scale = 1 }: { mats: Record<string, any>; scale?: number
       <mesh position={[0, 0.66, 0]} material={mats.gold}>
         <cylinderGeometry args={[1.15, 1.2, 0.12, 24]} />
       </mesh>
-      {petals.map((a, k) => (
-        <mesh key={k} position={[Math.cos(a) * 1.0, 0.85, Math.sin(a) * 1.0]} rotation={[0, -a, 0.55]} scale={[0.22, 0.32, 0.14]} material={mats.gold}>
-          <sphereGeometry args={[1, 10, 8]} />
-        </mesh>
-      ))}
-      {/* crossed legs, torso, arms, hands in the lap */}
-      <mesh position={[0, 1.15, 0.05]} scale={[1.05, 0.38, 0.75]} material={mats.gold} castShadow>
-        <sphereGeometry args={[1, 20, 14]} />
-      </mesh>
-      <mesh position={[0, 1.95, -0.05]} scale={[0.66, 0.85, 0.5]} material={mats.gold} castShadow>
-        <sphereGeometry args={[1, 20, 16]} />
-      </mesh>
-      {[-1, 1].map((sx) => (
-        <mesh key={sx} position={[sx * 0.62, 1.75, 0.05]} rotation={[0.3, 0, sx * 0.25]} scale={[0.2, 0.6, 0.22]} material={mats.gold}>
-          <sphereGeometry args={[1, 12, 10]} />
-        </mesh>
-      ))}
-      <mesh position={[0, 1.42, 0.45]} scale={[0.36, 0.12, 0.2]} material={mats.gold}>
-        <sphereGeometry args={[1, 12, 8]} />
-      </mesh>
-      {/* head: face, long ears, the ushnisha */}
-      <mesh position={[0, 2.95, 0]} scale={[0.36, 0.42, 0.36]} material={mats.gold} castShadow>
-        <sphereGeometry args={[1, 20, 16]} />
-      </mesh>
-      {[-1, 1].map((sx) => (
-        <mesh key={'e' + sx} position={[sx * 0.36, 2.88, -0.02]} scale={[0.06, 0.2, 0.09]} material={mats.gold}>
-          <sphereGeometry args={[1, 8, 8]} />
-        </mesh>
-      ))}
-      <mesh position={[0, 3.37, -0.02]} scale={[0.22, 0.2, 0.22]} material={mats.gold}>
-        <sphereGeometry args={[1, 14, 10]} />
-      </mesh>
-      <mesh position={[0, 3.05, 0.34]} material={mats.ruby}>
-        <sphereGeometry args={[0.035, 8, 6]} />
-      </mesh>
+      {/* the sculpted figure on its lotus (public/buddha.bin, tools/gen-buddha.mjs) */}
+      {geo && <mesh geometry={geo} material={buddhaMat} position={[0, 1.46, 0]} castShadow receiveShadow />}
       {/* halo and mandorla */}
-      <mesh position={[0, 3.0, -0.45]} material={mats.gold}>
+      <mesh position={[0, 3.48, -0.56]} material={mats.gold}>
         <torusGeometry args={[0.62, 0.05, 8, 40]} />
       </mesh>
       <mesh position={[0, 0.85, -0.6]} geometry={mandorla} material={mats.mandorla} />
