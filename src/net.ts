@@ -27,6 +27,28 @@ export type NetMessage =
   | { t: 'bye' };
 
 const ID_PREFIX = 'tianque-1v1-';
+
+/**
+ * How the two browsers find a path to each other. STUN tells each side its public address (enough for most home
+ * networks); TURN relays the traffic when a direct path is impossible (campus / office networks, strict NATs,
+ * across the Great Firewall). More than one of each, so one server being down or blocked doesn't sink the match.
+ */
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.miwifi.com:3478' },
+    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+    {
+      urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+  ],
+  iceCandidatePoolSize: 4,
+};
+/** give up on a join that never opens, with an explanation instead of spinning forever */
+const JOIN_TIMEOUT_MS = 25000;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 export function makeRoomCode() {
@@ -73,7 +95,8 @@ export class NetSession {
 
   start() {
     this.changed('opening');
-    const peer = this.role === 'host' ? new Peer(ID_PREFIX + this.code, { debug: 1 }) : new Peer({ debug: 1 });
+    const opts = { debug: 1, config: ICE_CONFIG };
+    const peer = this.role === 'host' ? new Peer(ID_PREFIX + this.code, opts) : new Peer(opts);
     this.peer = peer;
     peer.on('open', () => {
       if (this.role === 'host') {
@@ -82,6 +105,19 @@ export class NetSession {
         this.changed('connecting');
         const c = peer.connect(ID_PREFIX + this.code, { reliable: true, serialization: 'json' });
         this.attach(c);
+        this.joinTimer = window.setTimeout(() => {
+          if (this.status === 'connecting') {
+            this.changed(
+              'error',
+              '连不上房主：找到了房间，但两台电脑之间打不通。常见于校园网、公司网或跨国连接。可以都刷新后重开房间再试，或者换个网络（比如手机热点）试试。'
+            );
+            try {
+              c.close();
+            } catch {
+              /* ignore */
+            }
+          }
+        }, JOIN_TIMEOUT_MS);
       }
     });
     peer.on('connection', (c) => {
@@ -111,9 +147,30 @@ export class NetSession {
     });
   }
 
+  joinTimer = 0;
+  /** what the browser's connection is doing right now (shown while joining) */
+  iceState = '';
+
   private attach(c: DataConnection) {
     this.conn = c;
-    c.on('open', () => this.changed('connected', ''));
+    c.on('open', () => {
+      window.clearTimeout(this.joinTimer);
+      this.changed('connected', '');
+    });
+    // surface the WebRTC handshake so a stuck join says where it is stuck
+    const watch = () => {
+      const pc: RTCPeerConnection | undefined = (c as any).peerConnection;
+      if (!pc) return void window.setTimeout(watch, 200);
+      const upd = () => {
+        this.iceState = pc.iceConnectionState;
+        if (pc.iceConnectionState === 'failed' && this.status !== 'connected') {
+          this.changed('error', '连接被网络拦住了（直连和中继都没打通）。换个网络，比如手机热点，再试一次。');
+        } else this.changed();
+      };
+      pc.addEventListener('iceconnectionstatechange', upd);
+      upd();
+    };
+    watch();
     c.on('data', (d: any) => this.receive(d as NetMessage));
     c.on('close', () => this.changed('closed', '对方已断开连接'));
     c.on('error', () => this.changed('error', '连接中断'));
@@ -153,6 +210,7 @@ export class NetSession {
   close() {
     try {
       this.send({ t: 'bye' });
+      window.clearTimeout(this.joinTimer);
       this.conn?.close();
       this.peer?.destroy();
     } catch {

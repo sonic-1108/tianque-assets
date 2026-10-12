@@ -757,7 +757,14 @@ export default function App() {
                   )}
                   {net.status === 'opening' && <div>正在连接联机服务器…</div>}
                   {net.status === 'waiting' && <div>把房间号发给朋友，让他打开同一个网址，在这里输入房间号加入。等待对手…</div>}
-                  {net.status === 'connecting' && <div>正在加入房间 {net.code}…</div>}
+                  {net.status === 'connecting' && (
+                    <div>
+                      正在加入房间 {net.code}…
+                      <span className="ml-2 text-[11px] text-zinc-400">
+                        {net.iceState === 'checking' ? '正在打通两台电脑之间的连接' : net.iceState === 'new' || !net.iceState ? '正在联系房主' : net.iceState === 'disconnected' ? '连接不稳定，重试中' : ''}
+                      </span>
+                    </div>
+                  )}
                   {net.status === 'connected' && net.role === 'host' && (
                     <div className="text-emerald-300 font-bold">
                       对手已加入 ✓ 对手职业：{CLASS_CONFIGS[net.remoteClass || enemyClass].name}。选好你的职业，点一张地图开打。
