@@ -1,1 +1,29 @@
 @tailwind base;@tailwind components;@tailwind utilities;
+
+/* F interaction marker floating over usable things in 青冥古林 */
+.tq-fkey { display: flex; flex-direction: column; align-items: center; gap: 4px; transform: translateY(-50%); user-select: none; }
+.tq-fkey-cap {
+  position: relative; width: 30px; height: 30px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font: 800 16px/1 ui-sans-serif, system-ui, sans-serif; color: #1c1206;
+  background: linear-gradient(#fde68a, #f5b82e); border: 1px solid #fff4c2;
+  box-shadow: 0 3px 0 #9a6410, 0 6px 14px rgba(0, 0, 0, 0.45);
+}
+.tq-fkey-cap::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 11px; border: 2px solid rgba(253, 230, 138, 0.7);
+  animation: tq-fkey-pulse 1.4s ease-out infinite;
+}
+.tq-fkey-label {
+  font: 600 12px/1 "Noto Sans SC", "PingFang SC", system-ui, sans-serif; color: #fef3c7; letter-spacing: 0.08em;
+  padding: 3px 7px; border-radius: 999px; background: rgba(15, 10, 4, 0.62); white-space: nowrap;
+}
+@keyframes tq-fkey-pulse { from { transform: scale(0.9); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }
+.tq-hint {
+  display: flex; align-items: center; gap: 10px; padding: 7px 18px 7px 8px;
+  background: linear-gradient(90deg, rgba(12, 9, 5, 0) 0%, rgba(12, 9, 5, 0.78) 14%, rgba(12, 9, 5, 0.78) 86%, rgba(12, 9, 5, 0) 100%);
+  border-top: 1px solid rgba(232, 196, 104, 0.45); border-bottom: 1px solid rgba(232, 196, 104, 0.45);
+  font: 600 15px/1 "Noto Serif SC", "Songti SC", serif; color: #fdf2d0; letter-spacing: 0.12em;
+  animation: tq-hint-in 0.18s ease-out;
+}
+.tq-hint em { font-style: normal; font-size: 11px; color: #e8c468; border: 1px solid rgba(232, 196, 104, 0.6); border-radius: 4px; padding: 2px 5px; letter-spacing: 0.05em; }
+@keyframes tq-hint-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }

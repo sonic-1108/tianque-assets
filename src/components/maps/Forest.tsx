@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { loadBuddha, makeBuddhaMaterial } from './buddhaMesh';
 import { useThree } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple } from '../../maps';
+import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -1677,7 +1678,7 @@ function Buddha({ mats, scale = 1 }: { mats: Record<string, any>; scale?: number
         <cylinderGeometry args={[1.15, 1.2, 0.12, 24]} />
       </mesh>
       {/* the sculpted figure on its lotus (public/buddha.bin, tools/gen-buddha.mjs) */}
-      {geo && <mesh geometry={geo} material={buddhaMat} position={[0, 1.46, 0]} castShadow receiveShadow />}
+      {geo && <mesh geometry={geo} material={buddhaMat} position={[0, 1.46, 0]} />}
       {/* halo and mandorla */}
       <mesh position={[0, 3.48, -0.56]} material={mats.gold}>
         <torusGeometry args={[0.62, 0.05, 8, 40]} />
@@ -1874,6 +1875,86 @@ function Temple() {
       ruby: new THREE.MeshStandardMaterial({ color: '#c81e1e', roughness: 0.2, emissive: '#600' }),
       bronze: new THREE.MeshStandardMaterial({ color: '#5b4a2c', metalness: 0.7, roughness: 0.45 }),
       cloth: new THREE.MeshStandardMaterial({ color: '#a8221e', roughness: 0.8, side: THREE.DoubleSide }),
+      altarCloth: new THREE.MeshStandardMaterial({
+        roughness: 0.75,
+        side: THREE.DoubleSide,
+        map: canvasTex(512, 192, (g) => {
+          g.fillStyle = '#8f1a14';
+          g.fillRect(0, 0, 512, 192);
+          g.strokeStyle = '#e2b955';
+          g.lineWidth = 6;
+          g.strokeRect(10, 10, 492, 172);
+          g.lineWidth = 2;
+          g.strokeRect(20, 20, 472, 152);
+          // cloud scrolls along the border band
+          g.strokeStyle = '#c99a3a';
+          g.lineWidth = 2.5;
+          for (let x = 40; x < 480; x += 44) {
+            g.beginPath();
+            g.arc(x, 36, 8, Math.PI, Math.PI * 2.6);
+            g.stroke();
+            g.beginPath();
+            g.arc(x + 22, 156, 8, 0, Math.PI * 1.6);
+            g.stroke();
+          }
+          // a gold medallion with 佛 at the centre
+          g.fillStyle = '#e2b955';
+          g.beginPath();
+          g.arc(256, 96, 48, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = '#8f1a14';
+          g.beginPath();
+          g.arc(256, 96, 41, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = '#f2cf6a';
+          g.font = 'bold 56px "Noto Serif SC","Songti SC","STSong","SimSun",serif';
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText('佛', 256, 99);
+          // lotus sprigs either side
+          for (const sx of [-1, 1]) {
+            g.save();
+            g.translate(256 + sx * 140, 100);
+            g.fillStyle = '#d8ab48';
+            for (let k = -2; k <= 2; k++) {
+              g.save();
+              g.rotate(k * 0.42);
+              g.beginPath();
+              g.ellipse(0, -22, 9, 24, 0, 0, Math.PI * 2);
+              g.fill();
+              g.restore();
+            }
+            g.restore();
+          }
+        }),
+      }),
+      carpet: new THREE.MeshStandardMaterial({
+        roughness: 0.95,
+        map: canvasTex(128, 512, (g) => {
+          g.fillStyle = '#6e1612';
+          g.fillRect(0, 0, 128, 512);
+          g.fillStyle = '#c9a14a';
+          g.fillRect(6, 0, 6, 512);
+          g.fillRect(116, 0, 6, 512);
+          g.fillStyle = '#1f3b4d';
+          g.fillRect(16, 0, 4, 512);
+          g.fillRect(108, 0, 4, 512);
+          g.strokeStyle = '#b8893a';
+          g.lineWidth = 2;
+          for (let y = 32; y < 512; y += 64) {
+            g.beginPath();
+            g.moveTo(64, y - 20);
+            g.lineTo(84, y);
+            g.lineTo(64, y + 20);
+            g.lineTo(44, y);
+            g.closePath();
+            g.stroke();
+            g.beginPath();
+            g.arc(64, y, 5, 0, Math.PI * 2);
+            g.stroke();
+          }
+        }),
+      }),
       cushion: new THREE.MeshStandardMaterial({ color: '#c08a2a', roughness: 0.9 }),
       fruit: new THREE.MeshStandardMaterial({ color: '#e07a1f', roughness: 0.5 }),
       wax: new THREE.MeshStandardMaterial({ color: '#f2e8d4', roughness: 0.55 }),
@@ -2077,8 +2158,15 @@ function Temple() {
         <mesh position={[0, 1.12, 0]} material={mats.gold}>
           <boxGeometry args={[2.7, 0.05, 1.2]} />
         </mesh>
-        <mesh position={[0, 0.66, 0.56]} material={mats.cloth}>
-          <planeGeometry args={[2.3, 0.85]} />
+        <mesh position={[0, 0.66, 0.56]} material={mats.altarCloth}>
+          <planeGeometry args={[2.3, 0.86]} />
+        </mesh>
+        {/* gold-banded plinth and a carved apron under the top */}
+        <mesh position={[0, 0.06, 0]} material={mats.gold}>
+          <boxGeometry args={[2.72, 0.12, 1.22]} />
+        </mesh>
+        <mesh position={[0, 1.04, 0.57]} material={mats.gold}>
+          <boxGeometry args={[2.62, 0.08, 0.04]} />
         </mesh>
         {[-0.35, 0.35].map((x) => (
           <group key={'fr' + x} position={[x, 1.15, 0.1]}>
@@ -2115,6 +2203,10 @@ function Temple() {
           <pointLight ref={(el) => (lights.current[1 + i] = el)} position={[0, 1.6, 0.4]} color="#ffb05a" intensity={2.5} distance={9} decay={1.6} />
         </group>
       ))}
+      {/* a carpet runner from the doors to the altar */}
+      <mesh position={[0, P + 0.012, 1.6]} rotation={[-Math.PI / 2, 0, 0]} material={mats.carpet} receiveShadow>
+        <planeGeometry args={[1.5, 6.4]} />
+      </mesh>
       {/* prayer cushions */}
       {[-2.4, -0.8, 0.8, 2.4].map((x) => (
         <mesh key={'cu' + x} position={[x, P + 0.1, 0.6]} scale={[1, 0.35, 1]} material={mats.cushion}>
@@ -2203,43 +2295,19 @@ function Temple() {
 }
 
 /** Floating F key caps over everything F works on, shown only while the local player is close */
+/** one small key-cap marker over the nearest thing you can use with F (crisp DOM, not a texture) */
 function FMarkers() {
   const items = useMemo(() => {
-    const keyTex = (label: string) =>
-      canvasTex(256, 160, (g) => {
-        g.clearRect(0, 0, 256, 160);
-        g.fillStyle = 'rgba(0,0,0,0.55)';
-        g.beginPath();
-        g.roundRect(8, 96, 240, 56, 14);
-        g.fill();
-        g.fillStyle = '#fbbf24';
-        g.beginPath();
-        g.roundRect(88, 4, 80, 80, 14);
-        g.fill();
-        g.fillStyle = '#7c4a03';
-        g.fillRect(92, 70, 72, 10);
-        g.fillStyle = '#111';
-        g.font = 'bold 62px sans-serif';
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
-        g.fillText('F', 128, 44);
-        g.fillStyle = '#fde68a';
-        g.font = 'bold 34px "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif';
-        g.fillText(label, 128, 125);
-      });
-    const out: { key: string; x: number; y: number; z: number; tex: THREE.Texture; range: number; shade?: number }[] = [];
+    const out: { x: number; y: number; z: number; range: number; label: string; shade?: number }[] = [];
     const P = FOREST.hill.h + FOREST.temple.podium;
-    const candleTex = keyTex('取蜡烛 / 点燃');
-    for (const [lx, lz] of [[0, -2.4], [-2.6, -1.5], [2.6, -1.5]] as [number, number][]) {
-      const [x, z] = templeToWorld(lx, lz + 0.9);
-      out.push({ key: 'c' + lx, x, y: P + 2.3, z, tex: candleTex, range: 6 });
+    for (const [lx, lz] of CANDLE_POINTS) {
+      const [x, z] = templeToWorld(lx, lz);
+      out.push({ x, y: P + 1.75, z, range: 3.6, label: '蜡烛' });
     }
-    const shadeTex = keyTex('拿起灯罩');
     FOREST.shadeSpots.forEach(([lx, lz], k) => {
       const [x, z] = templeToWorld(lx, lz);
-      out.push({ key: 's' + k, x, y: forestFloor(x, z) + 1.1, z, tex: shadeTex, range: 3.5, shade: k });
+      out.push({ x, y: forestFloor(x, z) + 1.0, z, range: 3.2, label: '灯罩', shade: k });
     });
-    const ladderTex = keyTex('按住 爬梯子');
     let n = 0;
     for (const [x, z, r, deck] of FOREST.trees) {
       if (deck <= 0) continue;
@@ -2247,32 +2315,45 @@ function FMarkers() {
       const R = r * 1.08 + 0.45;
       const lx = x + Math.cos(a) * R;
       const lz = z + Math.sin(a) * R;
-      out.push({ key: 'l' + n, x: lx, y: forestFloor(lx, lz) + 2.4, z: lz, tex: ladderTex, range: 5 });
+      out.push({ x: lx, y: forestFloor(lx, lz) + 2.0, z: lz, range: 4, label: '梯子' });
     }
     return out;
   }, []);
-  const refs = useRef<(THREE.Sprite | null)[]>([]);
+  const [active, setActive] = useState(-1);
+  const activeRef = useRef(-1);
+  const group = useRef<THREE.Group>(null);
   useFrame((st) => {
-    const t = st.clock.elapsedTime;
+    let best = -1;
+    let bd = 1e9;
     items.forEach((it, i) => {
-      const s = refs.current[i];
-      if (!s) return;
+      if (it.shade !== undefined && it.shade !== mapRuntime.shadeSpot) return;
+      if (Math.abs(mapRuntime.viewY - it.y) > 4) return;
       const d = Math.hypot(mapRuntime.viewX - it.x, mapRuntime.viewZ - it.z);
-      const show = d < it.range && Math.abs(mapRuntime.viewY - it.y) < 4.5 && (it.shade === undefined || it.shade === mapRuntime.shadeSpot);
-      s.visible = show;
-      if (show) {
-        s.position.set(it.x, it.y + Math.sin(t * 3 + i) * 0.06, it.z);
-        (s.material as THREE.SpriteMaterial).opacity = Math.min(1, (it.range - d) * 1.5);
+      if (d < it.range && d < bd) {
+        bd = d;
+        best = i;
       }
     });
+    if (best !== activeRef.current) {
+      activeRef.current = best;
+      setActive(best);
+    }
+    if (best >= 0 && group.current) {
+      const it = items[best];
+      group.current.position.set(it.x, it.y + Math.sin(st.clock.elapsedTime * 3) * 0.05, it.z);
+    }
   });
+  const it = active >= 0 ? items[active] : null;
   return (
-    <group>
-      {items.map((it, i) => (
-        <sprite key={it.key} ref={(el) => (refs.current[i] = el)} scale={[1.1, 0.69, 1]} visible={false} renderOrder={30}>
-          <spriteMaterial map={it.tex} transparent depthTest={false} depthWrite={false} toneMapped={false} />
-        </sprite>
-      ))}
+    <group ref={group}>
+      {it && (
+        <Html center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+          <div className="tq-fkey">
+            <div className="tq-fkey-cap">F</div>
+            <div className="tq-fkey-label">{it.label}</div>
+          </div>
+        </Html>
+      )}
     </group>
   );
 }

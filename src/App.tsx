@@ -972,9 +972,10 @@ export default function App() {
 
         {/* interaction prompt: appears only while you're standing at something F works on */}
         {hudMirror.p1Hint && !isGameMenuOpen && !isMapSelectOpen && (
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-44 z-30 pointer-events-none flex items-center gap-2 bg-black/70 border border-amber-400/70 rounded-xl px-3 py-1.5 shadow-xl">
-            <span className="w-7 h-7 rounded-md bg-amber-400 text-black font-black flex items-center justify-center text-sm shadow-inner">F</span>
-            <span className="text-sm font-bold text-amber-100">{hudMirror.p1Hint.replace(/^按住? ?F ?/, '')}</span>
+          <div className="tq-hint absolute left-1/2 -translate-x-1/2 bottom-44 z-30 pointer-events-none">
+            <div className="tq-fkey-cap">F</div>
+            <span>{hudMirror.p1Hint.replace(/^按住? ?F ?/, '')}</span>
+            {/^按住/.test(hudMirror.p1Hint) && <em>按住</em>}
           </div>
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
