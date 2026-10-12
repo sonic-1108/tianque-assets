@@ -1087,7 +1087,8 @@ export default function App() {
           if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
           else if (hudMirror.p1Climb) meChips.push({ text: '攀爬中', tone: 'amber' });
           if (hudMirror.p1Swim) meChips.push({ text: '游泳中 不能出招', tone: 'sky' });
-          if (hudMirror.p1Candle) meChips.push({ text: hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
+          if (hudMirror.p1Candle) meChips.push({ text: (hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭') + ' · F 放下', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
+          else if (hudMirror.p1Shade) meChips.push({ text: '灯罩 · F 放下', tone: 'gold' });
           if (hudMirror.night > 0.55 && hudMirror.foeHidden) meChips.push({ text: '天黑 看不见对手', tone: 'slate' });
           if (hudMirror.p1Grip < 0.85) meChips.push({ text: `地滑 摩擦力 ${Math.round(hudMirror.p1Grip * 100)}%`, tone: hudMirror.p1Grip < 0.62 ? 'red' : 'sky' });
           if (hudMirror.p1Slip > 0.45) meChips.push({ text: hudMirror.p1Slip > 0.75 ? '快滑倒了！别急转' : '脚下不稳', tone: 'red', pulse: true });

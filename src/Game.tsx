@@ -12,7 +12,8 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS } from './maps';
+import { TQ_DARK } from './components/characterShading';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -118,7 +119,7 @@ const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMag
 /** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
 const SLIP_T = 0.74;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
-const WEATHER = { clear: 25, cloud: 10, rain: 45, storm: 55, ease: 12, dusk: 15, night: 80, dawn: 12 };
+const WEATHER = { clear: 25, cloud: 10, rain: 45, storm: 55, ease: 12, dusk: 20, night: 160, dawn: 12 };
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -296,6 +297,8 @@ function GameImpl({
   const netSendRef = useRef(0);
   const lastSnapRef = useRef<unknown>(null);
   const screenRepRef = useRef({ visible: false, hidden: false, t: 0 });
+  const fillLightRef = useRef<THREE.DirectionalLight>(null);
+  const envBaseRef = useRef(1);
   /** guest: locally predicted position of our own fighter */
   const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
@@ -361,6 +364,8 @@ function GameImpl({
     const env = makeSkyEnvironment(gl, sky);
     scene.environment = env;
     (scene as any).environmentIntensity = map.env ?? sky.intensity;
+    envBaseRef.current = map.env ?? sky.intensity;
+    TQ_DARK.value = 0;
     scene.background = new THREE.Color(map.background);
     scene.fog = new THREE.Fog(map.background, map.fog[0], map.fog[1]);
     gl.toneMappingExposure = map.exposure;
@@ -759,15 +764,21 @@ function GameImpl({
       mapRuntime.viewX = p1.pos[0];
       mapRuntime.viewY = p1.pos[1];
       mapRuntime.viewZ = p1.pos[2];
+      mapRuntime.viewCarry = p1.candle ? 1 : p1.shade ? 2 : 0;
       // the sun goes in as the rain comes; lightning lights everything up for an instant
       const rain = mapRuntime.rain;
       const night = mapRuntime.night;
-      if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.72 * rain) * (1 - 0.95 * night) + mapRuntime.lightning * 4;
-      if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 - 0.3 * rain) * (1 - 0.86 * night) + mapRuntime.lightning * 1.6;
-      if (rimLightRef.current) rimLightRef.current.intensity = 2.4 * (1 - 0.85 * night);
+      // deep night is meant to be black: only flames (and the temple's lamps) light anything
+      const dark = night * night * (3 - 2 * night);
+      if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.72 * rain) * (1 - 0.995 * dark) + mapRuntime.lightning * 4;
+      if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 - 0.3 * rain) * (1 - 0.985 * dark) + mapRuntime.lightning * 1.6;
+      if (rimLightRef.current) rimLightRef.current.intensity = 2.4 * (1 - 0.99 * dark);
+      if (fillLightRef.current) fillLightRef.current.intensity = 0.5 * (1 - 0.99 * dark);
+      (scene as any).environmentIntensity = envBaseRef.current * (1 - 0.985 * dark) + mapRuntime.lightning * 0.6;
+      TQ_DARK.value = dark * 0.97;
       if (scene.fog) {
-        (scene.fog as THREE.Fog).near = map.fog[0] * (1 - 0.45 * rain) * (1 - 0.6 * night);
-        (scene.fog as THREE.Fog).far = map.fog[1] * (1 - 0.5 * rain) * (1 - 0.6 * night);
+        (scene.fog as THREE.Fog).near = THREE.MathUtils.lerp(map.fog[0] * (1 - 0.45 * rain), 4, dark);
+        (scene.fog as THREE.Fog).far = THREE.MathUtils.lerp(map.fog[1] * (1 - 0.5 * rain), 22, dark);
       }
     }
     if (rimLightRef.current) {
@@ -809,7 +820,10 @@ function GameImpl({
     vD.set(en.pos[0], en.pos[1] + 1, en.pos[2]).applyMatrix4(camera.matrixWorldInverse);
     // 青冥古林 at night: you can't see your opponent unless they carry a lit candle or are inside your light
     const enDist = Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]);
-    const hiddenInDark = map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? 10 : 4.5);
+    // night: they show only if they carry a flame, stand in your candle's light, or near a candle that's been set down
+    const litNear = (x: number, z: number) =>
+      mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground));
+    const hiddenInDark = map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]);
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
       // itself is moved every frame without a re-render
@@ -863,7 +877,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, branches: mapRuntime.branches.map((b) => ({ ...b })) },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), branches: mapRuntime.branches.map((b) => ({ ...b })) },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -1674,7 +1688,8 @@ function GameImpl({
       const steps = 3;
       const k = Math.min(steps - 1, Math.floor(u * steps));
       const f = u * steps - k;
-      const rise = (k + THREE.MathUtils.smootherstep(f, 0, 0.75)) / steps;
+      // a steady run up the bark with a push at every kick (no dead hang between them)
+      const rise = 0.6 * THREE.MathUtils.smootherstep(u, 0, 1) + (0.4 * (k + THREE.MathUtils.smootherstep(f, 0, 0.75))) / steps;
       const top = (pl.h ?? 0) + 1.2; // clear the rail
       const y0 = c.climbY0 ?? c.pos[1];
       const a = (c.climbA0 ?? 0) + (c.climbSide ?? 1) * 1.1 * u;
@@ -2925,6 +2940,7 @@ function GameImpl({
       mapRuntime.night = 0;
       mapRuntime.skyFlash = 0;
       mapRuntime.shadeSpot = Math.floor(Math.random() * FOREST.shadeSpots.length);
+      mapRuntime.items = [];
       mapRuntime.rain = 0;
       mapRuntime.storm = 0;
       mapRuntime.strikeWarn = 0;
@@ -3533,39 +3549,121 @@ function GameImpl({
       const pressed = !!intent?.interact && !c.intPrev;
       c.intPrev = !!intent?.interact;
       c.interactHint = c.nearLadder ? '按住 F 爬梯子' : '';
-      if (c.hp <= 0) return;
-      const nearAltar = CANDLE_POINTS.some(([lx, lz]) => {
-        const [ax, az] = templeToWorld(lx, lz);
-        return Math.hypot(c.pos[0] - ax, c.pos[2] - az) < 2.0;
-      }) && Math.abs(c.pos[1] - FOREST.hill.h) < 2.5;
-      if (nearAltar && c.candle !== 2) {
-        c.interactHint = c.candle === 1 ? '按 F 重新点燃蜡烛' : '按 F 取一支蜡烛';
-        if (pressed) {
-          c.candle = 2;
-          vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.3, c.pos[2]), 10, '#ffcf6a', 2, 0.05, UP, 0.8);
-          if (i === 0) onRoundEvent?.({ type: 'toast', text: c.shade ? '取了蜡烛，灯罩护着火苗，不怕雨' : '取了蜡烛 · 淋雨可能会灭，寺里藏着一个灯罩' });
-        }
-      }
-      const spot = mapRuntime.shadeSpot;
-      if (spot >= 0 && !c.shade) {
-        const [lx, lz] = FOREST.shadeSpots[spot];
-        const [sx, sz] = templeToWorld(lx, lz);
-        if (Math.hypot(c.pos[0] - sx, c.pos[2] - sz) < 1.8 && Math.abs(c.pos[1] - FOREST.hill.h) < 2.5) {
-          c.interactHint = '按 F 拿起灯罩';
-          if (pressed) {
-            c.shade = true;
-            mapRuntime.shadeSpot = -1;
-            vfx.sparkBurst(vB.set(sx, FOREST.hill.h + 0.6, sz), 12, '#fde68a', 2.5, 0.05, UP, 0.8);
-            if (i === 0) onRoundEvent?.({ type: 'toast', text: '找到灯罩！蜡烛不会再被雨浇灭' });
+      const items = mapRuntime.items;
+      if (c.hp > 0) {
+        // everything F could do here; the nearest wins, putting things down only when nothing else is in reach
+        let best: { d: number; hint: string; act: () => void } | null = null;
+        const offer = (d: number, hint: string, act: () => void) => {
+          if (!best || d < best.d) best = { d, hint, act };
+        };
+        const onHill = Math.abs(c.pos[1] - FOREST.hill.h) < 2.5;
+        const spark = (x: number, y: number, z: number, col = '#ffcf6a') => vfx.sparkBurst(vB.set(x, y, z), 10, col, 2, 0.05, UP, 0.8);
+        const say = (text: string) => i === 0 && onRoundEvent?.({ type: 'toast', text });
+        // the altar and the candle racks: a fresh candle, or light yours again
+        if (onHill && c.candle !== 2)
+          for (const [lx, lz] of CANDLE_POINTS) {
+            const [ax, az] = templeToWorld(lx, lz);
+            const d = Math.hypot(c.pos[0] - ax, c.pos[2] - az);
+            if (d < 2.0)
+              offer(d, c.candle === 1 ? '按 F 重新点燃蜡烛' : '按 F 取一支蜡烛', () => {
+                c.candle = 2;
+                spark(c.pos[0], c.pos[1] + 1.3, c.pos[2]);
+                say(c.shade ? '取了蜡烛，灯罩护着火苗，不怕雨' : '取了蜡烛 · 淋雨可能会灭，寺里藏着一个灯罩');
+              });
           }
+        // the shade, still in its hiding place
+        const spot = mapRuntime.shadeSpot;
+        if (spot >= 0 && !c.shade && onHill) {
+          const [sx, sz] = templeToWorld(FOREST.shadeSpots[spot][0], FOREST.shadeSpots[spot][1]);
+          const d = Math.hypot(c.pos[0] - sx, c.pos[2] - sz);
+          if (d < 1.8)
+            offer(d, '按 F 拿起灯罩', () => {
+              c.shade = true;
+              mapRuntime.shadeSpot = -1;
+              spark(sx, FOREST.hill.h + 0.6, sz, '#fde68a');
+              say('找到灯罩！罩着的蜡烛不会被雨浇灭');
+            });
+        }
+        // things lying about (or hanging in a tree)
+        items.forEach((it, k) => {
+          const d = Math.hypot(c.pos[0] - it.x, c.pos[2] - it.z);
+          const reachY = it.hook >= 0 ? Math.abs(c.pos[1] + 1.4 - it.y) < 1.2 : Math.abs(c.pos[1] - it.y) < 1.2;
+          if (d > 1.7 || !reachY) return;
+          if (it.kind === 'candle' && c.candle === 0)
+            offer(d, it.hook >= 0 ? '按 F 取下蜡烛' : it.shade && !c.shade ? '按 F 拿起蜡烛和灯罩' : '按 F 拿起蜡烛', () => {
+              c.candle = it.lit ? 2 : 1;
+              if (it.shade && !c.shade) c.shade = true;
+              else if (it.shade) items.push({ kind: 'shade', x: it.x, y: it.hook >= 0 ? TREE_HOOKS[it.hook].deck : it.y, z: it.z, lit: false, shade: false, hook: -1 });
+              items.splice(k, 1);
+            });
+          else if (it.kind === 'candle' && c.candle === 2 && !it.lit)
+            offer(d, '按 F 用你的蜡烛点燃它', () => {
+              it.lit = true;
+              spark(it.x, it.y + 0.3, it.z);
+            });
+          else if (it.kind === 'shade' && !c.shade)
+            offer(d, '按 F 拿起灯罩', () => {
+              c.shade = true;
+              items.splice(k, 1);
+            });
+        });
+        const free = c.isGrounded && c.treeClimb === undefined && !c.swimming && !c.nearLadder;
+        if (c.candle > 0 && free && items.length < MAX_ITEMS) {
+          // hang it on the lookout tree's lantern hook: a little roof keeps the rain off, and it lights the whole deck
+          let hook = -1;
+          let hd = 1.9;
+          TREE_HOOKS.forEach((h, n) => {
+            const d = Math.hypot(c.pos[0] - h.x, c.pos[2] - h.z);
+            if (d < hd && Math.abs(c.pos[1] - h.deck) < 0.6 && !items.some((it) => it.hook === n)) {
+              hd = d;
+              hook = n;
+            }
+          });
+          if (hook >= 0) {
+            const h = TREE_HOOKS[hook];
+            offer(50, '按 F 把蜡烛挂在树上', () => {
+              items.push({ kind: 'candle', x: h.x, y: h.y, z: h.z, lit: c.candle === 2, shade: c.shade, hook });
+              c.candle = 0;
+              c.shade = false;
+              spark(h.x, h.y + 0.2, h.z);
+              say(items[items.length - 1].lit ? '蜡烛挂上了 · 整个瞭望台都亮了' : '挂上了，但它没点着');
+            });
+          } else
+            offer(90, '', () => {
+              const f = fwdOf(c.rotY);
+              const x = c.pos[0] + f.x * 0.7;
+              const z = c.pos[2] + f.z * 0.7;
+              items.push({ kind: 'candle', x, y: groundAt(x, z, c.pos[1] + 0.5), z, lit: c.candle === 2, shade: c.shade, hook: -1 });
+              c.candle = 0;
+              c.shade = false;
+            });
+        } else if (c.shade && c.candle === 0 && free && items.length < MAX_ITEMS)
+          offer(90, '', () => {
+            const f = fwdOf(c.rotY);
+            const x = c.pos[0] + f.x * 0.7;
+            const z = c.pos[2] + f.z * 0.7;
+            items.push({ kind: 'shade', x, y: groundAt(x, z, c.pos[1] + 0.5), z, lit: false, shade: false, hook: -1 });
+            c.shade = false;
+          });
+        const pick = best as { d: number; hint: string; act: () => void } | null;
+        if (pick && !c.nearLadder) {
+          // putting things down is always available while you carry them, so it doesn't nag with a prompt
+          if (pick.hint) c.interactHint = pick.hint;
+          if (pressed) pick.act();
         }
       }
-      // rain on an unshaded flame
-      if (c.candle === 2 && !c.shade && mapRuntime.rain > 0.25 && !underTempleRoof(c.pos[0], c.pos[2], c.pos[1]) && Math.random() < dt * 0.22 * mapRuntime.rain) {
+      // rain on an unshaded flame (in the hand, or set down in the open; a hook has its own little roof)
+      if (c.candle === 2 && !c.shade && mapRuntime.rain > 0.25 && !sheltered(c.pos[0], c.pos[2], c.pos[1]) && Math.random() < dt * 0.22 * mapRuntime.rain) {
         c.candle = 1;
         vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), 4, 0.1, 0.8, 0.5, '#9ca3af');
         if (i === 0) onRoundEvent?.({ type: 'toast', text: '蜡烛被雨浇灭了 · 回寺里供桌按 F 重新点' });
       }
+      if (i === 0)
+        for (const it of items)
+          if (it.kind === 'candle' && it.lit && !it.shade && it.hook < 0 && mapRuntime.rain > 0.25 && !sheltered(it.x, it.z, it.y) && Math.random() < dt * 0.11 * mapRuntime.rain) {
+            it.lit = false;
+            vfx.dustPuff(vB.set(it.x, it.y + 0.3, it.z), 4, 0.1, 0.8, 0.5, '#9ca3af');
+          }
       // swimming puts it out too
       if (c.candle === 2 && c.swimming && !c.shade) c.candle = 1;
     }
@@ -4260,7 +4358,7 @@ function GameImpl({
         shadow-camera-far={60}
       />
       <directionalLight ref={rimLightRef} color="#bcd7ff" intensity={2.4} />
-      <directionalLight position={[-10, 6, 10]} color="#7f9cc9" intensity={0.5} />
+      <directionalLight ref={fillLightRef} position={[-10, 6, 10]} color="#7f9cc9" intensity={0.5} />
 
       <Maps3D mapId={mapId} />
 
@@ -4357,7 +4455,7 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
       halo.current.visible = lit;
       halo.current.scale.set(0.16 * fl, 0.22 * fl, 1);
     }
-    if (light.current) light.current.intensity = lit ? 7 * fl : 0;
+    if (light.current) light.current.intensity = lit ? 9 * fl : 0;
     if (shadeRef.current) shadeRef.current.visible = !!c.shade;
   });
   return (
@@ -4410,7 +4508,7 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
           <meshStandardMaterial color="#6b5230" metalness={0.7} roughness={0.4} />
         </mesh>
       </group>
-      <pointLight ref={light} color="#ffb867" intensity={0} distance={11} decay={1.6} position={[0, 0.1, 0]} />
+      <pointLight ref={light} color="#ffb867" intensity={0} distance={10} decay={1.4} position={[0, 0.1, 0]} />
     </group>
   );
 }

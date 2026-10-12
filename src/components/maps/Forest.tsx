@@ -5,7 +5,7 @@ import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread } from '../../maps';
+import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -1958,7 +1958,21 @@ function Temple() {
         }),
       }),
       cushion: new THREE.MeshStandardMaterial({ color: '#c08a2a', roughness: 0.9 }),
-      fruit: new THREE.MeshStandardMaterial({ color: '#e07a1f', roughness: 0.5 }),
+      fruit: new THREE.MeshStandardMaterial({ color: '#f08a24', roughness: 0.45, emissive: '#5a2604', emissiveIntensity: 0.5 }),
+      redWax: new THREE.MeshStandardMaterial({ color: '#b3201a', roughness: 0.5, emissive: '#3a0604', emissiveIntensity: 0.6 }),
+      smoke: new THREE.SpriteMaterial({
+        map: canvasTex(64, 64, (g) => {
+          const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+          grd.addColorStop(0, 'rgba(255,255,255,0.9)');
+          grd.addColorStop(1, 'rgba(255,255,255,0)');
+          g.fillStyle = grd;
+          g.fillRect(0, 0, 64, 64);
+        }),
+        color: '#d8d2c8',
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+      }),
       wax: new THREE.MeshStandardMaterial({ color: '#f2e8d4', roughness: 0.55 }),
       paper: new THREE.MeshStandardMaterial({ color: '#f3e2b8', roughness: 0.9, side: THREE.DoubleSide, emissive: '#5a3a10', emissiveIntensity: 0.25 }),
       lantern: new THREE.MeshStandardMaterial({ color: '#c0281c', emissive: '#ff4a20', emissiveIntensity: 0.7, roughness: 0.7 }),
@@ -2018,6 +2032,8 @@ function Temple() {
   const shadeRef = useRef<THREE.Group>(null);
   const glint = useRef<THREE.Sprite>(null);
   const banners = useRef<(THREE.Mesh | null)[]>([]);
+  const smoke = useRef<(THREE.Sprite | null)[]>([]);
+  const smokeMats = useMemo(() => Array.from({ length: 6 }, () => mats.smoke.clone()), []);
   useFrame((st) => {
     const t = st.clock.elapsedTime;
     flames.current.forEach((f, i) => {
@@ -2030,6 +2046,17 @@ function Temple() {
     });
     banners.current.forEach((b, i) => {
       if (b) b.rotation.y = Math.sin(t * 0.7 + i) * 0.08;
+    });
+    // the lanterns glow brighter as night falls
+    mats.lantern.emissiveIntensity = 0.7 + mapRuntime.night * 1.6;
+    // incense smoke: wisps rising, curling and spreading as they fade
+    smoke.current.forEach((sp, k) => {
+      if (!sp) return;
+      const ph = (t * 0.22 + k / 6) % 1;
+      sp.position.set(Math.sin(t * 0.9 + k * 1.7) * 0.12 * ph, 1.6 + ph * 1.6, -0.15 + Math.cos(t * 0.7 + k) * 0.08 * ph);
+      const sz = 0.12 + ph * 0.55;
+      sp.scale.set(sz, sz, 1);
+      sp.material.opacity = 0.2 * Math.sin(ph * Math.PI);
     });
     const spot = mapRuntime.shadeSpot;
     if (shadeRef.current) {
@@ -2116,12 +2143,12 @@ function Temple() {
           <planeGeometry args={[1.4, 4.2]} />
         </mesh>
       ))}
-      {/* walls */}
-      <mesh position={[0, P + C / 2, -T.d / 2 - 0.12]} material={mats.wall} castShadow receiveShadow>
+      {/* walls (they cast shadows but take none: sunlight slanting through the doors threw hard black statue shadows on them) */}
+      <mesh position={[0, P + C / 2, -T.d / 2 - 0.12]} material={mats.wall} castShadow>
         <boxGeometry args={[T.w, C, 0.4]} />
       </mesh>
       {[-1, 1].map((sx) => (
-        <mesh key={sx} position={[sx * (T.w / 2 + 0.12), P + C / 2, 0]} rotation={[0, Math.PI / 2, 0]} material={mats.wall} castShadow receiveShadow>
+        <mesh key={sx} position={[sx * (T.w / 2 + 0.12), P + C / 2, 0]} rotation={[0, Math.PI / 2, 0]} material={mats.wall} castShadow>
           <boxGeometry args={[T.d, C, 0.4]} />
         </mesh>
       ))}
@@ -2175,14 +2202,27 @@ function Temple() {
       <mesh position={[0, top + 2.05, T.d * 0.37 + 0.02]} material={mats.plaque}>
         <planeGeometry args={[3.4, 1.28]} />
       </mesh>
-      {/* lanterns: two under the front eave, two inside */}
-      {[[-T.w / 6, T.d / 2 + 0.9], [T.w / 6, T.d / 2 + 0.9], [-2.2, 1.6], [2.2, 1.6]].map(([x, z], i) => (
+      {/* palace lanterns: two under the front eave, four down the hall */}
+      {[[-T.w / 6, T.d / 2 + 0.9], [T.w / 6, T.d / 2 + 0.9], [-2.2, 1.6], [2.2, 1.6], [-4.8, -1.2], [4.8, -1.2]].map(([x, z], i) => (
         <group key={'lan' + i} position={[x, top - 0.9, z]}>
-          <mesh material={mats.lantern} scale={[1, 1.3, 1]}>
-            <sphereGeometry args={[0.36, 14, 10]} />
+          <mesh material={mats.lantern} scale={[1, 1.15, 1]}>
+            <sphereGeometry args={[0.34, 16, 12]} />
           </mesh>
-          <mesh position={[0, 0.7, 0]} material={mats.bronze}>
-            <cylinderGeometry args={[0.012, 0.012, 0.9, 4]} />
+          {[-1, 1].map((sy) => (
+            <mesh key={sy} position={[0, sy * 0.36, 0]} material={mats.gold}>
+              <cylinderGeometry args={[0.2, 0.2, 0.08, 14]} />
+            </mesh>
+          ))}
+          {[0, 1, 2, 3, 4, 5].map((k) => (
+            <mesh key={'rib' + k} rotation={[0, (k / 6) * Math.PI, 0]} scale={[1, 1.15, 1]} material={mats.gold}>
+              <torusGeometry args={[0.345, 0.008, 4, 24]} />
+            </mesh>
+          ))}
+          <mesh position={[0, -0.62, 0]} material={mats.lantern}>
+            <cylinderGeometry args={[0.035, 0.01, 0.42, 6]} />
+          </mesh>
+          <mesh position={[0, 0.8, 0]} material={mats.bronze}>
+            <cylinderGeometry args={[0.012, 0.012, 0.8, 4]} />
           </mesh>
         </group>
       ))}
@@ -2236,14 +2276,30 @@ function Temple() {
         </mesh>
         {altarCandles.map(([x, z], i) => (
           <group key={'ac' + i} position={[x, 1.15, z - 0.4]}>
-            <mesh position={[0, 0.05, 0]} material={mats.bronze}>
-              <cylinderGeometry args={[0.1, 0.12, 0.1, 12]} />
+            {/* a gilt candlestick with a drip pan, and a tall red altar candle */}
+            <mesh position={[0, 0.04, 0]} material={mats.gold}>
+              <cylinderGeometry args={[0.09, 0.13, 0.08, 14]} />
             </mesh>
-            <mesh position={[0, 0.3, 0]} material={mats.wax}>
-              <cylinderGeometry args={[0.055, 0.06, 0.42, 10]} />
+            <mesh position={[0, 0.16, 0]} material={mats.gold}>
+              <cylinderGeometry args={[0.025, 0.035, 0.2, 8]} />
             </mesh>
-            <sprite ref={(el) => (flames.current[i] = el)} position={[0, 0.58, 0]} material={mats.flame} />
+            <mesh position={[0, 0.27, 0]} material={mats.gold}>
+              <cylinderGeometry args={[0.1, 0.05, 0.03, 14]} />
+            </mesh>
+            <mesh position={[0, 0.5, 0]} material={mats.redWax}>
+              <cylinderGeometry args={[0.05, 0.055, 0.44, 12]} />
+            </mesh>
+            <sprite ref={(el) => (flames.current[i] = el)} position={[0, 0.78, 0]} material={mats.flame} />
           </group>
+        ))}
+        {/* three sticks of incense in the bowl, and their smoke */}
+        {[-0.05, 0, 0.05].map((dx, k) => (
+          <mesh key={'is' + k} position={[dx, 1.42, -0.15]} rotation={[0, 0, dx * 2]} material={mats.bronze}>
+            <cylinderGeometry args={[0.006, 0.006, 0.3, 4]} />
+          </mesh>
+        ))}
+        {Array.from({ length: 6 }, (_, k) => (
+          <sprite key={'sm' + k} ref={(el) => (smoke.current[k] = el)} material={smokeMats[k]} position={[0, 1.6, -0.15]} />
         ))}
         <pointLight ref={(el) => (lights.current[0] = el)} position={[0, 2.4, 1.2]} color="#ffb05a" intensity={5} distance={20} decay={1.3} />
       </group>
@@ -2354,6 +2410,155 @@ function Temple() {
   );
 }
 
+/**
+ * candles and shades that have been put down, and the lantern hooks on the lookout trees. A fixed pool of lights
+ * follows the lit candles nearest the player (a changing light count would recompile every material).
+ */
+const LIGHT_POOL = 3;
+function PlacedItems() {
+  const mats = useMemo(() => {
+    const flameTex = canvasTex(32, 64, (g) => {
+      const grd = g.createRadialGradient(16, 40, 1, 16, 36, 16);
+      grd.addColorStop(0, 'rgba(255,255,230,1)');
+      grd.addColorStop(0.35, 'rgba(255,200,90,0.95)');
+      grd.addColorStop(1, 'rgba(255,120,20,0)');
+      g.fillStyle = grd;
+      g.beginPath();
+      g.ellipse(16, 38, 10, 24, 0, 0, Math.PI * 2);
+      g.fill();
+    });
+    const haloTex = canvasTex(64, 64, (g) => {
+      const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grd.addColorStop(0, 'rgba(255,200,120,0.9)');
+      grd.addColorStop(1, 'rgba(255,140,40,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 64, 64);
+    });
+    return {
+      wax: new THREE.MeshStandardMaterial({ color: '#f1e6cf', roughness: 0.6, emissive: '#3a2a10', emissiveIntensity: 0.4 }),
+      bronze: new THREE.MeshStandardMaterial({ color: '#6b5530', metalness: 0.7, roughness: 0.45 }),
+      iron: new THREE.MeshStandardMaterial({ color: '#2f2a26', metalness: 0.6, roughness: 0.6 }),
+      paper: new THREE.MeshStandardMaterial({ color: '#f3e3c0', roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.85, emissive: '#ffb050', emissiveIntensity: 0 }),
+      roof: new THREE.MeshStandardMaterial({ color: '#3b2a1a', roughness: 0.8 }),
+      flame: new THREE.SpriteMaterial({ map: flameTex, color: new THREE.Color(2.6, 1.8, 0.9), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+      halo: new THREE.SpriteMaterial({ map: haloTex, color: new THREE.Color(1.6, 1.0, 0.5), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0.55 }),
+    };
+  }, []);
+  const slots = useRef<(THREE.Group | null)[]>([]);
+  const parts = useRef<{ candle: THREE.Object3D | null; shade: THREE.Object3D | null; lantern: THREE.Object3D | null; flame: THREE.Sprite | null; halo: THREE.Sprite | null; paper: THREE.Mesh | null }[]>(
+    Array.from({ length: MAX_ITEMS }, () => ({ candle: null, shade: null, lantern: null, flame: null, halo: null, paper: null }))
+  );
+  const lights = useRef<(THREE.PointLight | null)[]>([]);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    const items = mapRuntime.items;
+    for (let k = 0; k < MAX_ITEMS; k++) {
+      const g = slots.current[k];
+      const P = parts.current[k];
+      const it = items[k];
+      if (!g) continue;
+      g.visible = !!it;
+      if (!it) continue;
+      g.position.set(it.x, it.y, it.z);
+      const hung = it.hook >= 0;
+      const candle = it.kind === 'candle';
+      if (P.candle) {
+        P.candle.visible = candle;
+        P.candle.position.y = hung ? -0.32 : 0;
+      }
+      if (P.lantern) P.lantern.visible = hung;
+      if (P.shade) {
+        P.shade.visible = it.kind === 'shade' || (candle && it.shade);
+        P.shade.position.y = hung ? -0.32 : 0;
+      }
+      const fl = 0.85 + 0.15 * Math.sin(t * 17 + k * 2.3) * Math.sin(t * 5.3 + k);
+      if (P.flame) {
+        P.flame.visible = candle && it.lit;
+        P.flame.scale.set(0.07 * fl, 0.17 * fl, 1);
+        P.flame.position.y = (hung ? -0.32 : 0) + 0.36;
+      }
+      if (P.halo) {
+        P.halo.visible = candle && it.lit;
+        const h = (hung ? 2.2 : 1.4) * (0.9 + 0.1 * fl);
+        P.halo.scale.set(h, h, 1);
+        P.halo.position.y = (hung ? -0.32 : 0) + 0.38;
+      }
+    }
+    // lights to the lit candles nearest the player
+    const lit = items
+      .map((it, k) => ({ it, k, d: Math.hypot(it.x - mapRuntime.viewX, it.z - mapRuntime.viewZ) }))
+      .filter((e) => e.it.kind === 'candle' && e.it.lit)
+      .sort((a, b) => a.d - b.d);
+    lights.current.forEach((l, n) => {
+      if (!l) return;
+      const e = lit[n];
+      if (!e) {
+        l.intensity = 0;
+        return;
+      }
+      const hung = e.it.hook >= 0;
+      l.position.set(e.it.x, e.it.y + (hung ? 0.1 : 0.45), e.it.z);
+      l.distance = hung ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground;
+      l.intensity = (hung ? 9 : 6) * (0.9 + 0.1 * Math.sin(t * 13 + n * 3));
+    });
+  });
+  return (
+    <group>
+      {/* the iron lantern hooks, so you can see where a candle goes */}
+      {TREE_HOOKS.map((h, n) => (
+        <group key={'hk' + n} position={[h.x, h.y, h.z]} rotation={[0, -h.a, 0]}>
+          <mesh position={[-0.12, 0.12, 0]} rotation={[0, 0, Math.PI / 2]} material={mats.iron}>
+            <cylinderGeometry args={[0.02, 0.02, 0.34, 6]} />
+          </mesh>
+          <mesh position={[0.04, 0.06, 0]} material={mats.iron}>
+            <torusGeometry args={[0.05, 0.012, 6, 12, Math.PI * 1.4]} />
+          </mesh>
+        </group>
+      ))}
+      {Array.from({ length: MAX_ITEMS }, (_, k) => (
+        <group key={k} ref={(el) => (slots.current[k] = el)} visible={false}>
+          <group ref={(el) => (parts.current[k].lantern = el)}>
+            {/* a little hanging lantern frame with a roof: keeps the rain off */}
+            <mesh position={[0, 0.12, 0]} material={mats.roof}>
+              <coneGeometry args={[0.26, 0.16, 6]} />
+            </mesh>
+            <mesh position={[0, -0.04, 0]} material={mats.iron}>
+              <cylinderGeometry args={[0.008, 0.008, 0.3, 4]} />
+            </mesh>
+            <mesh position={[0, -0.34, 0]} material={mats.iron}>
+              <cylinderGeometry args={[0.16, 0.16, 0.02, 12]} />
+            </mesh>
+          </group>
+          <group ref={(el) => (parts.current[k].candle = el)}>
+            <mesh position={[0, 0.02, 0]} material={mats.bronze}>
+              <cylinderGeometry args={[0.11, 0.13, 0.04, 12]} />
+            </mesh>
+            <mesh position={[0, 0.16, 0]} material={mats.wax}>
+              <cylinderGeometry args={[0.04, 0.045, 0.28, 10]} />
+            </mesh>
+          </group>
+          <group ref={(el) => (parts.current[k].shade = el)}>
+            <mesh position={[0, 0.24, 0]} material={mats.paper} ref={(el) => (parts.current[k].paper = el)}>
+              <cylinderGeometry args={[0.15, 0.17, 0.4, 14, 1, true]} />
+            </mesh>
+            <mesh position={[0, 0.45, 0]} material={mats.bronze}>
+              <torusGeometry args={[0.15, 0.016, 6, 16]} />
+            </mesh>
+            <mesh position={[0, 0.04, 0]} material={mats.bronze}>
+              <torusGeometry args={[0.17, 0.016, 6, 16]} />
+            </mesh>
+          </group>
+          <sprite ref={(el) => (parts.current[k].flame = el)} material={mats.flame} />
+          <sprite ref={(el) => (parts.current[k].halo = el)} material={mats.halo} />
+        </group>
+      ))}
+      {Array.from({ length: LIGHT_POOL }, (_, n) => (
+        <pointLight key={'pl' + n} ref={(el) => (lights.current[n] = el)} color="#ffb867" intensity={0} distance={8} decay={1.5} />
+      ))}
+    </group>
+  );
+}
+
 /** Floating F key caps over everything F works on, shown only while the local player is close */
 /** one small key-cap marker over the nearest thing you can use with F (crisp DOM, not a texture) */
 function FMarkers() {
@@ -2379,31 +2584,42 @@ function FMarkers() {
     }
     return out;
   }, []);
-  const [active, setActive] = useState(-1);
-  const activeRef = useRef(-1);
+  const [active, setActive] = useState<{ x: number; y: number; z: number; label: string } | null>(null);
+  const activeRef = useRef('');
   const group = useRef<THREE.Group>(null);
   useFrame((st) => {
-    let best = -1;
+    let best: { x: number; y: number; z: number; label: string } | null = null;
     let bd = 1e9;
-    items.forEach((it, i) => {
-      if (it.shade !== undefined && it.shade !== mapRuntime.shadeSpot) return;
-      if (Math.abs(mapRuntime.viewY - it.y) > 4) return;
-      const d = Math.hypot(mapRuntime.viewX - it.x, mapRuntime.viewZ - it.z);
-      if (d < it.range && d < bd) {
+    const consider = (x: number, y: number, z: number, range: number, label: string) => {
+      if (Math.abs(mapRuntime.viewY - y) > 4) return;
+      const d = Math.hypot(mapRuntime.viewX - x, mapRuntime.viewZ - z);
+      if (d < range && d < bd) {
         bd = d;
-        best = i;
+        best = { x, y, z, label };
       }
+    };
+    items.forEach((it) => {
+      if (it.shade !== undefined && it.shade !== mapRuntime.shadeSpot) return;
+      if (it.label === '蜡烛' && mapRuntime.viewCarry === 1) return; // already carrying one
+      consider(it.x, it.y, it.z, it.range, it.label);
     });
-    if (best !== activeRef.current) {
-      activeRef.current = best;
-      setActive(best);
+    for (const it of mapRuntime.items) {
+      if (it.kind === 'candle' && mapRuntime.viewCarry !== 1) consider(it.x, it.y + (it.hook >= 0 ? 0.3 : 0.9), it.z, 3, '蜡烛');
+      if (it.kind === 'shade') consider(it.x, it.y + 0.9, it.z, 3, '灯罩');
     }
-    if (best >= 0 && group.current) {
-      const it = items[best];
-      group.current.position.set(it.x, it.y + Math.sin(st.clock.elapsedTime * 3) * 0.05, it.z);
+    if (mapRuntime.viewCarry === 1)
+      TREE_HOOKS.forEach((h, n) => {
+        if (!mapRuntime.items.some((it) => it.hook === n)) consider(h.x, h.y + 0.4, h.z, 3, '挂蜡烛');
+      });
+    const pick = best as { x: number; y: number; z: number; label: string } | null;
+    const key = pick ? pick.label + pick.x.toFixed(1) + pick.z.toFixed(1) : '';
+    if (key !== activeRef.current) {
+      activeRef.current = key;
+      setActive(pick);
     }
+    if (pick && group.current) group.current.position.set(pick.x, pick.y + Math.sin(st.clock.elapsedTime * 3) * 0.05, pick.z);
   });
-  const it = active >= 0 ? items[active] : null;
+  const it = active;
   return (
     <group ref={group}>
       {it && (
@@ -2453,6 +2669,7 @@ export function ForestMap() {
       <StormSky />
       <Temple />
       <FMarkers />
+      <PlacedItems />
       <Rain />
       <Lightning />
     </group>

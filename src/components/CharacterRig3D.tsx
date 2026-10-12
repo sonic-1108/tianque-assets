@@ -586,13 +586,10 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (c.treeClimb !== undefined && c.climbMode === 'ladder') {
       key = 'idle'; // hand over hand: the climbing pose is layered on below
     } else if (c.treeClimb !== undefined) {
-      // 梯云纵: a fresh jump at each of the three kicks, the ranger's own flip for the last one
+      // 梯云纵: running straight up the bark, body leaning out from the trunk; the last kick turns into a flip
       const kick = Math.min(2, Math.floor(((c.climbT ?? 0) / 1.0) * 3));
-      key = kick === 2 && actionsRef.current.r_flip ? 'r_flip' : 'jump';
-      if (kick !== climbKickRef.current) {
-        climbKickRef.current = kick;
-        currentKeyRef.current = '';
-      }
+      key = kick === 2 && (c.climbT ?? 0) > 0.72 && actionsRef.current.r_flip ? 'r_flip' : actionsRef.current.run ? 'run' : 'jump';
+      climbKickRef.current = kick;
     } else if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
       key = 'r_kick';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
@@ -638,6 +635,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       cur.setEffectiveTimeScale(backward ? -ts : ts);
     }
     if (cur && currentKeyRef.current === 'skill_3') cur.setEffectiveTimeScale(2.0);
+    if (cur && currentKeyRef.current === 'run' && c.treeClimb !== undefined && c.climbMode !== 'ladder') cur.setEffectiveTimeScale(1.9);
     if (cur && currentKeyRef.current === 'swim') cur.setEffectiveTimeScale(speed > 0.6 ? THREE.MathUtils.clamp(speed / 3.5, 0.7, 1.4) : 0.45);
 
     mixer.update(delta);
@@ -693,7 +691,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
     else if (st === 'launched') leanX = -0.45;
     else if (st === 'hitstun') leanX = -0.12;
-    else if (key === 'run' && !backward) leanX = 0.08;
+    else if (c.treeClimb !== undefined && c.climbMode !== 'ladder' && (c.climbT ?? 0) < 0.66) leanX = -0.95; // feet on the bark
+    else if (c.treeClimb !== undefined && c.climbMode === 'ladder') {
+      leanX = 0.12; // chest in to the ladder
+      leanZ = Math.sin(ladderPhaseRef.current) * 0.06; // hips sway with each step
+    } else if (key === 'run' && !backward) leanX = 0.08;
     leanRef.current.x = THREE.MathUtils.damp(leanRef.current.x, leanX, 10, delta);
     leanRef.current.y = THREE.MathUtils.damp(leanRef.current.y, leanZ, 10, delta);
 

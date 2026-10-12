@@ -136,6 +136,23 @@ export function sheltered(x: number, z: number, y: number) {
   const [lx, lz] = worldToTemple(x, z);
   return Math.abs(lx + 7.2) < 1.9 && Math.abs(lz - 8.6) < 1.9 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 5;
 }
+/** a candle or a candle-shade that someone has put down */
+export interface PlacedItem {
+  kind: 'candle' | 'shade';
+  x: number;
+  y: number;
+  z: number;
+  /** candle: burning */
+  lit: boolean;
+  /** candle: a shade sits over it (rain can't put it out) */
+  shade: boolean;
+  /** index into TREE_HOOKS when hung on a lookout tree, else -1 */
+  hook: number;
+}
+/** most things that can lie about at once */
+export const MAX_ITEMS = 8;
+/** how far a candle lights up around itself (metres): carried, set down, hung high in a tree */
+export const CANDLE_LIGHT = { hand: 9, ground: 8, hook: 12 };
 /** the altar's world position (candles are taken here) */
 export function altarPos(): [number, number] {
   return templeToWorld(0, -2.4);
@@ -293,6 +310,13 @@ export function waterDepth(x: number, z: number) {
 export function ladderAngle(n: number) {
   return (n * 1.7) % (Math.PI * 2);
 }
+/** a lantern hook on each lookout tree's trunk, opposite the ladder, at head height above the deck */
+export const TREE_HOOKS: { x: number; y: number; z: number; deck: number; a: number }[] = FOREST.trees
+  .filter((t) => t[3] > 0)
+  .map(([x, z, r, deck], n) => {
+    const a = ladderAngle(n) + Math.PI;
+    return { x: x + Math.cos(a) * (r + 0.18), y: deck + 1.45, z: z + Math.sin(a) * (r + 0.18), deck, a };
+  });
 function forestPillars(): Circle[] {
   // collision a touch wider than the drawn trunk so the root flare never swallows a foot
   let deckIdx = 0;
@@ -602,12 +626,16 @@ export const mapRuntime = {
   night: 0,
   /** distant sheet lightning in the clouds (no strike) */
   skyFlash: 0,
-  /** which hiding place the candle-shade is in this round (-1 = someone took it) */
+  /** which hiding place the candle-shade is in this round (-1 = it has been taken from there) */
   shadeSpot: 0,
+  /** candles and shades put down somewhere (on the ground or hung on a lookout tree) */
+  items: [] as PlacedItem[],
   /** where the local player is (scenery uses it to show F markers near things you can use) */
   viewX: 0,
   viewY: 0,
   viewZ: 0,
+  /** what the local player carries: 0 nothing, 1 a candle, 2 only the shade */
+  viewCarry: 0,
 };
 
 // ----------------------------------------------------------------------
