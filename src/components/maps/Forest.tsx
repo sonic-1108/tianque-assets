@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle } from '../../maps';
+import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -21,7 +21,7 @@ const RIVER_GLSL = /* glsl */ `
 const floorAt = (x: number, z: number) => forestFloor(x, z);
 
 /** shared uniforms: time and wind gust */
-const shared = { uTime: { value: 0 }, uGust: { value: 0 }, uRain: { value: 0 } };
+const shared = { uTime: { value: 0 }, uGust: { value: 0 }, uRain: { value: 0 }, uNight: { value: 0 } };
 
 // ---------------------------------------------------------------
 // canvas textures
@@ -885,6 +885,12 @@ function blocked(x: number, z: number, pad: number) {
 }
 /** dry ground (no grass in the water) */
 const dry = (x: number, z: number, pad = 0.15) => floorAt(x, z) > FOREST.waterY + pad;
+/** the temple's paved hilltop and its stone stairs: nothing grows there */
+const paved = (x: number, z: number) => {
+  if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.top - 0.4) return true;
+  const [lx, lz] = worldToTemple(x, z);
+  return Math.abs(lx) < 1.7 && lz > 0 && lz < FOREST.hill.r + 1.5;
+};
 
 function Grass() {
   const mesh = useMemo(() => {
@@ -899,7 +905,7 @@ function Grass() {
       const t = rand() * Math.PI * 2;
       const x = Math.cos(t) * r;
       const z = Math.sin(t) * r;
-      if (!dry(x, z) || blocked(x, z, 0.3)) continue;
+      if (!dry(x, z) || blocked(x, z, 0.3) || paved(x, z)) continue;
       // clumped: lush in patches and along the banks, thin on the worn ground
       const patch = vnoiseJS(x * 0.08, z * 0.08);
       const bank = Math.abs(z - riverZ(x)) < FOREST.bankHalf + 3 ? 0.5 : 0;
@@ -977,7 +983,7 @@ function Ferns() {
       const side = rand() < 0.5 ? -1 : 1;
       spots.push([x, riverZ(x) + side * (FOREST.bankHalf + 0.5 + rand() * 2.5), 0.7 + rand() * 0.5]);
     }
-    const ok = spots.filter(([x, z]) => dry(x, z, 0.2));
+    const ok = spots.filter(([x, z]) => dry(x, z, 0.2) && !paved(x, z));
     const im = new THREE.InstancedMesh(geo, mat, ok.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -1207,7 +1213,7 @@ function GodRays() {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
-      uniforms: { uTime: shared.uTime, uRain: shared.uRain, uColor: { value: new THREE.Color('#ffe2a0') } },
+      uniforms: { uTime: shared.uTime, uRain: shared.uRain, uNight: shared.uNight, uColor: { value: new THREE.Color('#ffe2a0') } },
       vertexShader: /* glsl */ `
         varying vec2 vUv; varying float vSeed; varying vec3 vWP;
         void main(){
@@ -1218,13 +1224,13 @@ function GodRays() {
           gl_Position = projectionMatrix * viewMatrix * w;
         }`,
       fragmentShader: /* glsl */ `
-        uniform float uTime; uniform float uRain; uniform vec3 uColor; varying vec2 vUv; varying float vSeed; varying vec3 vWP;
+        uniform float uTime; uniform float uRain; uniform float uNight; uniform vec3 uColor; varying vec2 vUv; varying float vSeed; varying vec3 vWP;
         void main(){
           // soft across the beam, fading in under the canopy and out toward the ground
           float across = pow(sin(vUv.x * 3.14159), 2.0);
           float along = smoothstep(0.0, 0.25, vUv.y) * (1.0 - smoothstep(0.75, 1.0, vUv.y));
           float flick = 0.75 + 0.25 * sin(uTime * 0.7 + vSeed * 9.0) * sin(uTime * 0.31 + vSeed * 3.0);
-          float a = across * along * flick * 0.26 * smoothstep(-0.5, 1.0, vWP.y) * (1.0 - smoothstep(0.05, 0.5, uRain));
+          float a = across * along * flick * 0.26 * smoothstep(-0.5, 1.0, vWP.y) * (1.0 - smoothstep(0.05, 0.5, uRain)) * (1.0 - uNight);
           gl_FragColor = vec4(uColor * a, a);
         }`,
     });
@@ -1506,18 +1512,26 @@ function StormSky() {
         transparent: true,
         depthWrite: false,
         fog: false,
-        uniforms: { uRain: shared.uRain, uTime: shared.uTime, uFlash: { value: 0 } },
+        uniforms: { uRain: shared.uRain, uNight: shared.uNight, uTime: shared.uTime, uFlash: { value: 0 } },
         vertexShader: /* glsl */ `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
         fragmentShader: /* glsl */ `
-          uniform float uRain; uniform float uTime; uniform float uFlash; varying vec3 vDir;
+          uniform float uRain; uniform float uNight; uniform float uTime; uniform float uFlash; varying vec3 vDir;
           ${GLSL_NOISE}
           void main(){
             vec3 d = normalize(vDir);
             vec2 p = d.xz / max(0.15, d.y + 0.2) * 1.5 + vec2(uTime * 0.03, uTime * 0.01);
             float c = fbm(p);
             float a = uRain * (0.55 + 0.4 * c);
-            vec3 col = mix(vec3(0.2, 0.23, 0.26), vec3(0.36, 0.39, 0.42), c) + vec3(0.6, 0.65, 0.8) * uFlash * (0.4 + 0.6 * c);
-            gl_FragColor = vec4(col, clamp(a, 0.0, 0.92));
+            vec3 col = mix(vec3(0.2, 0.23, 0.26), vec3(0.36, 0.39, 0.42), c);
+            // night: a deep blue-black sky, stars where the clouds break
+            vec3 nightCol = mix(vec3(0.01, 0.015, 0.035), vec3(0.03, 0.04, 0.07), max(d.y, 0.0));
+            vec2 sp = floor(d.xz / max(0.2, d.y + 0.25) * 260.0);
+            float star = step(0.9975, hash(sp)) * smoothstep(0.1, 0.4, d.y) * (1.0 - uRain * 0.8) * (0.6 + 0.4 * sin(uTime * 3.0 + hash(sp + 3.0) * 30.0));
+            nightCol += vec3(0.9, 0.92, 1.0) * star;
+            col = mix(col, nightCol, uNight);
+            a = max(a, uNight * 0.97);
+            col += vec3(0.6, 0.65, 0.8) * uFlash * (0.4 + 0.6 * c);
+            gl_FragColor = vec4(col, clamp(a, 0.0, 0.97));
           }`,
       }),
     []
@@ -1593,11 +1607,248 @@ function Lightning() {
   );
 }
 
+// ---------------------------------------------------------------
+// the old temple on the hill
+// ---------------------------------------------------------------
+function Temple() {
+  const H = FOREST.hill;
+  const T = FOREST.temple;
+  const mats = useMemo(() => {
+    const plaque = canvasTex(256, 96, (g) => {
+      g.fillStyle = '#1d1a14';
+      g.fillRect(0, 0, 256, 96);
+      g.strokeStyle = '#b8902e';
+      g.lineWidth = 6;
+      g.strokeRect(5, 5, 246, 86);
+      g.fillStyle = '#d9b34a';
+      g.font = 'bold 60px "Noto Serif SC","Songti SC","STSong","SimSun",serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('青冥寺', 128, 52);
+    });
+    const wall = canvasTex(128, 128, (g) => {
+      g.fillStyle = '#d8d1c0';
+      g.fillRect(0, 0, 128, 128);
+      g.fillStyle = '#6e2a1f';
+      g.fillRect(0, 96, 128, 32);
+      const rand = seeded(5);
+      for (let i = 0; i < 400; i++) {
+        g.fillStyle = `rgba(80,70,50,${rand() * 0.12})`;
+        g.fillRect(rand() * 128, rand() * 96, 2 + rand() * 6, 1 + rand() * 3);
+      }
+    });
+    return {
+      stone: new THREE.MeshStandardMaterial({ color: '#8a8679', roughness: 0.9 }),
+      pave: new THREE.MeshStandardMaterial({ color: '#77736a', roughness: 0.85 }),
+      lacquer: new THREE.MeshStandardMaterial({ color: '#7a1c14', roughness: 0.45 }),
+      wall: new THREE.MeshStandardMaterial({ map: wall, roughness: 0.95 }),
+      tile: new THREE.MeshStandardMaterial({ color: '#2b2f2d', roughness: 0.6, flatShading: true }),
+      gold: new THREE.MeshStandardMaterial({ color: '#c9a14a', metalness: 0.85, roughness: 0.3 }),
+      bronze: new THREE.MeshStandardMaterial({ color: '#5b4a2c', metalness: 0.7, roughness: 0.45 }),
+      cloth: new THREE.MeshStandardMaterial({ color: '#8b1e1e', roughness: 0.8 }),
+      wax: new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.6 }),
+      paper: new THREE.MeshStandardMaterial({ color: '#efe0b8', roughness: 0.9, side: THREE.DoubleSide }),
+      plaque: new THREE.MeshStandardMaterial({ map: plaque, roughness: 0.6 }),
+      flame: new THREE.SpriteMaterial({ color: new THREE.Color(2.4, 1.6, 0.7), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+    };
+  }, []);
+  // stone steps down the front of the hill
+  const steps = useMemo(() => {
+    const out: { p: [number, number, number]; h: number }[] = [];
+    for (let lz = T.d / 2 + 2.6; lz < H.r + 1; lz += 0.55) {
+      const [x, z] = templeToWorld(0, lz);
+      const y = forestFloor(x, z);
+      out.push({ p: [0, y - H.h, lz], h: 0.18 });
+    }
+    return out;
+  }, [H, T]);
+  const candles = useMemo(() => {
+    const rand = seeded(9);
+    return Array.from({ length: 9 }, (_, i) => ({ x: -0.6 + (i % 5) * 0.3 + (rand() - 0.5) * 0.06, z: -1.6 + Math.floor(i / 5) * 0.28, h: 0.12 + rand() * 0.12 }));
+  }, []);
+  const flames = useRef<(THREE.Sprite | null)[]>([]);
+  const altarLight = useRef<THREE.PointLight>(null);
+  const shadeRef = useRef<THREE.Group>(null);
+  const glint = useRef<THREE.Sprite>(null);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    flames.current.forEach((f, i) => {
+      if (!f) return;
+      const k = 0.8 + 0.2 * Math.sin(t * 19 + i * 2.1) * Math.sin(t * 6.1 + i);
+      f.scale.set(0.06 * k, 0.15 * k, 1);
+    });
+    // the altar candles are the only steady light in the forest at night
+    if (altarLight.current) altarLight.current.intensity = (2.5 + mapRuntime.night * 9) * (0.92 + 0.08 * Math.sin(t * 13));
+    const spot = mapRuntime.shadeSpot;
+    if (shadeRef.current) {
+      shadeRef.current.visible = spot >= 0;
+      if (spot >= 0) {
+        const [lx, lz] = FOREST.shadeSpots[spot];
+        shadeRef.current.position.set(lx, 0, lz);
+      }
+    }
+    // now and then the shade catches the light: a tiny glint, so a sharp eye can find it
+    if (glint.current) {
+      const ph = (t * 0.4) % 1;
+      glint.current.material.opacity = spot >= 0 && ph < 0.08 ? Math.sin((ph / 0.08) * Math.PI) : 0;
+    }
+  });
+  const colX = [-T.w / 2, -T.w / 6, T.w / 6, T.w / 2];
+  const roofY = 3.3;
+  return (
+    <group position={[H.x, H.h, H.z]} rotation={[0, TEMPLE_YAW, 0]}>
+      {/* paved terrace */}
+      <mesh position={[0, -0.05, 1.1]} material={mats.pave} receiveShadow>
+        <boxGeometry args={[T.w + 3, 0.14, T.d + 3]} />
+      </mesh>
+      {/* hall floor */}
+      <mesh position={[0, 0.0, 0]} material={mats.stone} receiveShadow>
+        <boxGeometry args={[T.w + 1.2, 0.08, T.d + 1.2]} />
+      </mesh>
+      {colX.map((x) =>
+        [-T.d / 2, T.d / 2].map((z) => (
+          <group key={x + ':' + z} position={[x, 0, z]}>
+            <mesh position={[0, roofY / 2, 0]} material={mats.lacquer} castShadow>
+              <cylinderGeometry args={[0.2, 0.23, roofY, 12]} />
+            </mesh>
+            <mesh position={[0, 0.12, 0]} material={mats.stone}>
+              <cylinderGeometry args={[0.32, 0.36, 0.24, 12]} />
+            </mesh>
+          </group>
+        ))
+      )}
+      {/* walls: back, and the back half of the sides (the front stands open) */}
+      <mesh position={[0, roofY / 2, -T.d / 2 - 0.05]} material={mats.wall} castShadow receiveShadow>
+        <boxGeometry args={[T.w, roofY, 0.22]} />
+      </mesh>
+      {[-1, 1].map((sx) => (
+        <mesh key={sx} position={[sx * (T.w / 2 + 0.05), roofY / 2, -0.7]} rotation={[0, Math.PI / 2, 0]} material={mats.wall} castShadow receiveShadow>
+          <boxGeometry args={[T.d - 1.4, roofY, 0.22]} />
+        </mesh>
+      ))}
+      {/* beams and roof: a hipped roof with deep eaves */}
+      <mesh position={[0, roofY + 0.12, 0]} material={mats.lacquer} castShadow>
+        <boxGeometry args={[T.w + 0.6, 0.25, T.d + 0.6]} />
+      </mesh>
+      <mesh position={[0, roofY + 0.95, 0]} scale={[(T.w + 3.2) / 2, 1.35, (T.d + 3.0) / 2]} rotation={[0, Math.PI / 4, 0]} material={mats.tile} castShadow>
+        <coneGeometry args={[Math.SQRT2, 1.4, 4, 1]} />
+      </mesh>
+      <mesh position={[0, roofY + 1.7, 0]} material={mats.tile}>
+        <boxGeometry args={[T.w * 0.55, 0.22, 0.3]} />
+      </mesh>
+      {[-1, 1].map((sx) => (
+        <mesh key={'cw' + sx} position={[sx * T.w * 0.28, roofY + 1.92, 0]} material={mats.gold}>
+          <sphereGeometry args={[0.16, 10, 8]} />
+        </mesh>
+      ))}
+      <mesh position={[0, roofY - 0.35, T.d / 2 + 0.16]} material={mats.plaque}>
+        <planeGeometry args={[1.8, 0.66]} />
+      </mesh>
+      {/* altar with candles */}
+      <group position={[0, 0, -1.4]}>
+        <mesh position={[0, 0.5, 0]} material={mats.lacquer} castShadow>
+          <boxGeometry args={[1.7, 1.0, 0.9]} />
+        </mesh>
+        <mesh position={[0, 0.72, 0.46]} material={mats.cloth}>
+          <planeGeometry args={[1.5, 0.55]} />
+        </mesh>
+        {candles.map((cd, i) => (
+          <group key={i} position={[cd.x, 1.0, cd.z + 1.4]}>
+            <mesh position={[0, cd.h / 2, 0]} material={mats.wax}>
+              <cylinderGeometry args={[0.025, 0.025, cd.h, 6]} />
+            </mesh>
+            <sprite ref={(el) => (flames.current[i] = el)} position={[0, cd.h + 0.05, 0]} material={mats.flame} />
+          </group>
+        ))}
+        <pointLight ref={altarLight} position={[0, 1.6, 0.6]} color="#ffb05a" intensity={3} distance={14} decay={1.4} />
+      </group>
+      {/* seated Buddha behind the altar */}
+      <group position={[0, 0, -2.45]}>
+        <mesh position={[0, 0.35, 0]} material={mats.gold}>
+          <cylinderGeometry args={[0.75, 0.85, 0.7, 16]} />
+        </mesh>
+        <mesh position={[0, 1.05, 0]} scale={[1, 1, 0.75]} material={mats.gold}>
+          <sphereGeometry args={[0.62, 16, 12]} />
+        </mesh>
+        <mesh position={[0, 1.85, 0]} material={mats.gold}>
+          <sphereGeometry args={[0.3, 16, 12]} />
+        </mesh>
+        <mesh position={[0, 2.12, 0]} material={mats.gold}>
+          <sphereGeometry args={[0.12, 10, 8]} />
+        </mesh>
+        <mesh position={[0, 1.8, -0.25]} material={mats.gold}>
+          <circleGeometry args={[0.65, 24]} />
+        </mesh>
+      </group>
+      {/* bronze incense burner in the courtyard */}
+      <group position={[0, 0, 4.6]}>
+        <mesh position={[0, 0.65, 0]} material={mats.bronze} castShadow>
+          <cylinderGeometry args={[0.5, 0.42, 0.55, 14]} />
+        </mesh>
+        {[0, 1, 2].map((k) => (
+          <mesh key={k} position={[Math.cos((k / 3) * Math.PI * 2) * 0.35, 0.2, Math.sin((k / 3) * Math.PI * 2) * 0.35]} material={mats.bronze}>
+            <cylinderGeometry args={[0.06, 0.05, 0.4, 6]} />
+          </mesh>
+        ))}
+      </group>
+      {/* bell pavilion */}
+      <group position={[-5.5, 0, 2.9]}>
+        {[[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]].map(([x, z], k) => (
+          <mesh key={k} position={[x, 1.4, z]} material={mats.lacquer} castShadow>
+            <cylinderGeometry args={[0.09, 0.1, 2.8, 8]} />
+          </mesh>
+        ))}
+        <mesh position={[0, 3.15, 0]} rotation={[0, Math.PI / 4, 0]} material={mats.tile} castShadow>
+          <coneGeometry args={[1.8, 0.9, 4, 1]} />
+        </mesh>
+        <mesh position={[0, 1.5, 0]} material={mats.bronze} castShadow>
+          <cylinderGeometry args={[0.32, 0.45, 0.9, 16, 1, true]} />
+        </mesh>
+        <mesh position={[0, 2.0, 0]} material={mats.bronze}>
+          <sphereGeometry args={[0.32, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        </mesh>
+      </group>
+      {/* stone lanterns at the head of the stairs */}
+      {[-1.8, 1.8].map((x) => (
+        <group key={'l' + x} position={[x, 0, T.d / 2 + 2.3]}>
+          <mesh position={[0, 0.5, 0]} material={mats.stone}>
+            <cylinderGeometry args={[0.12, 0.16, 1.0, 6]} />
+          </mesh>
+          <mesh position={[0, 1.15, 0]} material={mats.stone}>
+            <boxGeometry args={[0.42, 0.34, 0.42]} />
+          </mesh>
+          <mesh position={[0, 1.48, 0]} material={mats.stone}>
+            <coneGeometry args={[0.38, 0.3, 4]} />
+          </mesh>
+        </group>
+      ))}
+      {steps.map((st, i) => (
+        <mesh key={'s' + i} position={st.p} material={mats.stone} receiveShadow>
+          <boxGeometry args={[2.6, 0.22, 0.6]} />
+        </mesh>
+      ))}
+      {/* the candle-shade, hidden somewhere in the temple grounds */}
+      <group ref={shadeRef}>
+        <mesh position={[0, 0.16, 0]} material={mats.paper} castShadow>
+          <cylinderGeometry args={[0.13, 0.16, 0.32, 12, 1, true]} />
+        </mesh>
+        <mesh position={[0, 0.33, 0]} material={mats.bronze}>
+          <torusGeometry args={[0.13, 0.015, 6, 16]} />
+        </mesh>
+        <sprite ref={glint} position={[0.1, 0.3, 0.1]} scale={[0.35, 0.35, 1]}>
+          <spriteMaterial color={new THREE.Color(3, 2.6, 1.6)} transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
+        </sprite>
+      </group>
+    </group>
+  );
+}
+
 function Clock() {
   useFrame((st) => {
     shared.uTime.value = st.clock.elapsedTime;
     shared.uGust.value = mapRuntime.gust;
     shared.uRain.value = mapRuntime.rain;
+    shared.uNight.value = mapRuntime.night;
   });
   return null;
 }
@@ -1625,6 +1876,7 @@ export function ForestMap() {
       <Motes />
       <FallingLeaves />
       <StormSky />
+      <Temple />
       <Rain />
       <Lightning />
     </group>

@@ -363,11 +363,13 @@ export default function App() {
   });
 
   // Dummy 2D Screen Projection state
-  const [dummyScreenPos, setDummyScreenPos] = useState<{ visible: boolean; screenX: number; screenY: number; angle?: number; dist?: number }>({
+  const [dummyScreenPos, setDummyScreenPos] = useState<{ visible: boolean; screenX: number; screenY: number; angle?: number; dist?: number; hidden?: boolean }>({
     visible: false,
     screenX: 0,
     screenY: 0,
   });
+  const dummyScreenPosRef = useRef(dummyScreenPos);
+  dummyScreenPosRef.current = dummyScreenPos;
 
   // Game state
   const [gameState, setGameState] = useState<GameState>({
@@ -512,6 +514,11 @@ export default function App() {
     p1Swim: false,
     p1Ladder: false,
     p1Grip: 1,
+    p1Hint: '',
+    p1Candle: 0,
+    p1Shade: false,
+    night: 0,
+    foeHidden: false,
     p1Slip: 0,
     rain: 0,
     storm: 0,
@@ -581,6 +588,11 @@ export default function App() {
         p1Swim: !!p1.swimming,
         p1Ladder: !!p1.nearLadder,
         p1Grip: mapId === 'forest' ? p1.grip ?? 1 : 1,
+        p1Hint: mapId === 'forest' ? p1.interactHint ?? '' : '',
+        p1Candle: mapId === 'forest' ? p1.candle ?? 0 : 0,
+        p1Shade: !!p1.shade,
+        night: mapId === 'forest' ? mapRuntime.night : 0,
+        foeHidden: !!dummyScreenPosRef.current.hidden,
         p1Slip: mapId === 'forest' ? p1.slip ?? 0 : 0,
         rain: mapId === 'forest' ? mapRuntime.rain : 0,
         storm: mapId === 'forest' ? mapRuntime.storm : 0,
@@ -956,7 +968,7 @@ export default function App() {
         </Suspense>
 
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
-        {!dummyScreenPos.visible && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
+        {!dummyScreenPos.visible && !dummyScreenPos.hidden && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
           <div
             className="absolute pointer-events-none z-20 flex flex-col items-center"
             style={{
@@ -1038,6 +1050,9 @@ export default function App() {
           else if (hudMirror.p1Climb) meChips.push({ text: '攀爬中', tone: 'amber' });
           if (hudMirror.p1Swim) meChips.push({ text: '游泳中 不能出招', tone: 'sky' });
           if (hudMirror.p1Ladder) meChips.push({ text: '按住 F 爬梯子', tone: 'amber', pulse: true });
+          if (hudMirror.p1Hint) meChips.push({ text: hudMirror.p1Hint, tone: 'amber', pulse: true });
+          if (hudMirror.p1Candle) meChips.push({ text: hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
+          if (hudMirror.night > 0.55 && hudMirror.foeHidden) meChips.push({ text: '天黑 看不见对手', tone: 'slate' });
           if (hudMirror.p1Grip < 0.85) meChips.push({ text: `地滑 摩擦力 ${Math.round(hudMirror.p1Grip * 100)}%`, tone: hudMirror.p1Grip < 0.62 ? 'red' : 'sky' });
           if (hudMirror.p1Slip > 0.45) meChips.push({ text: hudMirror.p1Slip > 0.75 ? '快滑倒了！别急转' : '脚下不稳', tone: 'red', pulse: true });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });

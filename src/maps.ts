@@ -97,7 +97,43 @@ export const FOREST = {
   deckR: 1.25, // how far the lookout platform reaches beyond the trunk
   /** boulders: x, z, size, yaw */
   rocks: [] as [number, number, number, number][],
+  /** the hill with the old temple on top */
+  hill: { x: -30, z: -38, r: 16, top: 8.6, h: 5.5 },
+  /** temple hall on the hilltop (local frame: +z faces the map centre) */
+  temple: { w: 8, d: 6 },
+  /** where the candle-shade can be hidden (temple-local x, z) */
+  shadeSpots: [
+    [-2.6, -2.2],
+    [2.9, -2.4],
+    [-5.2, 3.4],
+    [5.4, 1.2],
+  ] as [number, number][],
 };
+/** temple frame: hilltop centre, facing toward the middle of the map */
+export const TEMPLE_YAW = Math.atan2(-FOREST.hill.x, -FOREST.hill.z);
+/** temple-local (x, z) to world (x, z) */
+export function templeToWorld(lx: number, lz: number): [number, number] {
+  const c = Math.cos(TEMPLE_YAW);
+  const s = Math.sin(TEMPLE_YAW);
+  return [FOREST.hill.x + lx * c + lz * s, FOREST.hill.z - lx * s + lz * c];
+}
+/** world to temple-local */
+export function worldToTemple(x: number, z: number): [number, number] {
+  const dx = x - FOREST.hill.x;
+  const dz = z - FOREST.hill.z;
+  const c = Math.cos(TEMPLE_YAW);
+  const s = Math.sin(TEMPLE_YAW);
+  return [dx * c - dz * s, dx * s + dz * c];
+}
+/** under the temple roof (sheltered from the rain) */
+export function underTempleRoof(x: number, z: number, y: number) {
+  const [lx, lz] = worldToTemple(x, z);
+  return Math.abs(lx) < FOREST.temple.w / 2 + 0.6 && Math.abs(lz) < FOREST.temple.d / 2 + 0.6 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 3.5;
+}
+/** the altar's world position (candles are taken here) */
+export function altarPos(): [number, number] {
+  return templeToWorld(0, -1.4);
+}
 (() => {
   const rand = frand(1234);
   const ok = (x: number, z: number, pad: number) => {
@@ -105,6 +141,7 @@ export const FOREST = {
     if (Math.abs(z - riverZ(x)) < FOREST.bankHalf + pad) return false;
     if (Math.hypot(x, z - 30) < 7 || Math.hypot(x, z + 28) < 7) return false; // spawns
     if (Math.abs(x - FOREST.bridge.x) < 6 && Math.abs(z - riverZ(x)) < 14) return false; // bridge approaches
+    if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 2 + pad) return false; // the temple hill
     return true;
   };
   // hand-placed lookout trees first (both sides of the river, near the action), then fill
@@ -113,7 +150,7 @@ export const FOREST = {
     [16, 22],
     [-6, -17],
     [24, -16],
-    [-32, -12],
+    [-34, -14],
     [36, 12],
     [-40, 22],
   ];
@@ -151,6 +188,7 @@ export const FOREST = {
       const x = Math.cos(a) * d;
       const z = Math.sin(a) * d;
       if (blockedT(x, z, 1)) continue;
+      if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 1) continue;
       const bank = Math.abs(Math.abs(z - riverZ(x)) - FOREST.deepHalf - 1.5) < 2.5;
       if (!bank && d < FOREST.radius - 2 && rr() < 0.8) continue;
       const sc = 0.25 + rr() * (bank ? 0.9 : 0.5);
@@ -181,6 +219,10 @@ export function forestFloor(x: number, z: number) {
   const bed = FOREST.bedY + (FOREST.waterY - 0.35 - FOREST.bedY) * fordAmount(x);
   const k = sstepF(FOREST.deepHalf - 1.2, FOREST.bankHalf, d);
   h = bed + (h - bed) * k;
+  // the temple hill: a round-shouldered mound with a flat top
+  const H = FOREST.hill;
+  const hd = Math.hypot(x - H.x, z - H.z);
+  if (hd < H.r) h = Math.max(h, H.h * sstepF(H.r, H.top, hd));
   // the forest floor rises into the trees beyond the arena
   const r = Math.hypot(x, z);
   h += sstepF(FOREST.radius, FOREST.radius + 14, r) * 4;
@@ -219,6 +261,24 @@ function forestPillars(): Circle[] {
     for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH + forestFloor(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n) });
   }
   for (const [x, z] of FOREST.stones) out.push({ x, z, r: 0.62, h: FOREST.waterY + 0.2 });
+  // temple: eight columns, back and side walls (a row of circles), the altar, the statue, the bell pavilion posts
+  {
+    const T = FOREST.temple;
+    const add = (lx: number, lz: number, r: number, h?: number) => {
+      const [x, z] = templeToWorld(lx, lz);
+      out.push(h === undefined ? { x, z, r } : { x, z, r, h: FOREST.hill.h + h });
+    };
+    for (const lx of [-T.w / 2, -T.w / 6, T.w / 6, T.w / 2]) for (const lz of [-T.d / 2, T.d / 2]) add(lx, lz, 0.32);
+    for (let lx = -T.w / 2; lx <= T.w / 2 + 0.01; lx += 0.6) add(lx, -T.d / 2 - 0.05, 0.32); // back wall
+    for (let lz = -T.d / 2; lz <= T.d / 2 - 1.4; lz += 0.6) {
+      add(-T.w / 2 - 0.05, lz, 0.32);
+      add(T.w / 2 + 0.05, lz, 0.32);
+    }
+    add(0, -1.4, 0.8, 1.0); // altar: you can hop onto it
+    add(0, -2.4, 0.75); // statue
+    for (const [px, pz] of [[-6.4, 2.0], [-4.6, 2.0], [-6.4, 3.8], [-4.6, 3.8]]) add(px, pz, 0.15); // bell pavilion
+    add(0, 4.6, 0.55, 1.1); // incense burner
+  }
   // small stones you step onto; big boulders are solid (a flat standing top over a rounded rock reads as floating)
   for (const [x, z, sc] of FOREST.rocks) out.push(sc < 0.5 ? { x, z, r: sc * 1.1, h: forestFloor(x, z) + sc * 0.75 } : { x, z, r: sc * 1.15 });
   return out;
@@ -488,6 +548,12 @@ export const mapRuntime = {
   /** 0..1 static gathering at (boltX, boltZ) before a strike */
   strikeWarn: 0,
   boltY: 0, // ground height of the last strike
+  /** 0 day .. 1 deep night */
+  night: 0,
+  /** distant sheet lightning in the clouds (no strike) */
+  skyFlash: 0,
+  /** which hiding place the candle-shade is in this round (-1 = someone took it) */
+  shadeSpot: 0,
 };
 
 // ----------------------------------------------------------------------

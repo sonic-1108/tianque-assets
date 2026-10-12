@@ -12,7 +12,7 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, altarPos } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -49,7 +49,7 @@ interface GameSceneProps {
     camPitch: number;
     camDist: number;
   }) => void;
-  onDummyScreenPosUpdate?: (data: { visible: boolean; screenX: number; screenY: number; angle?: number; dist?: number }) => void;
+  onDummyScreenPosUpdate?: (data: { visible: boolean; screenX: number; screenY: number; angle?: number; dist?: number; hidden?: boolean }) => void;
   onBloodRageFlash?: () => void;
   onAnimationDebug?: (info: AnimationDebugInfo) => void;
   onLoadProgress?: (progress: ModelLoadProgress) => void;
@@ -96,9 +96,9 @@ const TREE_RUN_T = 1.0;
 /** 青冥古林: each fighter's own grip (sole friction), before the weather */
 const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMage: 0.95 };
 /** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
-const SLIP_T = 0.62;
+const SLIP_T = 0.74;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
-const WEATHER = { clear: 26, cloud: 10, rain: 24, storm: 32, ease: 14 };
+const WEATHER = { clear: 20, cloud: 8, rain: 18, storm: 28, ease: 10, dusk: 10, night: 40, dawn: 10 };
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -203,8 +203,9 @@ export function Game({
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   const forestRef = useRef({ timer: 14 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
+  const bgNight = useMemo(() => new THREE.Color('#05070c'), []);
   /** weather clock and lightning timer (host / offline) */
-  const weatherRef = useRef({ t: 8, phase: '', strike: 6, warn: 0 });
+  const weatherRef = useRef({ t: 12, phase: '', strike: 6, warn: 0 });
   const slipPrevRef = useRef([[0, 0], [0, 0]]);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
@@ -573,6 +574,7 @@ export function Game({
       if (map.id === 'forest') {
         updateWater(c);
         updateGrip(i, c);
+        updateItems(i, c, i === 0 ? playerIntent : enemyIntent);
       }
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
@@ -683,11 +685,13 @@ export function Game({
     if (map.id === 'forest') {
       // the sun goes in as the rain comes; lightning lights everything up for an instant
       const rain = mapRuntime.rain;
-      if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.72 * rain) + mapRuntime.lightning * 4;
-      if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 - 0.3 * rain) + mapRuntime.lightning * 1.6;
+      const night = mapRuntime.night;
+      if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.72 * rain) * (1 - 0.95 * night) + mapRuntime.lightning * 4;
+      if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 - 0.3 * rain) * (1 - 0.86 * night) + mapRuntime.lightning * 1.6;
+      if (rimLightRef.current) rimLightRef.current.intensity = 2.4 * (1 - 0.85 * night);
       if (scene.fog) {
-        (scene.fog as THREE.Fog).near = map.fog[0] * (1 - 0.45 * rain);
-        (scene.fog as THREE.Fog).far = map.fog[1] * (1 - 0.5 * rain);
+        (scene.fog as THREE.Fog).near = map.fog[0] * (1 - 0.45 * rain) * (1 - 0.6 * night);
+        (scene.fog as THREE.Fog).far = map.fog[1] * (1 - 0.5 * rain) * (1 - 0.6 * night);
       }
     }
     if (rimLightRef.current) {
@@ -727,8 +731,12 @@ export function Game({
     headProj.set(en.pos[0], en.pos[1] + 2.25, en.pos[2]).project(camera);
     // direction to the opponent in camera space, for the off-screen arrow on the big maps
     vD.set(en.pos[0], en.pos[1] + 1, en.pos[2]).applyMatrix4(camera.matrixWorldInverse);
+    // 青冥古林 at night: you can't see your opponent unless they carry a lit candle or are inside your light
+    const enDist = Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]);
+    const hiddenInDark = map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? 10 : 4.5);
     onDummyScreenPosUpdate?.({
-      visible: headProj.z < 1 && Math.abs(headProj.x) < 1.1 && Math.abs(headProj.y) < 1.1,
+      visible: !hiddenInDark && headProj.z < 1 && Math.abs(headProj.x) < 1.1 && Math.abs(headProj.y) < 1.1,
+      hidden: hiddenInDark,
       screenX: (headProj.x * 0.5 + 0.5) * size.width,
       screenY: (-headProj.y * 0.5 + 0.5) * size.height,
       angle: Math.atan2(vD.x, -vD.z),
@@ -771,7 +779,7 @@ export function Game({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, branches: mapRuntime.branches.map((b) => ({ ...b })) },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, branches: mapRuntime.branches.map((b) => ({ ...b })) },
         ev: net.events.splice(0),
       });
     }
@@ -871,6 +879,7 @@ export function Game({
       bgBase.set(map.background);
       bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
       if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
+      if (map.id === 'forest') bgTmp.lerp(bgNight, mapRuntime.night * 0.92); // night
       bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
       if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
       if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
@@ -1363,6 +1372,8 @@ export function Game({
         const dz = pl.z - c.pos[2];
         const d = Math.hypot(dx, dz);
         if (d > pl.r + 2.6) return;
+        // standing at the ladder: that's F, not 梯云纵
+        if (pl.ladder !== undefined && Math.hypot(c.pos[0] - (pl.x + Math.cos(pl.ladder) * (pl.r + 0.45)), c.pos[2] - (pl.z + Math.sin(pl.ladder) * (pl.r + 0.45))) < 1.5) return;
         // close to the trunk: any direction works; a bit further out you have to be heading for it
         if (d > pl.r + 1.2 && (dir.x * dx + dir.z * dz) / d < 0.2) return;
         // the AI only goes up after you
@@ -2713,6 +2724,9 @@ export function Game({
         c.treeClimb = undefined;
         c.climbing = false;
         c.swimming = false;
+        c.candle = 0;
+        c.shade = false;
+        c.slip = 0;
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
@@ -2729,7 +2743,10 @@ export function Game({
       bombZonesRef.current = [];
       mapRuntime.branches.length = 0;
       forestRef.current.timer = 14;
-      weatherRef.current = { t: 8, phase: '', strike: 6, warn: 0 };
+      weatherRef.current = { t: 12, phase: '', strike: 6, warn: 0 };
+      mapRuntime.night = 0;
+      mapRuntime.skyFlash = 0;
+      mapRuntime.shadeSpot = Math.floor(Math.random() * FOREST.shadeSpots.length);
       mapRuntime.rain = 0;
       mapRuntime.storm = 0;
       mapRuntime.strikeWarn = 0;
@@ -3170,6 +3187,7 @@ export function Game({
       bgBase.set(map.background);
       bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
       if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
+      if (map.id === 'forest') bgTmp.lerp(bgNight, mapRuntime.night * 0.92); // night
       bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
       if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
       if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
@@ -3300,10 +3318,53 @@ export function Game({
      * 青冥古林 footing: every fighter has their own grip; rain and mud cut it. Below SLIP_T, every sharp change of
      * velocity (cutting, stopping, rolling) and every hard landing costs balance; lose it all and you go down.
      */
+    /**
+     * 青冥古林 items: F at the temple altar takes a lit candle (or relights yours), F at the hiding place takes the
+     * candle-shade. Out in the rain an unshaded candle can be put out.
+     */
+    function updateItems(i: number, c: CombatantState, intent: Intent | null) {
+      const pressed = !!intent?.interact && !c.intPrev;
+      c.intPrev = !!intent?.interact;
+      c.interactHint = '';
+      if (c.hp <= 0) return;
+      const [ax, az] = altarPos();
+      const nearAltar = Math.hypot(c.pos[0] - ax, c.pos[2] - az) < 2.4 && Math.abs(c.pos[1] - FOREST.hill.h) < 2;
+      if (nearAltar && c.candle !== 2) {
+        c.interactHint = c.candle === 1 ? '按 F 重新点燃蜡烛' : '按 F 取一支蜡烛';
+        if (pressed) {
+          c.candle = 2;
+          vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.3, c.pos[2]), 10, '#ffcf6a', 2, 0.05, UP, 0.8);
+          if (i === 0) onRoundEvent?.({ type: 'toast', text: c.shade ? '取了蜡烛，灯罩护着火苗，不怕雨' : '取了蜡烛 · 淋雨可能会灭，寺里藏着一个灯罩' });
+        }
+      }
+      const spot = mapRuntime.shadeSpot;
+      if (spot >= 0 && !c.shade) {
+        const [lx, lz] = FOREST.shadeSpots[spot];
+        const [sx, sz] = templeToWorld(lx, lz);
+        if (Math.hypot(c.pos[0] - sx, c.pos[2] - sz) < 1.5 && Math.abs(c.pos[1] - FOREST.hill.h) < 2) {
+          c.interactHint = '按 F 拿起灯罩';
+          if (pressed) {
+            c.shade = true;
+            mapRuntime.shadeSpot = -1;
+            vfx.sparkBurst(vB.set(sx, FOREST.hill.h + 0.6, sz), 12, '#fde68a', 2.5, 0.05, UP, 0.8);
+            if (i === 0) onRoundEvent?.({ type: 'toast', text: '找到灯罩！蜡烛不会再被雨浇灭' });
+          }
+        }
+      }
+      // rain on an unshaded flame
+      if (c.candle === 2 && !c.shade && mapRuntime.rain > 0.25 && !underTempleRoof(c.pos[0], c.pos[2], c.pos[1]) && Math.random() < dt * 0.22 * mapRuntime.rain) {
+        c.candle = 1;
+        vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), 4, 0.1, 0.8, 0.5, '#9ca3af');
+        if (i === 0) onRoundEvent?.({ type: 'toast', text: '蜡烛被雨浇灭了 · 回寺里供桌按 F 重新点' });
+      }
+      // swimming puts it out too
+      if (c.candle === 2 && c.swimming && !c.shade) c.candle = 1;
+    }
+
     function updateGrip(i: number, c: CombatantState) {
       const rain = mapRuntime.rain;
       let g = GRIP[c.classId] ?? 0.85;
-      g *= 1 - rain * 0.32 - mapRuntime.storm * 0.18;
+      g *= 1 - rain * 0.36 - mapRuntime.storm * 0.2;
       const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
       const onDeck = c.pos[1] > floor + 2;
       if (!onDeck && Math.abs(c.pos[2] - riverZ(c.pos[0])) < FOREST.bankHalf + 2.5) g *= 1 - 0.18 * (0.4 + rain * 0.6); // river mud
@@ -3316,8 +3377,13 @@ export function Game({
       prev[1] = c.vel[2];
       const st = c.actionState;
       const footwork = c.isGrounded && !c.swimming && c.treeClimb === undefined && (st === 'idle' || st === 'run' || st === 'dodge' || st === 'block' || st.startsWith('attack_'));
-      if (footwork && g < SLIP_T) c.slip = (c.slip ?? 0) + Math.hypot(dvx, dvz) * (SLIP_T - g) * 0.24;
-      c.slip = Math.max(0, (c.slip ?? 0) - dt * (g < SLIP_T ? 0.32 : 0.8));
+      const dv = Math.hypot(dvx, dvz);
+      if (footwork && g < SLIP_T) {
+        c.slip = (c.slip ?? 0) + dv * (SLIP_T - g) * 0.34;
+        // skidding: a spray of mud and water at the feet
+        if (dv > 0.6 && Math.random() < 0.6) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 2, 0.2, 1.2, 0.35, mapRuntime.rain > 0.3 ? '#cbd5e1' : '#6b5a40');
+      }
+      c.slip = Math.max(0, (c.slip ?? 0) - dt * (g < SLIP_T ? 0.25 : 0.8));
       if ((c.slip ?? 0) >= 1 && footwork && c.hp > 0) {
         // down you go
         c.slip = 0;
@@ -3348,36 +3414,59 @@ export function Game({
         (globalThis as any).__TQ_WEATHER_T = undefined;
       }
       if (!round.over) W.t += dt;
-      const cyc = WEATHER.clear + WEATHER.cloud + WEATHER.rain + WEATHER.storm + WEATHER.ease;
+      const cyc = WEATHER.clear + WEATHER.cloud + WEATHER.rain + WEATHER.storm + WEATHER.ease + WEATHER.dusk + WEATHER.night + WEATHER.dawn;
       const t = W.t % cyc;
       let rainT = 0;
       let stormT = 0;
+      let nightT = 0;
       let phase = 'clear';
       const c1 = WEATHER.clear;
       const c2 = c1 + WEATHER.cloud;
       const c3 = c2 + WEATHER.rain;
       const c4 = c3 + WEATHER.storm;
+      const c5 = c4 + WEATHER.ease;
+      const c6 = c5 + WEATHER.dusk;
+      const c7 = c6 + WEATHER.night;
       if (t < c1) phase = 'clear';
       else if (t < c2) {
         phase = 'cloud';
         rainT = 0.15 * ((t - c1) / WEATHER.cloud);
       } else if (t < c3) {
         phase = 'rain';
-        rainT = 0.6;
+        rainT = 0.65;
       } else if (t < c4) {
         phase = 'storm';
         rainT = 1;
         stormT = 1;
-      } else {
+      } else if (t < c5) {
         phase = 'ease';
         rainT = 0.5 * (1 - (t - c4) / WEATHER.ease);
+      } else if (t < c6) {
+        phase = 'dusk';
+        nightT = (t - c5) / WEATHER.dusk;
+      } else if (t < c7) {
+        // night, with a fine rain that puts out any candle without a shade
+        phase = 'night';
+        nightT = 1;
+        rainT = 0.45;
+      } else {
+        phase = 'dawn';
+        nightT = 1 - (t - c7) / WEATHER.dawn;
       }
       mapRuntime.rain = THREE.MathUtils.damp(mapRuntime.rain, rainT, 0.6, dt);
       mapRuntime.storm = THREE.MathUtils.damp(mapRuntime.storm, stormT, 0.8, dt);
+      mapRuntime.night = THREE.MathUtils.damp(mapRuntime.night, nightT, 0.9, dt);
+      // sheet lightning flickering in the clouds whenever it's stormy (and now and then in the rain)
+      mapRuntime.skyFlash = Math.max(0, mapRuntime.skyFlash - dt * 4);
+      if (Math.random() < dt * (stormT * 0.9 + (phase === 'rain' ? 0.15 : 0))) {
+        mapRuntime.skyFlash = 0.5 + Math.random() * 0.5;
+        mapRuntime.lightning = Math.max(mapRuntime.lightning, mapRuntime.skyFlash * 0.5);
+        if (Math.random() < 0.5) vfx.later(0.4 + Math.random() * 1.2, () => gameAudio.playThunder());
+      }
       if (phase !== W.phase) {
-        const msg: Record<string, string> = { cloud: '天色暗了下来，山雨欲来', rain: '下雨了 · 地面湿滑，急转急停小心滑倒', storm: '暴雨雷暴！雷会劈站得最高的人，泡在水里会导电', ease: '雨小了', clear: '雨过天晴' };
+        const msg: Record<string, string> = { cloud: '天色暗了下来，山雨欲来', rain: '下雨了 · 地面湿滑，急转急停小心滑倒', storm: '暴雨雷暴！雷会劈站得最高的人，泡在水里会导电', ease: '雨小了', dusk: '天快黑了 · 去山上古寺取蜡烛', night: '入夜 · 黑暗中看不见对手，只有烛光能照亮；雨会浇灭没有灯罩的蜡烛', dawn: '天亮了', clear: '雨过天晴' };
         if (W.phase && msg[phase]) onRoundEvent?.({ type: 'toast', text: msg[phase] });
-        if (phase === 'storm') W.strike = 3;
+        if (phase === 'storm') W.strike = 2;
         W.phase = phase;
       }
       // lightning
@@ -3390,7 +3479,7 @@ export function Game({
         } else {
           W.strike -= dt;
           if (W.strike <= 0) {
-            W.strike = 4.5 + Math.random() * 3;
+            W.strike = 2.6 + Math.random() * 2.2;
             // aim at the highest fighter (whoever is up a tree), else either one, leading their run a little
             const alive = fighters.filter((f) => f.hp > 0);
             if (alive.length) {
@@ -3964,6 +4053,10 @@ export function Game({
       <group ref={enemyGroupRef} position={[0, 0, -6]}>
         <CharacterRig3D classId={enemyClass} combatantRef={dummyRefState} isPlayer={false} socketsRef={enemySockets} />
       </group>
+      <group>
+        {mapId === 'forest' && <HeldCandle combatantRef={p1RefState} />}
+        {mapId === 'forest' && <HeldCandle combatantRef={dummyRefState} />}
+      </group>
 
       <primitive object={vfx.root} />
 
@@ -3975,6 +4068,79 @@ export function Game({
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
       </EffectComposer>
+    </group>
+  );
+}
+
+
+/** 青冥古林: a candle carried in the hand: a warm light that shows you (and gives you away) in the dark */
+function HeldCandle({ combatantRef }: { combatantRef: React.MutableRefObject<CombatantState> }) {
+  const group = useRef<THREE.Group>(null);
+  const flame = useRef<THREE.Sprite>(null);
+  const light = useRef<THREE.PointLight>(null);
+  const shadeRef = useRef<THREE.Mesh>(null);
+  const flameTex = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = 32;
+    c.height = 64;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(16, 40, 1, 16, 36, 16);
+    grd.addColorStop(0, 'rgba(255,255,230,1)');
+    grd.addColorStop(0.35, 'rgba(255,200,90,0.95)');
+    grd.addColorStop(1, 'rgba(255,120,20,0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.ellipse(16, 38, 10, 24, 0, 0, Math.PI * 2);
+    g.fill();
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, []);
+  useFrame((st) => {
+    const c = combatantRef.current;
+    const g = group.current;
+    if (!c || !g) return;
+    const has = (c.candle ?? 0) > 0 && c.hp > 0;
+    g.visible = has;
+    if (!has) {
+      if (light.current) light.current.intensity = 0;
+      return;
+    }
+    // held out at the right hand, a little in front
+    const fx = -Math.sin(c.rotY);
+    const fz = -Math.cos(c.rotY);
+    const rx = -fz;
+    const rz = fx;
+    g.position.set(c.pos[0] + rx * 0.38 + fx * 0.32, c.pos[1] + (c.swimming ? 0.6 : c.treeClimb !== undefined ? 1.6 : 1.12), c.pos[2] + rz * 0.38 + fz * 0.32);
+    const lit = c.candle === 2;
+    const t = st.clock.elapsedTime;
+    const fl = 0.85 + 0.15 * Math.sin(t * 23 + c.pos[0]) * Math.sin(t * 7.3);
+    if (flame.current) {
+      flame.current.visible = lit;
+      flame.current.scale.set(0.09 * fl, 0.2 * fl, 1);
+    }
+    if (light.current) light.current.intensity = lit ? 7 * fl : 0;
+    if (shadeRef.current) shadeRef.current.visible = !!c.shade;
+  });
+  return (
+    <group ref={group} visible={false}>
+      <mesh position={[0, -0.09, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 0.18, 8]} />
+        <meshStandardMaterial color="#efe6d2" roughness={0.6} />
+      </mesh>
+      <mesh position={[0, -0.19, 0]}>
+        <cylinderGeometry args={[0.06, 0.05, 0.03, 10]} />
+        <meshStandardMaterial color="#8a6a3a" metalness={0.6} roughness={0.4} />
+      </mesh>
+      <sprite ref={flame} position={[0, 0.06, 0]}>
+        <spriteMaterial map={flameTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} color={new THREE.Color(2.2, 1.6, 0.9)} />
+      </sprite>
+      {/* paper shade */}
+      <mesh ref={shadeRef} position={[0, 0.02, 0]} visible={false}>
+        <cylinderGeometry args={[0.09, 0.11, 0.26, 12, 1, true]} />
+        <meshStandardMaterial color="#f3e2b8" emissive="#ffb04a" emissiveIntensity={0.9} transparent opacity={0.75} side={THREE.DoubleSide} roughness={0.9} />
+      </mesh>
+      <pointLight ref={light} color="#ffb867" intensity={0} distance={11} decay={1.6} position={[0, 0.1, 0]} />
     </group>
   );
 }

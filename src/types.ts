@@ -208,6 +208,10 @@ export interface CombatantState {
   nearLadder?: boolean; // standing at the foot of a ladder (HUD hint)
   grip?: number; // 0..1 effective friction underfoot (青冥古林 weather)
   slip?: number; // 0..1 loss of balance; at 1 you fall
+  candle?: 0 | 1 | 2; // 青冥古林: 0 none, 1 carrying an unlit candle, 2 lit
+  shade?: boolean; // has the candle-shade (rain can't put the candle out)
+  intPrev?: boolean; // F was held last frame (pickups fire on the press)
+  interactHint?: string; // what F would do right here (HUD)
   swimming?: boolean; // 青冥古林: floating in deep water
   ledgeBlocked?: number; // walking was stopped at a sheer drop (AI uses it to steer)
   sliding?: boolean; // out of stamina on a steep slope
