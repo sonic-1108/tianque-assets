@@ -1082,7 +1082,7 @@ export default function App() {
           <span className="text-lg font-black text-amber-300 tracking-[0.25em] leading-tight">
             {aiEnabled || online ? `${score.player} : ${score.enemy}` : '自由试炼'}
           </span>
-          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`}</span>
+          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`} · 版本 {__BUILD__}</span>
         </div>
       </div>
 
