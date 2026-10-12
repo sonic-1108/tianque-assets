@@ -25,6 +25,8 @@ export type NetMessage =
   | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; req: string | null }
   | { t: 's'; f: any[]; p: any[]; m: any; ev: any[]; ts?: number }
   | { t: 're'; e: any }
+  | { t: 'pi'; c: number }
+  | { t: 'po'; c: number }
   | { t: 'bye' };
 
 /** relay-only control messages (never reach the game) */
@@ -124,7 +126,10 @@ export class NetSession {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
+  private pinger = 0;
   private changed(status?: NetStatus, err?: string) {
+    if (status === 'connected' && this.role === 'guest' && !this.pinger)
+      this.pinger = window.setInterval(() => this.status === 'connected' && this.send({ t: 'pi', c: performance.now() }), 1000);
     if (status) this.status = status;
     if (err !== undefined) this.error = err;
     this.listeners.forEach((l) => l());
@@ -251,6 +256,15 @@ export class NetSession {
         const old = this.snaps.shift()!;
         if (!old.used && old.msg.ev.length) this.inbox.push(...old.msg.ev); // never drop an effect
       }
+      return;
+    }
+    if (m.t === 'pi') {
+      this.send({ t: 'po', c: m.c });
+      return;
+    }
+    if (m.t === 'po') {
+      const rtt = performance.now() - m.c;
+      this.pingMs = this.pingMs ? this.pingMs + (rtt - this.pingMs) * 0.25 : rtt;
       return;
     }
     if (m.t === 'hello') {
@@ -422,6 +436,7 @@ export class NetSession {
       this.conn?.close();
       this.peer?.destroy();
       this.relayTimers.forEach((t) => (window.clearTimeout(t), window.clearInterval(t)));
+      window.clearInterval(this.pinger);
       this.relays.forEach((c) => c.end(true));
     } catch {
       /* ignore */

@@ -216,6 +216,7 @@ export default function App() {
   }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
+  const [autoDpr, setAutoDpr] = useState<number | null>(null);
   const netRef = useRef<NetSession | null>(null);
   const [, setNetTick] = useState(0);
   const [joinCode, setJoinCode] = useState('');
@@ -952,7 +953,7 @@ export default function App() {
         >
           <Canvas
             shadows
-            dpr={QUALITY[settings.quality].dpr}
+            dpr={autoDpr ?? QUALITY[settings.quality].dpr}
             gl={{ antialias: false, powerPreference: 'high-performance' }}
             camera={STATIC_CANVAS_CAMERA}
             className="w-full h-full block"
@@ -972,6 +973,7 @@ export default function App() {
               onRoundEvent={handleRoundEvent}
               onVfxCountChange={setVfxCount}
               onDebugUpdate={setDebugData}
+              onAutoDpr={setAutoDpr}
               onDummyScreenPosUpdate={setDummyScreenPos}
               onBloodRageFlash={handleBloodRageFlash}
               onAnimationDebug={setAnimDebugInfo}

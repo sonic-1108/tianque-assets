@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
@@ -42,6 +42,8 @@ interface GameSceneProps {
   showBoneAxes?: boolean;
   onRoundEvent?: (e: RoundEvent) => void;
   onVfxCountChange?: (count: number) => void;
+  /** automatic quality: the device pixel ratio the canvas should render at */
+  onAutoDpr?: (dpr: number) => void;
   onDebugUpdate?: (data: {
     playerPos: [number, number, number];
     cameraPos: [number, number, number];
@@ -186,6 +188,7 @@ export function Game({
   onRoundEvent,
   onVfxCountChange,
   onDebugUpdate,
+  onAutoDpr,
   onDummyScreenPosUpdate,
   onBloodRageFlash,
   onAnimationDebug,
@@ -201,6 +204,52 @@ export function Game({
       (l.shadow as any).map = null;
     }
   }, [quality]);
+
+  // ---- automatic quality: keep the frame rate up on laptops (retina screens render 4x the pixels)
+  const setDpr = (d: number) => onAutoDpr?.(d);
+  const [perfTier, setPerfTier] = useState(0); // 0 everything, 1 no ambient occlusion, 2 also no MSAA
+  const perf = useRef({ frames: 0, t0: 0, dpr: 1, max: 1, slow: 0, fast: 0, tier: 0 });
+  useEffect(() => {
+    const P = perf.current;
+    P.max = Math.min(window.devicePixelRatio || 1, QUALITY[quality].dpr[1]);
+    P.dpr = Math.min(P.max, 1.5);
+    P.tier = 0;
+    P.slow = P.fast = 0;
+    setDpr(P.dpr);
+    setPerfTier(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quality]);
+  useFrame(() => {
+    const P = perf.current;
+    const now = performance.now();
+    if (!P.t0 || document.hidden) {
+      P.t0 = now;
+      P.frames = 0;
+      return;
+    }
+    P.frames++;
+    if (now - P.t0 < 1000) return;
+    const fps = (P.frames * 1000) / (now - P.t0);
+    P.t0 = now;
+    P.frames = 0;
+    if (fps < 50) {
+      P.slow++;
+      P.fast = 0;
+    } else if (fps > 58) {
+      P.fast++;
+      P.slow = 0;
+    } else P.slow = P.fast = 0;
+    if (P.slow >= 2) {
+      P.slow = 0;
+      if (P.tier === 0 && quality === 'high') setPerfTier((P.tier = 1));
+      else if (P.dpr > 0.76) setDpr((P.dpr = Math.max(0.75, P.dpr - 0.25)));
+      else if (P.tier < 2) setPerfTier((P.tier = 2));
+    } else if (P.fast >= 8 && P.dpr < P.max - 0.01) {
+      P.fast = 0;
+      setDpr((P.dpr = Math.min(P.max, P.dpr + 0.25)));
+    }
+    (globalThis as any).__TQ_PERF = { fps: Math.round(fps), dpr: P.dpr, tier: P.tier };
+  });
 
   const playerGroupRef = useRef<THREE.Group>(null);
   const enemyGroupRef = useRef<THREE.Group>(null);
@@ -243,6 +292,8 @@ export function Game({
   const glyphRef = useRef<{ idx: number; slot: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
   const lastSnapRef = useRef<unknown>(null);
+  /** guest: locally predicted position of our own fighter */
+  const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
 
   const auraTimers = useRef([0, 0]);
@@ -856,8 +907,9 @@ export function Game({
         }
         const fresh = s1 !== lastSnapRef.current;
         ([[p1, 1], [en, 0]] as [CombatantState, number][]).forEach(([c, idx], local) => {
-          const a = s0.msg.f[idx];
-          const b = s1.msg.f[idx];
+          // ourselves: the newest state (no interpolation delay); the opponent: smoothly, a little in the past
+          const a = local === 0 ? snaps[snaps.length - 1].msg.f[idx] : s0.msg.f[idx];
+          const b = local === 0 ? snaps[snaps.length - 1].msg.f[idx] : s1.msg.f[idx];
           const prevHp = c.hp;
           const prevState = c.actionState;
           const shown = c.stateTimer;
@@ -875,6 +927,81 @@ export function Game({
             controller?.addShake(prevHp - b.hp > 120 ? 0.4 : 0.15);
           }
         });
+        // ---- our own fighter: predicted locally so running and turning answer the keys at once; the host's
+        // newest word on where we are pulls the prediction back in gently (hard snap only if far off)
+        {
+          const P = predRef.current;
+          const newest = snaps[snaps.length - 1];
+          const nb = newest.msg.f[1];
+          const now = performance.now();
+          const age = Math.min(0.25, (now - newest.at) / 1000);
+          const ax = nb.pos[0] + nb.vel[0] * age;
+          const az = nb.pos[2] + nb.vel[2] * age;
+          const loco = (nb.actionState === 'idle' || nb.actionState === 'run' || nb.actionState === 'jump' || nb.actionState === 'block') && nb.hp > 0 && nb.treeClimb === undefined && !nb.swimming && !(nb.rootTimer > 0);
+          if (!P.on) {
+            P.x = ax;
+            P.z = az;
+            P.vx = P.vz = 0;
+            P.on = true;
+          }
+          if (loco) {
+            const mult = nb.actionState === 'block' ? 0.25 : 1;
+            const spd = speedOf(p1) * mult;
+            const acc = nb.isGrounded ? 18 * THREE.MathUtils.clamp((nb.grip ?? 1) * (nb.grip ?? 1) * 1.4, 0.22, 1) : 6;
+            P.vx = THREE.MathUtils.damp(P.vx, mv.x * spd, acc, realDt);
+            P.vz = THREE.MathUtils.damp(P.vz, mv.z * spd, acc, realDt);
+            P.x += P.vx * realDt;
+            P.z += P.vz * realDt;
+            P.hist.push([now, P.x, P.z]);
+            while (P.hist.length > 90 || (P.hist.length && P.hist[0][0] < now - 1500)) P.hist.shift();
+            if (newest !== P.lastSnap) {
+              P.lastSnap = newest;
+              // where we predicted ourselves when the host computed this snapshot (one round trip ago)
+              const back = newest.at - Math.max(30, n.pingMs || 120);
+              let hx = P.x;
+              let hz = P.z;
+              for (let q = P.hist.length - 1; q >= 0; q--)
+                if (P.hist[q][0] <= back) {
+                  hx = P.hist[q][1];
+                  hz = P.hist[q][2];
+                  break;
+                }
+              const ex = nb.pos[0] - hx;
+              const ez = nb.pos[2] - hz;
+              if (ex * ex + ez * ez > 2.5 * 2.5) {
+                P.x = ax;
+                P.z = az;
+                P.hist.length = 0;
+              } else {
+                P.x += ex * 0.3;
+                P.z += ez * 0.3;
+                for (const h of P.hist) {
+                  h[1] += ex * 0.3;
+                  h[2] += ez * 0.3;
+                }
+              }
+            }
+          } else {
+            // dodges, hits, skills: the host drives us, followed closely (no interpolation delay for ourselves)
+            P.x = THREE.MathUtils.damp(P.x, ax, 22, realDt);
+            P.z = THREE.MathUtils.damp(P.z, az, 22, realDt);
+            P.vx = nb.vel[0];
+            P.vz = nb.vel[2];
+            P.hist.length = 0;
+          }
+          p1.pos = [P.x, nb.pos[1] + Math.max(-0.5, nb.vel[1] * age), P.z];
+          if (nb.isGrounded) p1.pos[1] = Math.max(p1.pos[1], groundHeight(p1) - 0.02);
+          if (loco) {
+            const moving = P.vx * P.vx + P.vz * P.vz > 0.25;
+            if (nb.isGrounded && moving && nb.actionState === 'idle') p1.actionState = 'run';
+            if (nb.isGrounded && !moving && nb.actionState === 'run') p1.actionState = 'idle';
+            const want = targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw;
+            let d = want - p1.rotY;
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            p1.rotY += d * Math.min(1, realDt * 14);
+          }
+        }
         if (fresh) {
           lastSnapRef.current = s1;
           Object.assign(mapRuntime, s1.msg.m);
@@ -908,8 +1035,9 @@ export function Game({
         if (typeof fn !== 'function') continue;
         const args = (ev[2] as any[]).map((x) => (x && typeof x === 'object' && 'v3' in x ? new THREE.Vector3(x.v3[0], x.v3[1], x.v3[2]) : x));
         // slot-indexed effects: the host's slot 0 is our opponent
-        if ((ev[1] === 'setVortex' || ev[1] === 'pillarAt') && typeof args[2] === 'number') args[2] = 1 - args[2];
-        if (ev[1] === 'glyph' && typeof args[3] === 'number') args[3] = 1 - args[3];
+        const SLOT_ARG: Record<string, number> = { setVortex: 2, pillarAt: 2, glyph: 3, bell: 1, bellHit: 0, zenField: 3 };
+        const si = SLOT_ARG[ev[1]];
+        if (si !== undefined) args[si] = 1 - (typeof args[si] === 'number' ? args[si] : 0); // a missing slot meant the default 0
         fn.apply(vfx, args);
       }
       // sky tint from lightning / eruption, same as on the host
@@ -4131,8 +4259,8 @@ export function Game({
 
       <primitive object={vfx.root} />
 
-      <EffectComposer multisampling={quality === 'high' ? 4 : quality === 'medium' ? 2 : 0}>
-        {quality === 'high' && <N8AO halfRes quality="medium" aoRadius={2.4} distanceFalloff={1.0} intensity={3.5} color="#1a1410" />}
+      <EffectComposer multisampling={perfTier >= 2 ? 0 : quality === 'high' ? 4 : quality === 'medium' ? 2 : 0}>
+        {quality === 'high' && perfTier === 0 && <N8AO halfRes quality="medium" aoRadius={2.4} distanceFalloff={1.0} intensity={3.5} color="#1a1410" />}
         <HueSaturation saturation={0.08} />
         <BrightnessContrast brightness={0} contrast={0.06} />
         <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />

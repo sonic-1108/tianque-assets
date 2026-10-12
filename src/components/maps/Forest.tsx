@@ -2024,7 +2024,7 @@ function Temple() {
       f.scale.set(0.055 * k, 0.14 * k, 1);
     });
     lights.current.forEach((l, i) => {
-      if (l) l.intensity = (i === 0 ? 4 : 2.5) * (1 + mapRuntime.night * 2.5) * (0.92 + 0.08 * Math.sin(t * 13 + i));
+      if (l) l.intensity = 5 * (1 + mapRuntime.night * 2.5) * (0.92 + 0.08 * Math.sin(t * 13 + i));
     });
     banners.current.forEach((b, i) => {
       if (b) b.rotation.y = Math.sin(t * 0.7 + i) * 0.08;
@@ -2212,13 +2212,12 @@ function Temple() {
             <sprite ref={(el) => (flames.current[i] = el)} position={[0, 0.58, 0]} material={mats.flame} />
           </group>
         ))}
-        <pointLight ref={(el) => (lights.current[0] = el)} position={[0, 2.2, 1.0]} color="#ffb05a" intensity={4} distance={18} decay={1.4} />
+        <pointLight ref={(el) => (lights.current[0] = el)} position={[0, 2.4, 1.2]} color="#ffb05a" intensity={5} distance={20} decay={1.3} />
       </group>
       {/* candle racks either side */}
       {[-2.6, 2.6].map((x, i) => (
         <group key={'cr' + x} position={[x, P, -1.5]}>
           <CandleRack mats={mats} flames={flames} base={2 + i * 18} />
-          <pointLight ref={(el) => (lights.current[1 + i] = el)} position={[0, 1.6, 0.4]} color="#ffb05a" intensity={2.5} distance={9} decay={1.6} />
         </group>
       ))}
       {/* a carpet runner from the doors to the altar */}
