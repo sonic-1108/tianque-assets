@@ -542,9 +542,9 @@ function trunkGeometry(radius: number, height: number, seed: number, deck = 0) {
     const flare = Math.exp(-Math.max(0, y) / 0.9);
     for (let j = 0; j <= seg; j++) {
       const a = (j / seg) * Math.PI * 2;
-      const butt = Math.pow(Math.max(0, Math.sin(a * lobes + ph)), 3) * 0.45 * Math.exp(-Math.max(0, y) / 0.6);
+      const butt = Math.pow(Math.max(0, Math.sin(a * lobes + ph)), 3) * 0.22 * Math.exp(-Math.max(0, y) / 0.5);
       const knot = (Math.sin(a * 3 + y * 0.8 + ph) * 0.03 + Math.sin(a * 7 - y * 1.7) * 0.02) * (1 - flare);
-      const r = radius * (taper + flare * 0.3 + butt + knot);
+      const r = radius * (taper + flare * 0.16 + butt + knot);
       pos.push(bx(y) + Math.cos(a) * r, y, bz(y) + Math.sin(a) * r);
       uv.push((j / seg) * 3, y / 3);
     }

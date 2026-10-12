@@ -91,6 +91,8 @@ const colorFor = (slot: number, c: CombatantState) =>
     : ENEMY_COLOR;
 /** 禅定结界 radius */
 const ZEN_R = 4.5;
+/** 梯云纵: seconds to run up a lookout tree */
+const TREE_RUN_T = 1.0;
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -1299,7 +1301,6 @@ export function Game({
      * spiralling round the trunk, then flip over the rail onto the deck. About one second, costs stamina.
      * A hit on the way up knocks you off. Returns true while the move is running (normal movement is skipped).
      */
-    const TREE_RUN_T = 1.0;
     function startTreeRun(c: CombatantState, intent: Intent): boolean {
       if (map.id !== 'forest' || !c.isGrounded || c.swimming || c.hp <= 0) return false;
       const i = fighters.indexOf(c);
@@ -1312,7 +1313,9 @@ export function Game({
         const dx = pl.x - c.pos[0];
         const dz = pl.z - c.pos[2];
         const d = Math.hypot(dx, dz);
-        if (d > pl.r + 1.8 || (dir.x * dx + dir.z * dz) / d < 0.3) return;
+        if (d > pl.r + 2.6) return;
+        // close to the trunk: any direction works; a bit further out you have to be heading for it
+        if (d > pl.r + 1.2 && (dir.x * dx + dir.z * dz) / d < 0.2) return;
         // the AI only goes up after you
         if (aiOn && i === 1 && !(fighters[0].pos[1] > (pl.h ?? 0) - 1 && Math.hypot(fighters[0].pos[0] - pl.x, fighters[0].pos[2] - pl.z) < (pl.deck ?? pl.r) + 0.5)) return;
         if (d < bestD) {
@@ -1359,13 +1362,27 @@ export function Game({
       const k = Math.min(steps - 1, Math.floor(u * steps));
       const f = u * steps - k;
       const rise = (k + THREE.MathUtils.smootherstep(f, 0, 0.75)) / steps;
-      const top = (pl.h ?? 0) + 0.9; // clear the rail
+      const top = (pl.h ?? 0) + 1.2; // clear the rail
       const y0 = c.climbY0 ?? c.pos[1];
       const a = (c.climbA0 ?? 0) + (c.climbSide ?? 1) * 1.1 * u;
-      const R0 = pl.r + 0.55 + Math.sin(Math.min(1, f / 0.75) * Math.PI) * 0.3;
+      // the first two kicks hug the trunk below the deck; the last one swings out past the deck's edge
+      // (never up through the planks) and arcs back in over the rail
+      const outer = (pl.deck ?? pl.r + 1.25) + 0.55;
+      const R0 = k < 2 ? pl.r + 0.55 + Math.sin(Math.min(1, f / 0.75) * Math.PI) * 0.25 : THREE.MathUtils.lerp(pl.r + 0.55, outer, Math.min(1, f * 3));
+      // keep the climber under the deck until they are out past its edge
+      const under = (pl.h ?? 0) - 1.6;
       c.pos[0] = pl.x + Math.cos(a) * R0;
       c.pos[2] = pl.z + Math.sin(a) * R0;
-      c.pos[1] = y0 + (top - y0) * rise;
+      let y = y0 + (top - y0) * rise;
+      if (k === 2 && Math.hypot(c.pos[0] - pl.x, c.pos[2] - pl.z) < outer - 0.2) y = Math.min(y, under);
+      c.pos[1] = y;
+      // over the rail: come back in toward the trunk as the flip lands
+      if (k === 2 && f > 0.7) {
+        const back = (f - 0.7) / 0.3;
+        const Rin = THREE.MathUtils.lerp(outer, pl.r + 0.8, back);
+        c.pos[0] = pl.x + Math.cos(a) * Rin;
+        c.pos[2] = pl.z + Math.sin(a) * Rin;
+      }
       c.vel = [0, 0, 0];
       c.rotY = c.targetRotY = yawTo(c.pos, [pl.x, 0, pl.z]);
       // a puff of bark and a ring of qi at every kick
@@ -1375,6 +1392,7 @@ export function Game({
         vfx.dustPuff(vB.set(bx, c.pos[1] + 0.2, bz), 6, 0.25, 1.4, 0.4, '#9a8a6a');
         vfx.ring(vC.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 0.9, '#e0f2fe', 0.35, 0.06, 0.2);
         if (prevT > 0) gameAudio.playDodge();
+        if (prevT === 0 && fighters.indexOf(c) === 0) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), '梯云纵', true, '#e0f2fe');
       }
       if (t >= T) {
         // over the rail and onto the deck, facing out over the forest

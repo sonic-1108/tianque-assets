@@ -204,7 +204,8 @@ export function waterDepth(x: number, z: number) {
   return Math.max(0, FOREST.waterY - forestFloor(x, z));
 }
 function forestPillars(): Circle[] {
-  const out: Circle[] = FOREST.trees.map(([x, z, r, deck]) => (deck > 0 ? { x, z, r, h: deck, deck: r + FOREST.deckR, climb: true } : { x, z, r }));
+  // collision a touch wider than the drawn trunk so the root flare never swallows a foot
+  const out: Circle[] = FOREST.trees.map(([x, z, r, deck]) => (deck > 0 ? { x, z, r: r * 1.08, h: deck, deck: r + FOREST.deckR, climb: true } : { x, z, r: r * 1.08 }));
   for (const [x0, z0, x1, z1] of FOREST.logs) {
     const L = Math.hypot(x1 - x0, z1 - z0);
     const n = Math.max(2, Math.round(L / 1.0));
