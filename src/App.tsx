@@ -967,6 +967,13 @@ export default function App() {
           </Canvas>
         </Suspense>
 
+        {/* interaction prompt: appears only while you're standing at something F works on */}
+        {hudMirror.p1Hint && !isGameMenuOpen && !isMapSelectOpen && (
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-44 z-30 pointer-events-none flex items-center gap-2 bg-black/70 border border-amber-400/70 rounded-xl px-3 py-1.5 shadow-xl">
+            <span className="w-7 h-7 rounded-md bg-amber-400 text-black font-black flex items-center justify-center text-sm shadow-inner">F</span>
+            <span className="text-sm font-bold text-amber-100">{hudMirror.p1Hint.replace(/^按住? ?F ?/, '')}</span>
+          </div>
+        )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {!dummyScreenPos.visible && !dummyScreenPos.hidden && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
           <div
@@ -1049,8 +1056,6 @@ export default function App() {
           if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
           else if (hudMirror.p1Climb) meChips.push({ text: '攀爬中', tone: 'amber' });
           if (hudMirror.p1Swim) meChips.push({ text: '游泳中 不能出招', tone: 'sky' });
-          if (hudMirror.p1Ladder) meChips.push({ text: '按住 F 爬梯子', tone: 'amber', pulse: true });
-          if (hudMirror.p1Hint) meChips.push({ text: hudMirror.p1Hint, tone: 'amber', pulse: true });
           if (hudMirror.p1Candle) meChips.push({ text: hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
           if (hudMirror.night > 0.55 && hudMirror.foeHidden) meChips.push({ text: '天黑 看不见对手', tone: 'slate' });
           if (hudMirror.p1Grip < 0.85) meChips.push({ text: `地滑 摩擦力 ${Math.round(hudMirror.p1Grip * 100)}%`, tone: hudMirror.p1Grip < 0.62 ? 'red' : 'sky' });

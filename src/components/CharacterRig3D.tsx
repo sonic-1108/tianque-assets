@@ -43,6 +43,8 @@ export interface RigSockets {
   leftBase: THREE.Object3D | null;
   leftTip: THREE.Object3D | null;
   chest: THREE.Object3D | null;
+  /** left hand bone: candles and the candle-shade are carried here */
+  leftHand?: THREE.Object3D | null;
 }
 
 interface CharacterRigProps {
@@ -501,6 +503,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         leftBase: left.base,
         leftTip: left.tip,
         chest: bones.spine2 || bones.spine1 || null,
+        leftHand: bones.lefthand || null,
       };
     }
 
@@ -654,7 +657,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy;
-      if (w0.left) w0.left.group.visible = !handsBusy && classId !== 'Ranger';
+      // the left hand carries the candle / candle-shade in 青冥古林
+      if (w0.left) w0.left.group.visible = !handsBusy && classId !== 'Ranger' && !c.candle && !c.shade;
     }
 
     // Face protection (暗器 model): damp neck / head rotation toward rest

@@ -98,7 +98,7 @@ const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMag
 /** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
 const SLIP_T = 0.74;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
-const WEATHER = { clear: 20, cloud: 8, rain: 18, storm: 28, ease: 10, dusk: 10, night: 40, dawn: 10 };
+const WEATHER = { clear: 25, cloud: 10, rain: 45, storm: 55, ease: 12, dusk: 15, night: 80, dawn: 12 };
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -191,8 +191,8 @@ export function Game({
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const cameraControllerRef = useRef<CameraController | null>(null);
-  const playerSockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null });
-  const enemySockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null });
+  const playerSockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null });
+  const enemySockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null });
 
   const slowMoTimerRef = useRef(0);
   const gameTimeRef = useRef(0);
@@ -1428,6 +1428,7 @@ export function Game({
         });
         if (hit < 0) return false;
         c.nearLadder = true;
+        c.interactHint = '按住 F 爬梯子';
         if (!intent.interact) return false;
         c.treeClimb = hit;
         c.climbMode = 'ladder';
@@ -3325,7 +3326,7 @@ export function Game({
     function updateItems(i: number, c: CombatantState, intent: Intent | null) {
       const pressed = !!intent?.interact && !c.intPrev;
       c.intPrev = !!intent?.interact;
-      c.interactHint = '';
+      c.interactHint = c.nearLadder ? '按住 F 爬梯子' : '';
       if (c.hp <= 0) return;
       const [ax, az] = altarPos();
       const nearAltar = Math.hypot(c.pos[0] - ax, c.pos[2] - az) < 2.4 && Math.abs(c.pos[1] - FOREST.hill.h) < 2;
@@ -3610,6 +3611,7 @@ export function Game({
             z *= (map.radius - 1.5) / d;
           }
           if (spots.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 3.5)) continue;
+          if (underTempleRoof(x, z, FOREST.hill.h + 0.5)) continue; // the roof keeps them off
           spots.push([x, z]);
           // staggered so they don't all land on the same beat
           mapRuntime.branches.push({ x, z, t: -1.9 - k * 0.35, a: Math.random() * Math.PI });
@@ -4054,8 +4056,8 @@ export function Game({
         <CharacterRig3D classId={enemyClass} combatantRef={dummyRefState} isPlayer={false} socketsRef={enemySockets} />
       </group>
       <group>
-        {mapId === 'forest' && <HeldCandle combatantRef={p1RefState} />}
-        {mapId === 'forest' && <HeldCandle combatantRef={dummyRefState} />}
+        {mapId === 'forest' && <HeldCandle combatantRef={p1RefState} socketsRef={playerSockets} />}
+        {mapId === 'forest' && <HeldCandle combatantRef={dummyRefState} socketsRef={enemySockets} />}
       </group>
 
       <primitive object={vfx.root} />
@@ -4074,11 +4076,13 @@ export function Game({
 
 
 /** 青冥古林: a candle carried in the hand: a warm light that shows you (and gives you away) in the dark */
-function HeldCandle({ combatantRef }: { combatantRef: React.MutableRefObject<CombatantState> }) {
+function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableRefObject<CombatantState>; socketsRef: React.MutableRefObject<RigSockets> }) {
+  const handPos = useMemo(() => new THREE.Vector3(), []);
   const group = useRef<THREE.Group>(null);
   const flame = useRef<THREE.Sprite>(null);
   const light = useRef<THREE.PointLight>(null);
   const shadeRef = useRef<THREE.Mesh>(null);
+  const candleBody = useRef<THREE.Group>(null);
   const flameTex = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = 32;
@@ -4100,18 +4104,23 @@ function HeldCandle({ combatantRef }: { combatantRef: React.MutableRefObject<Com
     const c = combatantRef.current;
     const g = group.current;
     if (!c || !g) return;
-    const has = (c.candle ?? 0) > 0 && c.hp > 0;
+    const has = ((c.candle ?? 0) > 0 || !!c.shade) && c.hp > 0;
+    if (candleBody.current) candleBody.current.visible = (c.candle ?? 0) > 0;
     g.visible = has;
     if (!has) {
       if (light.current) light.current.intensity = 0;
       return;
     }
-    // held out at the right hand, a little in front
-    const fx = -Math.sin(c.rotY);
-    const fz = -Math.cos(c.rotY);
-    const rx = -fz;
-    const rz = fx;
-    g.position.set(c.pos[0] + rx * 0.38 + fx * 0.32, c.pos[1] + (c.swimming ? 0.6 : c.treeClimb !== undefined ? 1.6 : 1.12), c.pos[2] + rz * 0.38 + fz * 0.32);
+    // in the left hand: follow the hand bone, the candle itself stays upright
+    const hand = socketsRef.current.leftHand;
+    if (hand) {
+      hand.getWorldPosition(handPos);
+      g.position.set(handPos.x, handPos.y + 0.07, handPos.z);
+    } else {
+      const fx = -Math.sin(c.rotY);
+      const fz = -Math.cos(c.rotY);
+      g.position.set(c.pos[0] + fz * 0.38 + fx * 0.32, c.pos[1] + 1.1, c.pos[2] - fx * 0.38 + fz * 0.32);
+    }
     const lit = c.candle === 2;
     const t = st.clock.elapsedTime;
     const fl = 0.85 + 0.15 * Math.sin(t * 23 + c.pos[0]) * Math.sin(t * 7.3);
@@ -4124,6 +4133,7 @@ function HeldCandle({ combatantRef }: { combatantRef: React.MutableRefObject<Com
   });
   return (
     <group ref={group} visible={false}>
+      <group ref={candleBody}>
       <mesh position={[0, -0.09, 0]}>
         <cylinderGeometry args={[0.03, 0.03, 0.18, 8]} />
         <meshStandardMaterial color="#efe6d2" roughness={0.6} />
@@ -4132,6 +4142,7 @@ function HeldCandle({ combatantRef }: { combatantRef: React.MutableRefObject<Com
         <cylinderGeometry args={[0.06, 0.05, 0.03, 10]} />
         <meshStandardMaterial color="#8a6a3a" metalness={0.6} roughness={0.4} />
       </mesh>
+      </group>
       <sprite ref={flame} position={[0, 0.06, 0]}>
         <spriteMaterial map={flameTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} color={new THREE.Color(2.2, 1.6, 0.9)} />
       </sprite>

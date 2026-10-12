@@ -98,15 +98,15 @@ export const FOREST = {
   /** boulders: x, z, size, yaw */
   rocks: [] as [number, number, number, number][],
   /** the hill with the old temple on top */
-  hill: { x: -30, z: -38, r: 16, top: 8.6, h: 5.5 },
+  hill: { x: -30, z: -38, r: 17.5, top: 10.2, h: 5.5 },
   /** temple hall on the hilltop (local frame: +z faces the map centre) */
-  temple: { w: 8, d: 6 },
+  temple: { w: 10, d: 7, podium: 0.6, col: 4.6 },
   /** where the candle-shade can be hidden (temple-local x, z) */
   shadeSpots: [
-    [-2.6, -2.2],
-    [2.9, -2.4],
-    [-5.2, 3.4],
-    [5.4, 1.2],
+    [-3.6, -2.7],
+    [3.7, -2.8],
+    [-5.3, 6.4],
+    [3.4, 6.6],
   ] as [number, number][],
 };
 /** temple frame: hilltop centre, facing toward the middle of the map */
@@ -128,11 +128,11 @@ export function worldToTemple(x: number, z: number): [number, number] {
 /** under the temple roof (sheltered from the rain) */
 export function underTempleRoof(x: number, z: number, y: number) {
   const [lx, lz] = worldToTemple(x, z);
-  return Math.abs(lx) < FOREST.temple.w / 2 + 0.6 && Math.abs(lz) < FOREST.temple.d / 2 + 0.6 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 3.5;
+  return Math.abs(lx) < FOREST.temple.w / 2 + 1.4 && Math.abs(lz) < FOREST.temple.d / 2 + 1.4 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 7;
 }
 /** the altar's world position (candles are taken here) */
 export function altarPos(): [number, number] {
-  return templeToWorld(0, -1.4);
+  return templeToWorld(0, -1.6);
 }
 (() => {
   const rand = frand(1234);
@@ -141,7 +141,8 @@ export function altarPos(): [number, number] {
     if (Math.abs(z - riverZ(x)) < FOREST.bankHalf + pad) return false;
     if (Math.hypot(x, z - 30) < 7 || Math.hypot(x, z + 28) < 7) return false; // spawns
     if (Math.abs(x - FOREST.bridge.x) < 6 && Math.abs(z - riverZ(x)) < 14) return false; // bridge approaches
-    if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 2 + pad) return false; // the temple hill
+    // the temple hill, with room so no limb or crown reaches over the temple
+    if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 9 + pad) return false;
     return true;
   };
   // hand-placed lookout trees first (both sides of the river, near the action), then fill
@@ -223,6 +224,12 @@ export function forestFloor(x: number, z: number) {
   const H = FOREST.hill;
   const hd = Math.hypot(x - H.x, z - H.z);
   if (hd < H.r) h = Math.max(h, H.h * sstepF(H.r, H.top, hd));
+  // the temple's stone podium
+  if (hd < H.top) {
+    const [lx, lz] = worldToTemple(x, z);
+    const T = FOREST.temple;
+    if (Math.abs(lx) < T.w / 2 + 1.4 && Math.abs(lz) < T.d / 2 + 1.4) h = H.h + T.podium;
+  }
   // the forest floor rises into the trees beyond the arena
   const r = Math.hypot(x, z);
   h += sstepF(FOREST.radius, FOREST.radius + 14, r) * 4;
@@ -261,23 +268,27 @@ function forestPillars(): Circle[] {
     for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH + forestFloor(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n) });
   }
   for (const [x, z] of FOREST.stones) out.push({ x, z, r: 0.62, h: FOREST.waterY + 0.2 });
-  // temple: eight columns, back and side walls (a row of circles), the altar, the statue, the bell pavilion posts
+  // temple: columns, thick back and side walls, lattice screens in the outer front bays, altar, statue,
+  // bell pavilion posts, incense burner (rows of circles: the collision is a set of round posts)
   {
     const T = FOREST.temple;
-    const add = (lx: number, lz: number, r: number, h?: number) => {
+    const P = FOREST.hill.h + T.podium;
+    const add = (lx: number, lz: number, r: number, top?: number) => {
       const [x, z] = templeToWorld(lx, lz);
-      out.push(h === undefined ? { x, z, r } : { x, z, r, h: FOREST.hill.h + h });
+      out.push(top === undefined ? { x, z, r } : { x, z, r, h: top });
     };
-    for (const lx of [-T.w / 2, -T.w / 6, T.w / 6, T.w / 2]) for (const lz of [-T.d / 2, T.d / 2]) add(lx, lz, 0.32);
-    for (let lx = -T.w / 2; lx <= T.w / 2 + 0.01; lx += 0.6) add(lx, -T.d / 2 - 0.05, 0.32); // back wall
-    for (let lz = -T.d / 2; lz <= T.d / 2 - 1.4; lz += 0.6) {
-      add(-T.w / 2 - 0.05, lz, 0.32);
-      add(T.w / 2 + 0.05, lz, 0.32);
+    const cols = [-T.w / 2, -T.w / 6, T.w / 6, T.w / 2];
+    for (const lx of cols) for (const lz of [-T.d / 2, T.d / 2]) add(lx, lz, 0.36);
+    for (let lx = -T.w / 2; lx <= T.w / 2 + 0.01; lx += 0.55) add(lx, -T.d / 2 - 0.1, 0.3); // back wall
+    for (let lz = -T.d / 2; lz <= T.d / 2 + 0.01; lz += 0.55) {
+      add(-T.w / 2 - 0.1, lz, 0.3);
+      add(T.w / 2 + 0.1, lz, 0.3);
     }
-    add(0, -1.4, 0.8, 1.0); // altar: you can hop onto it
-    add(0, -2.4, 0.75); // statue
-    for (const [px, pz] of [[-6.4, 2.0], [-4.6, 2.0], [-6.4, 3.8], [-4.6, 3.8]]) add(px, pz, 0.15); // bell pavilion
-    add(0, 4.6, 0.55, 1.1); // incense burner
+    for (const sx of [-1, 1]) for (let lx = T.w / 6 + 0.4; lx < T.w / 2 - 0.2; lx += 0.55) add(sx * lx, T.d / 2, 0.25); // lattice screens
+    add(0, -1.6, 0.85, P + 1.0); // altar: you can hop onto it
+    add(0, -2.8, 0.95); // statue
+    for (const [px, pz] of [[-6.3, 5.3], [-4.3, 5.3], [-6.3, 7.3], [-4.3, 7.3]]) add(px, pz, 0.16); // bell pavilion
+    add(0, 6.3, 0.6, FOREST.hill.h + 1.1); // incense burner
   }
   // small stones you step onto; big boulders are solid (a flat standing top over a rounded rock reads as floating)
   for (const [x, z, sc] of FOREST.rocks) out.push(sc < 0.5 ? { x, z, r: sc * 1.1, h: forestFloor(x, z) + sc * 0.75 } : { x, z, r: sc * 1.15 });
