@@ -114,15 +114,21 @@ const RANGER_CLIP_PLAN: Record<string, ClipSpec> = {
 /** 梵音 overrides: jabs, palm thrusts, a stamp for the zen circle, praying hands, meditation */
 const MONK_CLIP_PLAN: Record<string, ClipSpec> = {
   ...CLIP_PLAN,
-  attack_1: { match: ['box_01', 'punch', 'jab'], start: 0.1, end: 0.48, hit: 0.23, hitAt: 0.11 },
+  idle: { match: ['standing_relax', 'idle'], loop: true },
+  attack_1: { match: ['box_01', 'punch'], start: 0.1, end: 0.48, hit: 0.23, hitAt: 0.11 },
   attack_2: { match: ['box_03', 'box_02', 'punch'], start: 0.12, end: 0.47, hit: 0.26, hitAt: 0.12 },
-  attack_3: { match: ['palm', 'push', 'box_02', 'box_01'], start: 0.1, end: 0.5, fit: true },
-  skill_1: { match: ['palm', 'push', 'box_01', 'punch'], start: 0.1, end: 0.5, fit: true },
-  skill_2: { match: ['stomp', 'angry_02', 'angry_01', 'angry'], start: 0.5, end: 0.82, fit: true },
-  skill_3: { match: ['pray', 'meditat', 'agree', 'idle'], start: 0.0, end: 0.6, fit: true },
-  skill_4: { match: ['angry_01', 'roar', 'angry'], start: 0.52, end: 0.82, fit: true },
-  m_ult: { match: ['meditat', 'pray', 'sit', 'idle'], loop: true },
-  cheer: { match: ['pray', 'cheer', 'victory', 'agree'], start: 0.0, end: 0.45, loop: true },
+  // cast_a_spell: one arm drives straight out, palm forward
+  attack_3: { match: ['cast_a_spell', 'box_02'], start: 0.28, end: 0.68, fit: true },
+  skill_1: { match: ['cast_a_spell', 'box_02'], start: 0.3, end: 0.72, fit: true },
+  // angry_01: both arms flung up and a stamp
+  skill_2: { match: ['angry_01', 'angry'], start: 0.42, end: 0.8, fit: true },
+  // clap: palms pressed together, the chant
+  skill_3: { match: ['clap', 'bow', 'agree'], start: 0.08, end: 0.85, fit: true },
+  skill_4: { match: ['angry_01', 'angry'], start: 0.3, end: 0.68, fit: true },
+  // sit: legs folded under him, floated a little off the ground for 万佛朝宗
+  m_ult: { match: ['sit', 'clap', 'idle'], start: 0.3, end: 0.75, loop: true, speed: 0.3 },
+  dodge: { match: ['dive', 'roll', 'flip'], start: 0.36, end: 0.92, fit: true },
+  cheer: { match: ['bow', 'cheer'], start: 0.0, end: 0.9, loop: true, speed: 0.6 },
 };
 const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : CLIP_PLAN);
 
@@ -403,6 +409,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.color = new THREE.Color('#9aa3ad');
         }
         m.emissive = new THREE.Color('#000000');
+        if (classId === 'BuddhistMage' && !asset.fallback) {
+          // 金身: let the gilded skin catch the light
+          m.envMapIntensity = 1.6;
+          m.roughness = Math.min(m.roughness ?? 1, 0.85);
+        }
         o.material = m;
         mats.push(m);
       }
@@ -593,7 +604,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // Locomotion playback speed matches ground speed (no foot sliding)
     const cur = actionsRef.current[currentKeyRef.current];
     if (cur && (currentKeyRef.current === 'run' || currentKeyRef.current === 'walk')) {
-      const base = currentKeyRef.current === 'run' ? (classId === 'Ranger' ? 7.5 : 6.0) : 2.2;
+      const base = currentKeyRef.current === 'run' ? (classId === 'Ranger' ? 7.5 : classId === 'BuddhistMage' ? 6.4 : 6.0) : 2.2;
       const ts = THREE.MathUtils.clamp(speed / base, 0.6, 1.8);
       cur.setEffectiveTimeScale(backward ? -ts : ts);
     }
@@ -603,7 +614,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     // Face protection (暗器 model): damp neck / head rotation toward rest
     const rq = restQuats.current;
-    if (classId === 'Ranger' && !asset.fallback) {
+    if ((classId === 'Ranger' || classId === 'BuddhistMage') && !asset.fallback) {
       if (rq.neckBone && rq.neck) rq.neckBone.quaternion.slerp(rq.neck, 0.6);
       if (rq.headBone && rq.head) rq.headBone.quaternion.slerp(rq.head, 0.45);
     }
@@ -644,8 +655,10 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // ---------- hit flash & blood rage ----------
     const flash = c.whiteFlashTimer > 0 ? Math.min(1, c.whiteFlashTimer / 0.12) : 0;
     const rage = c.buffs.some((b) => b.type === 'blood_rage');
+    // 梵音: the golden body glows under 金钟罩 and while the Buddha is called down
+    const holy = classId === 'BuddhistMage' && ((c.bellTimer ?? 0) > 0 || st === 'ultimate') ? 0.5 + 0.25 * Math.sin(performance.now() * 0.008) : 0;
     for (const m of materialsRef.current) {
-      m.emissive.setRGB(flash * 0.75, flash * 0.6, flash * 0.5);
+      m.emissive.setRGB(flash * 0.75 + holy * 0.55, flash * 0.6 + holy * 0.38, flash * 0.5 + holy * 0.08);
     }
     const w = weaponsRef.current;
     const pulse = rage ? 0.65 + 0.35 * Math.sin(performance.now() * 0.012) : 0;
