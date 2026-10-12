@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest';
 
 export interface Circle {
   x: number;
@@ -54,7 +54,53 @@ const ring = (n: number, radius: number, r: number, offset = 0): Circle[] =>
     return { x: Math.cos(a) * radius, z: Math.sin(a) * radius, r };
   });
 
-export const MAPS: Record<MapId, MapDef> = {
+// ----------------------------------------------------------------------
+// 青冥古林: a clearing among thousand-year-old trees, a stream across the middle.
+// ----------------------------------------------------------------------
+export const FOREST = {
+  /** giant trees inside the arena: x, z, trunk radius */
+  trees: [
+    [-12, -2, 2.0],
+    [11.5, 4, 2.2],
+    [-6.5, -15, 1.7],
+    [7.5, -12.5, 1.8],
+    [-15, 12, 1.9],
+    [16.5, -9.5, 1.7],
+    [4, 19.5, 1.6],
+    [-20.5, -11, 1.8],
+    [19.5, 14, 1.9],
+  ] as [number, number, number][],
+  /** fallen logs you can jump onto: from, to */
+  logs: [
+    [-9.5, 7, -3.8, 9.8],
+    [5.5, -3.2, 11.5, -6.6],
+  ] as [number, number, number, number][],
+  logR: 0.72,
+  logH: 1.15,
+  streamHalf: 1.45,
+  /** stepping stones on the stream's centre line (x) */
+  stones: [-15, -7.5, 0.5, 8, 15.5],
+};
+/** the stream's centre line: z as a function of x */
+export function streamZ(x: number) {
+  return 1.2 + 3.2 * Math.sin(x * 0.13 + 0.6) + 1.1 * Math.sin(x * 0.31 + 2.0);
+}
+/** 1 inside the stream, 0 on dry ground */
+export function inStream(x: number, z: number) {
+  return Math.abs(z - streamZ(x)) < FOREST.streamHalf ? 1 : 0;
+}
+function forestPillars(): Circle[] {
+  const out: Circle[] = FOREST.trees.map(([x, z, r]) => ({ x, z, r }));
+  for (const [x0, z0, x1, z1] of FOREST.logs) {
+    const L = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.max(2, Math.round(L / 1.0));
+    for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH });
+  }
+  for (const x of FOREST.stones) out.push({ x, z: streamZ(x), r: 0.62, h: 0.42 });
+  return out;
+}
+
+export const MAPS = {
   temple: {
     id: 'temple',
     name: '天阙演武场',
@@ -250,8 +296,38 @@ export const MAPS: Record<MapId, MapDef> = {
     // floating jade posts just outside the inner disc: they survive the collapse
     pillars: [...ring(4, 10.6, 0.7, Math.PI / 4).map((p) => ({ ...p, h: 2.2 })), ...ring(6, 18.3, 0.8, 0).map((p) => ({ ...p, h: 2.6 }))],
   },
+} as Record<MapId, MapDef>;
+
+MAPS.forest = {
+  id: 'forest',
+  name: '青冥古林',
+  subtitle: '千年古树遮天蔽日，阳光从树冠缝里漏下来，一条山溪横穿林间空地',
+  icon: '🌲',
+  mechanics: [
+    '九棵合抱古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕',
+    '山溪横穿中间，蹚水时移动变慢；溪里有五块踏脚石，站上去不减速',
+    '两根倒木可以跳上去，居高临下',
+    '山风一起，树上的枯枝会砸下来，落点先出现红圈，快躲开',
+  ],
+  homeClass: 'Ranger',
+  homeClassName: '暗器',
+  homeBonus: '伤害 +10%',
+  available: true,
+  radius: 25,
+  spawnPlayer: [0, 13],
+  spawnEnemy: [0, -13],
+  background: '#9db08a',
+  fog: [16, 120],
+  hemi: ['#d9e8c0', '#2c3a22', 0.75],
+  keyColor: '#ffe2a8',
+  keyIntensity: 2.6,
+  exposure: 0.95,
+  bloom: 0.8,
+  cardGradient: 'from-emerald-900/80 via-green-900/70 to-zinc-950/90',
+  pillars: forestPillars(),
 };
 
+// 青冥古林 joins the list once its scenery is finished
 export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'rooftop', 'summit'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
@@ -272,6 +348,9 @@ export const mapRuntime = {
   summitStage: 0, // 天阙之巅: rings already fallen (0, 1 = outer gone, 2 = middle gone)
   summitWarn: 0, // 0..1 cracks glowing on the ring that is about to go
   summitFall: 0, // seconds since the last ring broke (drives the falling pieces)
+  /** 青冥古林: branches coming down. t < 0: warning (falls during the last 0.45 s), 0 = impact, then lies there */
+  branches: [] as { x: number; z: number; t: number; a: number }[],
+  gust: 0, // 0..1 wind gust shaking the canopy
 };
 
 // ----------------------------------------------------------------------

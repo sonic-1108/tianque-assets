@@ -24,6 +24,7 @@ export const SKY_ENV: Record<MapId, SkyEnv> = {
   glacier: { zenith: '#56739c', horizon: '#e6e2dc', ground: '#e9eff6', sunDir: [-0.55, 0.32, -0.77], sun: '#ffe6c8', sunPower: 12, intensity: 0.7 },
   bamboo: { zenith: '#0d1420', horizon: '#33435a', ground: '#cfd8e3', sunDir: [0, 1, 0], sun: '#cfe0ff', sunPower: 2, intensity: 0.6 },
   rooftop: { zenith: '#070a18', horizon: '#4a2216', ground: '#c2541c', sunDir: [-0.45, 0.42, -0.78], sun: '#d6dcff', sunPower: 5, intensity: 0.55 },
+  forest: { zenith: '#6f8fa8', horizon: '#c9d6a8', ground: '#3d4a2a', sunDir: [0.47, 0.8, 0.35], sun: '#ffe2a8', sunPower: 6, intensity: 0.55 },
   summit: { zenith: '#2f5fae', horizon: '#f0cf9c', ground: '#e9e2d6', sunDir: [0.5, 0.14, -1], sun: '#ffcf8a', sunPower: 12, intensity: 0.45 },
 };
 

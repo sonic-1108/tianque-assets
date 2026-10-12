@@ -12,7 +12,7 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, inStream } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -191,6 +191,7 @@ export function Game({
   const mapTimeRef = useRef(0);
   const eruptRef = useRef({ timer: 9 });
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
+  const forestRef = useRef({ timer: 14 });
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
@@ -204,6 +205,8 @@ export function Game({
     pendingResetRef.current = true;
   }, [mapId, playerClass, enemyClass]);
   const projRef = useRef<Projectile[]>([]);
+  /** 雪岭: ground height each fighter last stood on (for the no-climbing rule) */
+  const takeoffY = useRef([0, 0]);
   /** 六字真言 syllables in flight (host / offline only; the guest sees them through the vfx replay) */
   const glyphRef = useRef<{ idx: number; slot: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
@@ -443,7 +446,10 @@ export function Game({
       enemyIntent.request = round.over || en.hp <= 0 ? null : (r.req as InputKeyAction | null);
       r.reqTtl -= dt;
       if (r.reqTtl <= 0) r.req = null;
-    } else if (aiOn && !round.over && en.hp > 0) runAI(en, p1, enemyIntent, dt);
+    } else if (aiOn && !round.over && en.hp > 0) {
+      runAI(en, p1, enemyIntent, dt);
+      if (map.id === 'glacier') routeUpMountain(en, p1, enemyIntent);
+    }
     else if (!aiOn) {
       enemyIntent.faceYaw = en.targetRotY;
     }
@@ -536,6 +542,7 @@ export function Game({
       c.pos[0] += c.vel[0] * cdt;
       c.pos[2] += c.vel[2] * cdt;
       ledgeGuard(c, px0, pz0);
+      mountainWall(i, c, px0, pz0);
       const free = c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || c.actionState === 'skill_2';
       if (!free || c.actionState === 'dodge') {
         const k = Math.exp(-4.5 * cdt);
@@ -730,7 +737,7 @@ export function Game({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, branches: mapRuntime.branches.map((b) => ({ ...b })) },
         ev: net.events.splice(0),
       });
     }
@@ -1242,6 +1249,7 @@ export function Game({
           if (c.actionState === 'block') mult = 0.25;
           if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
           if (inZen(c)) mult *= 0.5;
+          if (map.id === 'forest' && c.pos[1] < 0.3 && inStream(c.pos[0], c.pos[2])) mult *= 0.62; // wading
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
           const accel = c.isGrounded ? 18 : 6;
@@ -1275,7 +1283,8 @@ export function Game({
       const uz = gz / steep;
       const mv = intent.move;
       const along = mv.lengthSq() > 0.01 ? (mv.x * ux + mv.z * uz) / Math.max(0.001, mv.length()) : 0; // +1 = straight uphill
-      if (along > 0.3) {
+      const noClimb = map.id === 'glacier';
+      if (along > 0.3 && !noClimb) {
         if ((c.stamina ?? 0) > 0.5) {
           // climbing: slow, costly, steeper costs more
           c.climbing = true;
@@ -1289,7 +1298,7 @@ export function Game({
         }
       }
       // no grip left (or not climbing): the snow slides you back down the face
-      const exhausted = (c.stamina ?? 0) <= 0.5 && along > 0.3;
+      const exhausted = !noClimb && (c.stamina ?? 0) <= 0.5 && along > 0.3;
       const slip = exhausted ? 6.5 : steep > 1.05 && mv.lengthSq() < 0.01 && !c.isBlocking ? 1.4 : 0;
       if (slip > 0) {
         c.sliding = exhausted;
@@ -2440,6 +2449,8 @@ export function Game({
       mapTimeRef.current = 0;
       eruptRef.current = { timer: 9 };
       bombZonesRef.current = [];
+      mapRuntime.branches.length = 0;
+      forestRef.current.timer = 14;
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
@@ -2490,6 +2501,40 @@ export function Game({
      * Walking never takes you over a sheer drop (roof edge, cliff): only being knocked, dodging or jumping does.
      * Slide along the edge instead of stopping dead, so the AI can steer round a courtyard.
      */
+    /**
+     * 雪岭: the mountain can only be climbed by the road. Off the road, any move that would gain height
+     * (walking, dodging, jumping, being knocked) is stopped at the slope; going down is always allowed.
+     * In the air the reference is the ground you jumped from, so hopping up the face doesn't work either.
+     */
+    function mountainWall(i: number, c: CombatantState, px0: number, pz0: number) {
+      if (map.id !== 'glacier' || c.actionState === 'buried') return;
+      if (c.isGrounded) takeoffY.current[i] = c.pos[1];
+      const nx = c.pos[0];
+      const nz = c.pos[2];
+      if (nx === px0 && nz === pz0) return;
+      const blocked = (x: number, z: number) => {
+        const h1 = glacierHeight(x, z);
+        if (h1 < 1.2) return false; // valley floor
+        if (glacierPath(x, z).on > 0.5) return false; // the road
+        const d = Math.hypot(x - px0, z - pz0);
+        if (c.isGrounded) return h1 - glacierHeight(px0, pz0) > d * 0.35 + 0.02;
+        return h1 > takeoffY.current[i] + 0.3 && h1 > c.pos[1] - 1.2;
+      };
+      if (!blocked(nx, nz)) return;
+      // slide along the slope if one axis is fine, otherwise stop
+      if (!blocked(nx, pz0)) {
+        c.pos[2] = pz0;
+        c.vel[2] = 0;
+      } else if (!blocked(px0, nz)) {
+        c.pos[0] = px0;
+        c.vel[0] = 0;
+      } else {
+        c.pos[0] = px0;
+        c.pos[2] = pz0;
+        c.vel[0] = c.vel[2] = 0;
+      }
+    }
+
     function ledgeGuard(c: CombatantState, px0: number, pz0: number) {
       if (!map.terrain || !c.isGrounded) return;
       const s = c.actionState;
@@ -2512,6 +2557,7 @@ export function Game({
 
     function danger(x: number, z: number, margin: number) {
       for (const zn of bombZonesRef.current) if (Math.hypot(x - zn.x, z - zn.z) < zn.r + 0.6) return true;
+      if (map.id === 'forest') for (const b of mapRuntime.branches) if (b.t < 0 && Math.hypot(x - b.x, z - b.z) < 2.6) return true;
       if (map.id === 'lavacliff') return Math.hypot(x, z) > map.radius - 1.8 - margin;
       if (map.id === 'summit') {
         const d = Math.hypot(x, z);
@@ -2847,6 +2893,7 @@ export function Game({
       if (map.id === 'glacier') updateGlacier();
       if (map.id === 'rooftop') updateRooftop();
       if (map.id === 'summit') updateSummit(t);
+      if (map.id === 'forest') updateForest();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
@@ -2947,6 +2994,69 @@ export function Game({
             });
           }, 1.3);
         });
+      }
+    }
+
+    /** 青冥古林: splashes in the stream, and now and then a gust brings dead branches down */
+    function updateForest() {
+      for (let i = 0; i < 2; i++) {
+        const c = fighters[i];
+        if (c.isGrounded && c.pos[1] < 0.3 && inStream(c.pos[0], c.pos[2]) && Math.hypot(c.vel[0], c.vel[2]) > 1.5 && Math.random() < dt * 9)
+          vfx.dustPuff(vB.set(c.pos[0], 0.08, c.pos[2]), 3, 0.25, 1.4, 0.35, '#dbeafe');
+      }
+      mapRuntime.gust = Math.max(0, mapRuntime.gust - dt * 0.35);
+      const F = forestRef.current;
+      if (!round.over) F.timer -= dt;
+      if (F.timer <= 0) {
+        F.timer = 16 + Math.random() * 6;
+        mapRuntime.gust = 1;
+        onRoundEvent?.({ type: 'toast', text: '山风骤起，小心头顶落下的枯枝' });
+        gameAudio.playWhirl();
+        const spots: [number, number][] = [];
+        for (let k = 0; k < 4; k++) {
+          const near = k < 2 ? fighters[k] : null;
+          let x: number;
+          let z: number;
+          if (near) {
+            x = near.pos[0] + near.vel[0] * 0.6 + (Math.random() - 0.5) * 2.5;
+            z = near.pos[2] + near.vel[2] * 0.6 + (Math.random() - 0.5) * 2.5;
+          } else {
+            const a = Math.random() * Math.PI * 2;
+            const r = 4 + Math.random() * (map.radius - 6);
+            x = Math.cos(a) * r;
+            z = Math.sin(a) * r;
+          }
+          const d = Math.hypot(x, z);
+          if (d > map.radius - 1.5) {
+            x *= (map.radius - 1.5) / d;
+            z *= (map.radius - 1.5) / d;
+          }
+          if (spots.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 3.5)) continue;
+          spots.push([x, z]);
+          // staggered so they don't all land on the same beat
+          mapRuntime.branches.push({ x, z, t: -1.9 - k * 0.35, a: Math.random() * Math.PI });
+          vfx.ring(new THREE.Vector3(x, 0.05, z), 2.0, '#ff3a1a', 1.9 + k * 0.35, 0.3, 0.6);
+        }
+      }
+      const list = mapRuntime.branches;
+      for (let n = list.length - 1; n >= 0; n--) {
+        const b = list[n];
+        const was = b.t;
+        b.t += dt;
+        if (was < 0 && b.t >= 0) {
+          const g = new THREE.Vector3(b.x, 0.1, b.z);
+          vfx.dustPuff(g, 18, 1.2, 3.2, 0.9, '#8b7a5c');
+          vfx.rocks(g, 8, 5, 0.09);
+          vfx.embers(vB.set(b.x, 1.0, b.z), 14, '#7aa04a', 1.6, 2.5, 0.09);
+          vfx.ring(g, 2.2, '#c8b48a', 0.35, 0.12, 0.3);
+          gameAudio.playSlam();
+          const dp = Math.hypot(b.x - p1.pos[0], b.z - p1.pos[2]);
+          controller?.addShake(Math.max(0.03, 0.4 - dp * 0.04));
+          fighters.forEach((c, i) => {
+            if (Math.hypot(c.pos[0] - b.x, c.pos[2] - b.z) < 2.0 && c.pos[1] < 2.2) envHit(i, 100, 7, '落枝');
+          });
+        }
+        if (b.t > 2.2) list.splice(n, 1);
       }
     }
 
@@ -3103,6 +3213,26 @@ export function Game({
     // AI: 霍岩影. Thinks a few times per second, reacts to the
     // player's attacks, keeps spacing, combos, uses skills.
     // ------------------------------------------------------
+    /** 雪岭 AI: the face can't be climbed, so when the target is above, walk the road up instead */
+    function routeUpMountain(me: CombatantState, foe: CombatantState, out: Intent) {
+      if (foe.pos[1] - me.pos[1] < 1.5 || out.move.lengthSq() < 0.01) return;
+      const tx = foe.pos[0] - me.pos[0];
+      const tz = foe.pos[2] - me.pos[2];
+      if (out.move.x * tx + out.move.z * tz <= 0) return; // backing off / circling: leave it
+      const pts = GLACIER.pathPts;
+      let iMe = 0, dMe = 1e9, iF = 0, dF = 1e9;
+      for (let k = 0; k < pts.length; k += 2) {
+        const a = Math.hypot(pts[k][0] - me.pos[0], pts[k][1] - me.pos[2]);
+        // the nearest stretch of road I can reach without climbing
+        if (pts[k][2] <= me.pos[1] + 0.8 && a < dMe) { dMe = a; iMe = k; }
+        const b = Math.hypot(pts[k][0] - foe.pos[0], pts[k][1] - foe.pos[2]) + Math.abs(pts[k][2] - foe.pos[1]) * 2;
+        if (b < dF) { dF = b; iF = k; }
+      }
+      const target = dMe > 2.2 ? pts[iMe] : pts[Math.min(pts.length - 1, Math.max(iMe + 14, Math.min(iF, iMe + 14)))];
+      out.move.set(target[0] - me.pos[0], 0, target[1] - me.pos[2]);
+      if (out.move.lengthSq() > 0.01) out.move.normalize();
+    }
+
     function runAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
       if (me.classId === 'Ranger') return runRangerAI(me, foe, out, dt2);
       const monkAI = me.classId === 'BuddhistMage';
