@@ -176,6 +176,11 @@ export interface CombatantState {
   airSlash?: boolean; // left click in the air: 下劈
   dodgeSlash?: boolean; // left click out of a dodge: 回身斩
   dodgeEndAt?: number;
+  /** 梵音 (monk) runtime */
+  bellTimer?: number; // 金钟罩 seconds left
+  zenField?: { x: number; z: number; t: number }; // 禅定结界 centre and seconds left
+  palmsThrown?: number; // 万佛朝宗 palms already called down
+  mantraDone?: boolean;
   /** 暗器 (Ranger) runtime */
   rootTimer?: number; // pinned in place by 定身镖
   poisonStacks?: number;

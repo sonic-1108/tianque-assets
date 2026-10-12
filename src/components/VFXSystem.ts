@@ -1,3 +1,4 @@
+import { MonkFX } from './MonkFX';
 import * as THREE from 'three';
 
 /**
@@ -609,8 +610,11 @@ export class VFXSystem {
   private time = 0;
   trails: RibbonTrail[] = [];
 
+  monk!: MonkFX;
+
   constructor() {
     this.root.name = 'VFXSystem';
+    this.monk = new MonkFX(this.root);
     this.root.add(this.sparks.points, this.dust.points, this.debris.mesh);
     for (const sl of this.slots) this.root.add(sl.vortex.group, sl.pillar.group);
 
@@ -1067,7 +1071,28 @@ export class VFXSystem {
     sl.pillar.group.visible = true;
   }
 
+  // ---------------- 梵音 ----------------
+  palmStrike(pos: THREE.Vector3, scale = 1, fall = 0.35) {
+    this.monk.palmStrike(pos, scale, fall);
+  }
+  palmPush(from: THREE.Vector3, dir: THREE.Vector3, scale = 1, reach = 3) {
+    this.monk.palmPush(from, dir, scale, reach);
+  }
+  buddha(pos: THREE.Vector3, dur: number) {
+    this.monk.buddha(pos, dur);
+  }
+  bell(dur: number, slot = 0) {
+    this.monk.bell(slot, dur);
+  }
+  bellHit(slot = 0) {
+    this.monk.bellHit(slot);
+  }
+  zenField(pos: THREE.Vector3, radius: number, dur: number, slot = 0) {
+    this.monk.zenField(slot, pos, radius, dur);
+  }
+
   followFighter(slot: number, p: THREE.Vector3) {
+    this.monk.follow(slot, p);
     const sl = this.slots[slot];
     sl.vortex.group.position.set(p.x, p.y, p.z);
     sl.pillar.group.position.set(p.x, 0, p.z);
@@ -1120,6 +1145,7 @@ export class VFXSystem {
   // ---------------- tick ----------------
   update(dt: number) {
     this.time += dt;
+    this.monk.update(dt);
     if (this.timers.length) {
       const due: (() => void)[] = [];
       this.timers = this.timers.filter((x) => {

@@ -68,7 +68,13 @@ export function UnitFrame({ s, me }: { s: UnitStats; me: boolean }) {
             boxShadow: me ? '0 0 0 1.5px #d4a74a, 0 0 0 3px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.5)' : '0 0 0 1.5px rgba(255,255,255,0.35), 0 0 0 3px rgba(0,0,0,0.6)',
           }}
         >
-          {PORTRAIT[s.classId] && <img src={PORTRAIT[s.classId]} alt="" className="w-full h-full object-cover" draggable={false} />}
+          {PORTRAIT[s.classId] ? (
+            <img src={PORTRAIT[s.classId]} alt="" className="w-full h-full object-cover" draggable={false} />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-amber-200 font-black" style={{ fontSize: size * 0.45, fontFamily: '"Noto Serif SC", "Songti SC", serif', textShadow: '0 0 8px rgba(251,191,36,0.6)' }}>
+              {s.className.slice(0, 1)}
+            </div>
+          )}
           {/* red vignette when close to death */}
           {low && <div className="absolute inset-0" style={{ boxShadow: 'inset 0 0 14px rgba(220,38,38,0.85)' }} />}
         </div>

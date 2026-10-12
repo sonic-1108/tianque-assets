@@ -8,6 +8,7 @@ export const BERSERKER_MODEL_URL = `${import.meta.env.BASE_URL}berserker.glb`;
 export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   Berserker: BERSERKER_MODEL_URL,
   Ranger: `${import.meta.env.BASE_URL}ranger.glb`,
+  BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
 };
 
 /** Tripo / Mixamo models face +Z. Gameplay forward is -Z, so the visual is turned 180°. */
@@ -110,7 +111,20 @@ const RANGER_CLIP_PLAN: Record<string, ClipSpec> = {
   getup: { match: ['fall'], start: 0.4, end: 0.75, speed: -2.2 },
   cheer: { match: ['cheer', 'victory', 'agree'], start: 0.0, end: 0.45, loop: true },
 };
-const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : CLIP_PLAN);
+/** 梵音 overrides: jabs, palm thrusts, a stamp for the zen circle, praying hands, meditation */
+const MONK_CLIP_PLAN: Record<string, ClipSpec> = {
+  ...CLIP_PLAN,
+  attack_1: { match: ['box_01', 'punch', 'jab'], start: 0.1, end: 0.48, hit: 0.23, hitAt: 0.11 },
+  attack_2: { match: ['box_03', 'box_02', 'punch'], start: 0.12, end: 0.47, hit: 0.26, hitAt: 0.12 },
+  attack_3: { match: ['palm', 'push', 'box_02', 'box_01'], start: 0.1, end: 0.5, fit: true },
+  skill_1: { match: ['palm', 'push', 'box_01', 'punch'], start: 0.1, end: 0.5, fit: true },
+  skill_2: { match: ['stomp', 'angry_02', 'angry_01', 'angry'], start: 0.5, end: 0.82, fit: true },
+  skill_3: { match: ['pray', 'meditat', 'agree', 'idle'], start: 0.0, end: 0.6, fit: true },
+  skill_4: { match: ['angry_01', 'roar', 'angry'], start: 0.52, end: 0.82, fit: true },
+  m_ult: { match: ['meditat', 'pray', 'sit', 'idle'], loop: true },
+  cheer: { match: ['pray', 'cheer', 'victory', 'agree'], start: 0.0, end: 0.45, loop: true },
+};
+const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : CLIP_PLAN);
 
 interface BuiltClip {
   key: string;
@@ -381,6 +395,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         if (asset.fallback && classId === 'Ranger') {
           // 沈惊鸿 model not uploaded yet: borrow 霍岩's body with a jade tint
           m.color = new THREE.Color(isPlayer ? '#9fe0d6' : '#c4b5fd');
+        } else if (asset.fallback && classId === 'BuddhistMage') {
+          // 了尘 model not uploaded yet: borrow 霍岩's body in saffron
+          m.color = new THREE.Color(isPlayer ? '#f0c27a' : '#d8c4ff');
         } else if (!isPlayer) {
           // opponent: desaturated stone tint, texture kept
           m.color = new THREE.Color('#9aa3ad');
@@ -423,6 +440,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const right = ranger ? buildKnife(glow) : buildCleaver(glow);
     const left = ranger ? buildKnife(glow) : buildCleaver(glow);
     if (ranger) left.group.visible = false; // 暗器: one knife in the right hand, the rest fly
+    if (classId === 'BuddhistMage') right.group.visible = left.group.visible = false; // 梵音 fights bare-handed
     // Hand-local frame (Mixamo): +Y runs along the fingers, the knuckle line is X.
     // The blade leaves the fist on the index-finger side: -X for the right hand, +X for the left.
     right.group.rotation.set(0, 0, Math.PI / 2);
@@ -540,6 +558,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       key = 'r_kick';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
+    } else if (st === 'ultimate' && classId === 'BuddhistMage') {
+      key = actionsRef.current.m_ult ? 'm_ult' : 'idle';
     } else if (st === 'ultimate' && classId === 'Ranger') {
       key = c.stateTimer < 0.45 ? 'jump' : 'r_rain';
     } else if (st === 'ultimate') {
@@ -597,7 +617,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     strafeYawRef.current = THREE.MathUtils.damp(strafeYawRef.current, targetYaw, 12, delta);
 
-    if (st === 'skill_2' && classId !== 'Ranger') spinRef.current -= delta * 15;
+    if (st === 'skill_2' && classId === 'Berserker') spinRef.current -= delta * 15;
     else spinRef.current = THREE.MathUtils.damp(spinRef.current, Math.round(spinRef.current / (Math.PI * 2)) * Math.PI * 2, 14, delta);
 
     // Ultimate: forward somersault on the way up
@@ -607,7 +627,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     let leanX = 0;
     let leanZ = 0;
-    if (st === 'skill_3' && classId !== 'Ranger') leanX = 0.32;
+    if (st === 'skill_3' && classId === 'Berserker') leanX = 0.32;
+    else if (st === 'skill_3' && classId === 'BuddhistMage') leanX = 0.1;
     else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
     else if (st === 'launched') leanX = -0.45;
     else if (st === 'hitstun') leanX = -0.12;
@@ -616,7 +637,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     leanRef.current.y = THREE.MathUtils.damp(leanRef.current.y, leanZ, 10, delta);
 
     pose.rotation.set(leanRef.current.x - flipRef.current, strafeYawRef.current + spinRef.current, leanRef.current.y, 'YXZ');
-    pose.position.y = HIP_PIVOT;
+    // 梵音 floats a little off the ground while meditating for 万佛朝宗
+    const levitate = classId === 'BuddhistMage' && st === 'ultimate' ? 0.45 + Math.sin(performance.now() * 0.003) * 0.05 : 0;
+    pose.position.y = HIP_PIVOT + levitate;
 
     // ---------- hit flash & blood rage ----------
     const flash = c.whiteFlashTimer > 0 ? Math.min(1, c.whiteFlashTimer / 0.12) : 0;

@@ -8,7 +8,7 @@ import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
 import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId } from './types';
 import { GameInputSnapshot, InputKeyAction } from './input';
-import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
+import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
@@ -73,9 +73,23 @@ const GOLD = '#fbbf24';
 const POISON_COLOR = '#86efac';
 const UP = new THREE.Vector3(0, 1, 0);
 
-const phasesFor = (c: CombatantState) => (c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : ACTION_PHASE_CONFIGS);
+const MONK_PLAYER_COLOR = '#f6c453';
+const MONK_ENEMY_COLOR = '#93c5fd';
+const phasesFor = (c: CombatantState) => (c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : c.classId === 'BuddhistMage' ? MONK_PHASE_CONFIGS : ACTION_PHASE_CONFIGS);
 const colorFor = (slot: number, c: CombatantState) =>
-  c.classId === 'Ranger' ? (slot === 0 ? RANGER_PLAYER_COLOR : RANGER_ENEMY_COLOR) : slot === 0 ? PLAYER_COLOR : ENEMY_COLOR;
+  c.classId === 'Ranger'
+    ? slot === 0
+      ? RANGER_PLAYER_COLOR
+      : RANGER_ENEMY_COLOR
+    : c.classId === 'BuddhistMage'
+    ? slot === 0
+      ? MONK_PLAYER_COLOR
+      : MONK_ENEMY_COLOR
+    : slot === 0
+    ? PLAYER_COLOR
+    : ENEMY_COLOR;
+/** 禅定结界 radius */
+const ZEN_R = 4.5;
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -215,7 +229,7 @@ export function Game({
   // Online host: record every top-level effect and sound so the guest can replay them
   useEffect(() => {
     if (!net || net.role !== 'host') return;
-    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail'];
+    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail', 'palmStrike', 'palmPush', 'buddha', 'bell', 'bellHit', 'zenField'];
     const enc = (x: any) =>
       x instanceof THREE.Vector3 ? { v3: [+x.x.toFixed(3), +x.y.toFixed(3), +x.z.toFixed(3)] } : x instanceof THREE.Color ? '#' + x.getHexString() : typeof x === 'function' ? null : x;
     let depth = 0;
@@ -334,10 +348,24 @@ export function Game({
       if ((c.protectTimer ?? 0) > 0) c.protectTimer = (c.protectTimer ?? 0) - dt;
       // 体力 regenerates after a short pause
       if ((c.staminaDelay ?? 0) > 0) c.staminaDelay = (c.staminaDelay ?? 0) - dt;
-      else c.stamina = Math.min(c.maxStamina ?? 100, (c.stamina ?? 100) + dt * (c.classId === 'Ranger' ? 32 : 24));
+      else c.stamina = Math.min(c.maxStamina ?? 100, (c.stamina ?? 100) + dt * (c.classId === 'Ranger' ? 32 : c.classId === 'BuddhistMage' ? 26 : 24));
       const stunnedNow = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown' || c.actionState === 'buried';
       if (!stunnedNow && (c.stunLoad ?? 0) > 0) c.stunLoad = Math.max(0, (c.stunLoad ?? 0) - dt * 4);
       if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
+      if (c.zenField && c.zenField.t > 0) c.zenField.t -= dt;
+      if ((c.bellTimer ?? 0) > 0) {
+        c.bellTimer = (c.bellTimer ?? 0) - dt;
+        if ((c.bellTimer ?? 0) <= 0 && c.hp > 0) {
+          // 金钟罩 fades: a moment of 气竭 where the monk is open
+          c.bellTimer = 0;
+          if (isFree(c) || c.actionState.startsWith('attack_')) {
+            c.actionState = 'hitstun';
+            c.stateTimer = 0;
+            c.stateDuration = 0.5;
+            vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '气竭', false, '#fde68a');
+          }
+        }
+      }
     }
     // 淬毒: poison damage over time
     for (let i = 0; i < 2; i++) {
@@ -629,8 +657,9 @@ export function Game({
           c.actionState === 'skill_3' ||
           (c.actionState === 'ultimate' ? !!c.ultSlamStarted && c.stateTimer < 1.0 : !!cfg && c.stateTimer >= cfg.startup * 0.4 && c.stateTimer <= cfg.startup + cfg.active + 0.05));
       const rangerC = c.classId === 'Ranger';
-      t.right.emitting = rangerC ? c.actionState === 'attack_3' && !!c.backSlash && c.stateTimer > 0.18 && c.stateTimer < 0.42 : swinging;
-      t.left.emitting = !rangerC && swinging && c.actionState !== 'attack_1';
+      const monkC = c.classId === 'BuddhistMage';
+      t.right.emitting = monkC ? false : rangerC ? c.actionState === 'attack_3' && !!c.backSlash && c.stateTimer > 0.18 && c.stateTimer < 0.42 : swinging;
+      t.left.emitting = !rangerC && !monkC && swinging && c.actionState !== 'attack_1';
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
       const col = rangerC ? colorFor(i, c) : i === 0 ? (rage ? '#ff1030' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
       t.right.setColor(col, 2.2);
@@ -838,7 +867,7 @@ export function Game({
       // Soft lock: attacks snap toward a nearby opponent that is roughly in front
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-        const range = ranger ? 22 : 4.2;
+        const range = ranger ? 22 : c.classId === 'BuddhistMage' ? 5.5 : 4.2;
         if (fd < range && foe.hp > 0) {
           const ty = yawTo(c.pos, foe.pos);
           let dd = ty - intent.faceYaw;
@@ -886,7 +915,7 @@ export function Game({
       if (stunned) {
         if (req !== 'dodge') return false;
         if ((c.cooldowns.breakout ?? 0) > 0) return report('受身', `冷却中 (${(c.cooldowns.breakout ?? 0).toFixed(1)}s)`), false;
-        c.cooldowns.breakout = ranger ? 10 : 15;
+        c.cooldowns.breakout = ranger ? 10 : c.classId === 'BuddhistMage' ? 12 : 15;
         const dir = vA.copy(intent.move);
         if (dir.lengthSq() < 0.01) dir.set(c.pos[0] - foe.pos[0], 0, c.pos[2] - foe.pos[2]);
         dir.y = 0;
@@ -999,16 +1028,21 @@ export function Game({
         return false;
       }
 
+      if (c.classId === 'BuddhistMage' && (req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
+        return executeMonk(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
+      }
+
       switch (req) {
         case 'special':
-          return true; // berserker: right click is block (held), nothing to cast
+          return true; // berserker / monk: right click is block (held), nothing to cast
         case 'dodge': {
           if (c.dodgeCooldownTimer > 0 || !canDodge) return report('闪避', '无法闪避'), false;
-          if ((c.stamina ?? 100) < 25) {
+          const dodgeCost = inZen(c) ? 40 : 25;
+          if ((c.stamina ?? 100) < dodgeCost) {
             if (isPlayer) vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '体力不足', false, '#a3a3a3');
             return report('闪避', '体力不足'), false;
           }
-          c.stamina = (c.stamina ?? 100) - 25;
+          c.stamina = (c.stamina ?? 100) - dodgeCost;
           c.staminaDelay = 0.7;
           const dir = vA.copy(intent.move);
           if (dir.lengthSq() < 0.01) dir.copy(fwdOf(intent.faceYaw));
@@ -1164,8 +1198,10 @@ export function Game({
     function applyMovement(c: CombatantState, intent: Intent) {
       const st = c.actionState;
       const ranger = c.classId === 'Ranger';
-      const whirl = !ranger && st === 'skill_2';
-      const charge = !ranger && st === 'skill_3';
+      const bers = c.classId === 'Berserker';
+      const monk = c.classId === 'BuddhistMage';
+      const whirl = bers && st === 'skill_2';
+      const charge = bers && st === 'skill_3';
       const dodging = st === 'dodge';
       const rangerThrow = ranger && (st === 'attack_1' || st === 'attack_2' || st === 'skill_4');
       const blocking = !ranger && intent.block && c.isGrounded && c.hp > 0 && (st === 'idle' || st === 'run' || st === 'block');
@@ -1175,7 +1211,7 @@ export function Game({
         c.actionState = 'block';
         c.stateDuration = 0;
       } else if (st === 'block') c.actionState = 'idle';
-      c.hasSuperArmor = ranger ? c.actionState === 'ultimate' : ARMOR_STATES.has(c.actionState);
+      c.hasSuperArmor = ranger ? c.actionState === 'ultimate' : monk ? c.actionState === 'ultimate' || (c.bellTimer ?? 0) > 0 : ARMOR_STATES.has(c.actionState);
 
       // local move (x = right, z = forward relative to facing) drives strafe/backpedal animation
       const f = fwdOf(c.rotY);
@@ -1193,6 +1229,7 @@ export function Game({
           if (rangerThrow) mult = 0.8;
           if (c.actionState === 'block') mult = 0.25;
           if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
+          if (inZen(c)) mult *= 0.5;
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
           const accel = c.isGrounded ? 18 : 6;
@@ -1256,7 +1293,7 @@ export function Game({
       att: CombatantState,
       def: CombatantState,
       base: number,
-      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean; flinch?: boolean }
+      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean; flinch?: boolean; breakArmor?: boolean }
     ) {
       if (def.hp <= 0) return;
       const o = { ...oIn };
@@ -1303,6 +1340,23 @@ export function Game({
           o.knock = Math.min(o.knock ?? 1.5, 2);
         }
         def.juggleCount = jc + 1;
+      }
+      // 金钟罩: big damage reduction, can't be interrupted, melee attackers get some of it back
+      const belled = (def.bellTimer ?? 0) > 0;
+      if (belled) {
+        dmg *= 0.35;
+        def.mp = Math.min(def.maxMp, def.mp + 4);
+        const sl = def === p1 ? 0 : 1;
+        vfx.bellHit(sl);
+        gameAudio.playGong();
+        const near = Math.hypot(att.pos[0] - def.pos[0], att.pos[2] - def.pos[2]) < 3.5;
+        if (near && !o.ranged && att.hp > 0) {
+          const back = Math.round(base * 0.3);
+          att.hp = Math.max(1, att.hp - back);
+          att.whiteFlashTimer = 0.08;
+          vfx.damageNumber(vA.set(att.pos[0], att.pos[1] + 2.1, att.pos[2]), `反震 ${back}`, false, '#fde68a');
+          vfx.sparkBurst(vA.set(def.pos[0], def.pos[1] + 1.2, def.pos[2]), 16, '#ffd36a', 7, 0.08, hitDir.clone().multiplyScalar(-1), 1.2);
+        }
       }
       dmg = Math.round(dmg);
 
@@ -1359,7 +1413,7 @@ export function Game({
       const protectedNow = (def.protectTimer ?? 0) > 0;
       // light darts only make you flinch: they chip HP but never interrupt, so a ranged fighter can't stun-lock
       const flinchOnly = !!o.flinch;
-      const armored = protectedNow || flinchOnly || (def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried');
+      const armored = !o.breakArmor && (protectedNow || flinchOnly || (def.bellTimer ?? 0) > 0 || (def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried'));
       if (flinchOnly) {
         def.vel[0] += hitDir.x * 1.2;
         def.vel[2] += hitDir.z * 1.2;
@@ -1390,7 +1444,7 @@ export function Game({
           vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.5, def.pos[2]), '保护', true, '#f1f5f9');
         }
       }
-      att.mp = Math.min(att.maxMp, att.mp + (o.heavy ? 6 : 3));
+      att.mp = Math.min(att.maxMp, att.mp + (o.heavy ? 6 : 3) + (att.classId === 'BuddhistMage' ? 3 : 0));
       def.whiteFlashTimer = o.heavy ? 0.1 : 0.06;
       const stop = o.noStop ? 0 : o.heavy ? 0.11 : 0.055;
       if (!o.noMark) vfx.slashMark(chest, color, o.heavy ? 1.3 : 0.9);
@@ -1424,6 +1478,10 @@ export function Game({
       const color = slot === 0 ? (rage ? '#ff1f2f' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
       if (c.classId === 'Ranger') {
         resolveRanger(slot, c, foe, fwd, dist, inFront, active);
+        return;
+      }
+      if (c.classId === 'BuddhistMage') {
+        resolveMonk(slot, c, foe, fwd, dist, inFront, active);
         return;
       }
 
@@ -1579,6 +1637,221 @@ export function Game({
           if (dist < 7) applyHit(slot, c, foe, 420, { heavy: true, crit: true, launch: 15, knock: 10, state: 'knockdown', dur: 1.2, unblockable: true });
           c.vel[0] = 0;
           c.vel[2] = 0;
+        }
+      }
+    }
+
+    // ======================================================
+    // 梵音 (monk)
+    // ======================================================
+    /** standing inside the opponent's 禅定结界 */
+    function inZen(c: CombatantState) {
+      const o = c === p1 ? en : p1;
+      const z = o.zenField;
+      if (!z || z.t <= 0 || o.hp <= 0) return false;
+      return Math.hypot(c.pos[0] - z.x, c.pos[2] - z.z) < ZEN_R && c.pos[1] - fy(z.x, z.z) < 2.5;
+    }
+
+    function executeMonk(
+      slot: number,
+      c: CombatantState,
+      foe: CombatantState,
+      intent: Intent,
+      req: string,
+      h: {
+        cur: CharacterActionState;
+        phase: string;
+        free: boolean;
+        canSkill: boolean;
+        start: (next: CharacterActionState, push?: number) => void;
+        paySkill: (idx: number, key: string, label: string) => boolean;
+        report: (a: string, r: string) => void;
+        color: string;
+      }
+    ): boolean {
+      const { cur, phase, free, start, paySkill, report } = h;
+      void intent;
+      void foe;
+      switch (req) {
+        case 'attack': {
+          let next: CharacterActionState | null = null;
+          if (free) next = 'attack_1';
+          else if (cur === 'attack_1' && phase === 'recovery') next = 'attack_2';
+          else if (cur === 'attack_2' && phase === 'recovery') next = 'attack_3';
+          if (!next) return report('普攻', `被 [${cur} ${phase}] 占用`), false;
+          start(next, phasesFor(c)[next]!.forwardMomentum);
+          if (next === 'attack_3') gameAudio.playSwingHeavy();
+          else gameAudio.playSwingLight();
+          report('普攻', next === 'attack_3' ? '金刚掌印' : `${next.slice(-1)} 段拳`);
+          return true;
+        }
+        case 'skill1': {
+          if (!paySkill(0, 'skill1', '1')) return false;
+          start('skill_1');
+          gameAudio.playCharge();
+          return true;
+        }
+        case 'skill2': {
+          if (!paySkill(1, 'skill2', '2')) return false;
+          start('skill_2');
+          return true;
+        }
+        case 'skill3': {
+          if (!paySkill(2, 'skill3', '3')) return false;
+          start('skill_3');
+          c.mantraDone = false;
+          gameAudio.playPowerupChime();
+          return true;
+        }
+        case 'skill4': {
+          if (!paySkill(3, 'skill4', '4')) return false;
+          start('skill_4');
+          c.bellTimer = 4;
+          vfx.bell(4, slot);
+          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 2.2, h.color, 0.5, 0.14, 0.4);
+          vfx.embers(vC.set(c.pos[0], c.pos[1] + 0.3, c.pos[2]), 30, '#ffd36a', 0.9, 3, 0.08);
+          gameAudio.playGong();
+          if (slot === 0) controller?.addShake(0.15);
+          return true;
+        }
+        case 'ultimate': {
+          if (!paySkill(4, 'ultimate', 'R')) return false;
+          start('ultimate');
+          c.vel[0] = c.vel[2] = 0;
+          c.palmsThrown = 0;
+          // the Buddha rises behind the monk, facing the same way
+          const f = fwdOf(c.rotY);
+          vfx.buddha(vB.set(c.pos[0] - f.x * 3.2, c.pos[1] + 4.6, c.pos[2] - f.z * 3.2), phasesFor(c).ultimate!.totalDuration + 0.4);
+          vfx.ring(vA.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 3.2, h.color, 0.7, 0.16, 0.5);
+          vfx.pillarAt(2.6, '#ffc94a', slot);
+          gameAudio.playUltRise();
+          gameAudio.playGong();
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function resolveMonk(slot: number, c: CombatantState, foe: CombatantState, fwd: THREE.Vector3, dist: number, inFront: boolean, active: boolean) {
+      const cfg = phasesFor(c)[c.actionState];
+      const st = c.actionState;
+      const t = c.stateTimer;
+      const color = colorFor(slot, c);
+      const gy = fy(c.pos[0], c.pos[2]);
+      const chest = () => vB.set(c.pos[0] + fwd.x * 0.5, c.pos[1] + 1.2, c.pos[2] + fwd.z * 0.5);
+
+      if ((st === 'attack_1' || st === 'attack_2') && active && !c.hasHitCurrentMove && dist < 2.5 && inFront) {
+        c.hasHitCurrentMove = true;
+        if (st === 'attack_1') applyHit(slot, c, foe, 58, { knock: 3.5 });
+        else applyHit(slot, c, foe, 74, { knock: 4.5 });
+      }
+
+      // third hit: a palm of light pushed out a few metres
+      if (st === 'attack_3' && active && !c.hasHitCurrentMove) {
+        c.hasHitCurrentMove = true;
+        vfx.palmPush(chest().clone(), fwd, 0.9, 3.4);
+        vfx.flash(chest(), '#ffd36a', 18, 0.15, 6);
+        const lateral = Math.abs(fwd.x * (foe.pos[2] - c.pos[2]) - fwd.z * (foe.pos[0] - c.pos[0]));
+        if (dist < 4.2 && inFront && lateral < 1.4) applyHit(slot, c, foe, 125, { heavy: true, knock: 9, state: 'knockdown', dur: 0.8, launch: 3, shake: 0.3 });
+      }
+
+      // 金刚掌: lunge, then a huge palm
+      if (st === 'skill_1' && cfg) {
+        const lunging = t > 0.04 && t < cfg.startup + cfg.active && !c.hasHitCurrentMove;
+        if (lunging) {
+          c.vel[0] = fwd.x * 17;
+          c.vel[2] = fwd.z * 17;
+          if (Math.random() < 0.5) vfx.dustPuff(vB.set(c.pos[0], gy, c.pos[2]), 2, 0.3, 1.5, 0.5);
+        } else {
+          c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 10, dt);
+          c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 10, dt);
+        }
+        const strike = !c.hasHitCurrentMove && ((t >= cfg.startup && dist < 2.4 && inFront) || t >= cfg.startup + cfg.active);
+        if (strike) {
+          c.hasHitCurrentMove = true;
+          vfx.palmPush(chest().clone(), fwd, 1.5, 4.5);
+          vfx.chargeWave(vA.set(c.pos[0], gy, c.pos[2]), fwd, color);
+          vfx.flash(chest(), '#ffd36a', 40, 0.2, 9);
+          gameAudio.playHitHeavy();
+          if (slot === 0) controller?.addShake(0.35);
+          if (dist < 3.2 && inFront) applyHit(slot, c, foe, 160, { heavy: true, crit: true, knock: 17, dur: 0.75, shake: 0.5 });
+          c.stateTimer = Math.max(c.stateTimer, cfg.startup + cfg.active);
+          c.vel[0] *= 0.2;
+          c.vel[2] *= 0.2;
+        }
+      }
+
+      // 禅定结界: unfold the circle under the monk
+      if (st === 'skill_2' && cfg && t >= cfg.startup && !c.hasHitCurrentMove) {
+        c.hasHitCurrentMove = true;
+        c.zenField = { x: c.pos[0], z: c.pos[2], t: 5 };
+        vfx.zenField(vA.set(c.pos[0], gy, c.pos[2]), ZEN_R, 5, slot);
+        vfx.ring(vB.set(c.pos[0], gy + 0.05, c.pos[2]), ZEN_R, color, 0.6, 0.12, 0.25);
+        vfx.dustPuff(vB, 14, 1.5, 3, 0.7);
+        gameAudio.playSlam();
+        if (slot === 0) controller?.addShake(0.2);
+      }
+      // the circle hums while it lasts
+      if (c.zenField && c.zenField.t > 0 && Math.random() < dt * 6) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * ZEN_R;
+        const zx = c.zenField.x + Math.cos(a) * r;
+        const zz = c.zenField.z + Math.sin(a) * r;
+        vfx.embers(vB.set(zx, fy(zx, zz) + 0.1, zz), 1, '#ffd36a', 0.1, 1.6, 0.06);
+      }
+
+      // 六字真言: chant, then a burst that interrupts anything
+      if (st === 'skill_3' && cfg) {
+        if (t < cfg.startup && Math.random() < 0.6) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), 2, '#ffe9a8', 0.5, 1.2, 0.07);
+        if (t >= cfg.startup && !c.mantraDone) {
+          c.mantraDone = true;
+          vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]);
+          vfx.ring(vB, 5, '#ffe9a8', 0.5, 0.2, 0.15);
+          vfx.later(0.08, () => vfx.ring(new THREE.Vector3(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 5.5, color, 0.55, 0.12));
+          vfx.flash(vA.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), '#ffe2a0', 60, 0.25, 12);
+          vfx.sparkBurst(vA, 40, '#ffe9a8', 10, 0.08, UP, 1.6);
+          vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.6, c.pos[2]), '唵嘛呢叭咪吽', true, '#fde68a');
+          gameAudio.playGong();
+          controller?.addShake(slot === 0 ? 0.3 : 0.15);
+          const d3 = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+          if (d3 < 5 && Math.abs(foe.pos[1] - c.pos[1]) < 3 && foe.hp > 0) {
+            const casting = foe.actionState.startsWith('skill_') || foe.actionState === 'ultimate';
+            applyHit(slot, c, foe, 100, { heavy: true, knock: 9, state: 'hitstun', dur: 0.6, unblockable: true, breakArmor: true });
+            if (casting && foe.actionState === 'hitstun') {
+              vfx.setVortex(false, 0, slot === 0 ? 1 : 0);
+              vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.5, foe.pos[2]), '打断!', true, '#fde68a');
+            }
+          }
+        }
+      }
+
+      // 万佛朝宗: palms rain down on the opponent; the last one flattens them
+      if (st === 'ultimate') {
+        c.vel[0] = c.vel[2] = 0;
+        const n = c.palmsThrown ?? 0;
+        if (n < 9 && t >= 0.45 + n * 0.19) {
+          c.palmsThrown = n + 1;
+          const last = n === 8;
+          const lead = last ? 0 : 0.25;
+          const tx = foe.pos[0] + foe.vel[0] * lead + (last ? 0 : (Math.random() - 0.5) * 1.6);
+          const tz = foe.pos[2] + foe.vel[2] * lead + (last ? 0 : (Math.random() - 0.5) * 1.6);
+          const ty = fy(tx, tz);
+          const target = new THREE.Vector3(tx, ty, tz);
+          vfx.palmStrike(target, last ? 1.6 : 1.0, 0.32);
+          vfx.later(0.32, () => {
+            vfx.ring(new THREE.Vector3(tx, ty + 0.05, tz), last ? 4 : 2.6, color, 0.4, 0.16, 0.3);
+            vfx.dustPuff(new THREE.Vector3(tx, ty, tz), last ? 24 : 10, last ? 1.6 : 1, 3, 0.8);
+            if (last) vfx.rocks(new THREE.Vector3(tx, ty, tz), 12, 7, 0.12);
+            gameAudio.playSlam();
+            controller?.addShake(last ? 0.7 : 0.18);
+            if (round.over || c.hp <= 0 || foe.hp <= 0) return;
+            const hitR = last ? 3.4 : 2.6;
+            if (Math.hypot(foe.pos[0] - tx, foe.pos[2] - tz) < hitR && foe.pos[1] - ty < 3) {
+              if (last) applyHit(slot, c, foe, 190, { heavy: true, crit: true, knock: 4, launch: 6, state: 'knockdown', dur: 1.1, unblockable: true });
+              else applyHit(slot, c, foe, 52, { knock: 1.2, dur: 0.3, noMark: true });
+            }
+            if (last) onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,225,150,0.5)' });
+          });
         }
       }
     }
@@ -2084,6 +2357,9 @@ export function Game({
         c.pierceNext = false;
         c.backSlash = false;
         c.celebrate = false;
+        c.bellTimer = 0;
+        c.zenField = undefined;
+        c.palmsThrown = 0;
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
@@ -2762,6 +3038,7 @@ export function Game({
     // ------------------------------------------------------
     function runAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
       if (me.classId === 'Ranger') return runRangerAI(me, foe, out, dt2);
+      const monkAI = me.classId === 'BuddhistMage';
       const ai = aiRef.current;
       const dx = foe.pos[0] - me.pos[0];
       const dz = foe.pos[2] - me.pos[2];
@@ -2804,7 +3081,44 @@ export function Game({
         ai.comboLeft -= 1;
       }
 
-      if (ai.think <= 0 && free && !ai.request) {
+      if (ai.think <= 0 && free && !ai.request && monkAI) {
+        ai.think = 0.22 + Math.random() * 0.25;
+        const r = Math.random();
+        const foeCasting = (foe.actionState.startsWith('skill_') || foe.actionState === 'ultimate') && phaseOf(foe).phase !== 'recovery';
+        if (foeCasting && dist < 5 && ready('skill3') && me.mp >= 25 && r < 0.8) ask('skill3');
+        else if (foeAttacking && dist < 3.6 && r < 0.45) {
+          if (r < 0.2 && me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
+            ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
+            ask('dodge');
+          } else {
+            ai.plan = 'guard';
+            ai.planTimer = 0.45 + Math.random() * 0.3;
+          }
+        } else if (me.hp < me.maxHp * 0.6 && dist < 4 && ready('skill4') && me.mp >= 30 && r < 0.35) ask('skill4');
+        else if (ready('ultimate') && me.mp >= 60 && dist < 8 && r < 0.15) ask('ultimate');
+        else if (dist > 7) {
+          ai.plan = 'approach';
+          ai.planTimer = 0.6;
+        } else if (dist > 2.4) {
+          if (ready('skill1') && me.mp >= 20 && dist < 5 && r < 0.35) ask('skill1');
+          else if (ready('skill2') && me.mp >= 25 && dist < 4 && r < 0.2) ask('skill2');
+          else {
+            ai.plan = r < 0.8 ? 'approach' : 'circle';
+            ai.planTimer = 0.5 + Math.random() * 0.4;
+            ai.strafe = Math.random() < 0.5 ? -1 : 1;
+          }
+        } else if (r < 0.6) {
+          ask('attack');
+          ai.comboLeft = 2;
+        } else if (r < 0.7 && ready('skill2') && me.mp >= 25) ask('skill2');
+        else if (r < 0.78 && ready('skill1') && me.mp >= 20) ask('skill1');
+        else {
+          ai.plan = r < 0.9 ? 'circle' : 'retreat';
+          ai.planTimer = 0.45;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        }
+      }
+      if (ai.think <= 0 && free && !ai.request && !monkAI) {
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
         if (foe.pos[1] - me.pos[1] > 2) {

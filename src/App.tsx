@@ -84,8 +84,28 @@ const RANGER_HOTBAR: HotbarEntry[] = [
   { id: 'rain_of_darts', key: 'R', name: RS[4].name, icon: RS[4].icon, short: '悬空洒镖', cdKey: 'ultimate', super: true, meta: rMeta(4), desc: RS[4].description,
     tip: '先用 2 定身镖钉住对手，再开暴雨梨花，几乎全中。' },
 ];
-const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR };
-const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger'];
+const MS = CLASS_CONFIGS.BuddhistMage.skills;
+const mMeta = (i: number) => [`MP ${MS[i].mpCost}`, `冷却 ${MS[i].cooldown}s`];
+const MONK_HOTBAR: HotbarEntry[] = [
+  { id: 'm_attack', key: '左键', name: '拳掌', icon: '👊', short: '三段拳掌', basic: true, meta: ['命中回蓝更多', '可连按'],
+    desc: '直拳、勾拳，第三段推出一道金色掌印，打到前方约4米，把人推倒。被动「禅心」：拳掌命中比别人多回法力。',
+    tip: '贴身连按左键；第三段掌印够得比看上去远，对手后撤时也能打中。' },
+  { id: 'm_block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'],
+    desc: '按住右键双掌护身格挡，正面伤害减少60%。在被打中前0.2秒内按下触发「完美格挡」：完全免伤，对手被弹开，你的下一击伤害+50%。',
+    tip: '梵音血厚但慢，被沈惊鸿风筝时多用格挡和 1 金刚掌贴上去。' },
+  { id: 'vajra_palm', key: '1', name: MS[0].name, icon: MS[0].icon, short: '冲刺推掌', cdKey: 'skill1', meta: mMeta(0), desc: MS[0].description,
+    tip: '把对手往墙边或柱子方向推，撞上去会额外眩晕；也是梵音最好的贴身手段。' },
+  { id: 'zen_domain', key: '2', name: MS[1].name, icon: MS[1].icon, short: '减速法阵', cdKey: 'skill2', meta: mMeta(1), desc: MS[1].description,
+    tip: '贴身时放在脚下，对手在阵里跑不快也翻不远，接拳掌连招。' },
+  { id: 'mantra', key: '3', name: MS[2].name, icon: MS[2].icon, short: '打断音波', cdKey: 'skill3', meta: mMeta(2), desc: MS[2].description,
+    tip: '专门留着打断：狂刃起旋风刃或天崩、沈惊鸿腾空放暴雨梨花时，靠近按 3。' },
+  { id: 'golden_bell', key: '4', name: MS[3].name, icon: MS[3].icon, short: '减伤反震', cdKey: 'skill4', meta: mMeta(3), desc: MS[3].description,
+    tip: '对手连招打过来时开，硬吃着打回去；罩子散的那半秒别贪刀。' },
+  { id: 'buddhas', key: 'R', name: MS[4].name, icon: MS[4].icon, short: '九掌天降', cdKey: 'ultimate', super: true, meta: mMeta(4), desc: MS[4].description,
+    tip: '先用 2 禅定结界让对手跑不快，再开万佛朝宗，掌印几乎躲不开。' },
+];
+const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR };
+const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage'];
 
 interface CanvasLoadingScreenProps {
   progress: number;
@@ -464,6 +484,10 @@ export default function App() {
 
   // HUD sync states
   const [hudMirror, setHudMirror] = useState({
+    p1Bell: 0,
+    dBell: 0,
+    p1Zen: false,
+    dZen: false,
     p1Hp: 1600,
     p1MaxHp: 1600,
     p1Mp: 100,
@@ -519,7 +543,12 @@ export default function App() {
     const interval = setInterval(() => {
       const p1 = p1RefState.current;
       const dummy = dummyRefState.current;
+      const zenHas = (owner: typeof p1, c: typeof p1) => !!owner.zenField && owner.zenField.t > 0 && Math.hypot(c.pos[0] - owner.zenField.x, c.pos[2] - owner.zenField.z) < 4.5;
       setHudMirror({
+        p1Bell: p1.bellTimer || 0,
+        dBell: dummy.bellTimer || 0,
+        p1Zen: zenHas(dummy, p1),
+        dZen: zenHas(p1, dummy),
         p1Hp: p1.hp,
         p1MaxHp: p1.maxHp,
         p1Mp: p1.mp,
@@ -750,7 +779,7 @@ export default function App() {
                             setScore({ player: 0, enemy: 0 });
                           }}
                           className={`flex-1 text-left rounded-xl border px-3 py-2 transition-all ${
-                            on ? (cid === 'Ranger' ? 'border-teal-400 bg-teal-900/40 ring-2 ring-teal-400/50' : 'border-amber-400 bg-amber-900/40 ring-2 ring-amber-400/50') : 'border-zinc-700 hover:border-zinc-500'
+                            on ? (cid === 'Ranger' ? 'border-teal-400 bg-teal-900/40 ring-2 ring-teal-400/50' : cid === 'BuddhistMage' ? 'border-yellow-300 bg-yellow-900/30 ring-2 ring-yellow-300/50' : 'border-amber-400 bg-amber-900/40 ring-2 ring-amber-400/50') : 'border-zinc-700 hover:border-zinc-500'
                           }`}
                         >
                           <div className="text-sm font-black text-white">{cc.name} · {cc.defaultCharacter}</div>
@@ -971,6 +1000,8 @@ export default function App() {
           if (hudMirror.poisonBuff > 0) meChips.push({ text: `淬毒 ${hudMirror.poisonBuff.toFixed(1)}s`, tone: 'green' });
           if (hudMirror.pierceNext) meChips.push({ text: '袖里乾坤', tone: 'gold', pulse: true });
           if (hudMirror.protect) meChips.push({ text: '保护', tone: 'slate' });
+          if (hudMirror.p1Bell > 0) meChips.push({ text: `金钟罩 ${hudMirror.p1Bell.toFixed(1)}s`, tone: 'gold', pulse: hudMirror.p1Bell < 1 });
+          if (hudMirror.p1Zen) meChips.push({ text: '禅定 减速', tone: 'amber', pulse: true });
           if (hudMirror.p1Poisoned) meChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.p1Rooted) meChips.push({ text: '定身', tone: 'teal', pulse: true });
           if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
@@ -995,6 +1026,8 @@ export default function App() {
           if (hudMirror.dBlocking) foeChips.push({ text: '格挡', tone: 'sky' });
           if (hudMirror.dPoisonBuff > 0) foeChips.push({ text: '淬毒', tone: 'green' });
           if (hudMirror.dProtect) foeChips.push({ text: '保护', tone: 'slate' });
+          if (hudMirror.dBell > 0) foeChips.push({ text: '金钟罩', tone: 'gold' });
+          if (hudMirror.dZen) foeChips.push({ text: '禅定 减速', tone: 'amber', pulse: true });
           if (hudMirror.dPoisoned) foeChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.dRooted) foeChips.push({ text: '定身', tone: 'teal', pulse: true });
           const foe: UnitStats = {
