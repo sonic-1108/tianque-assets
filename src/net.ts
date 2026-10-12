@@ -35,7 +35,14 @@ type RelayCtl = { t: 'rj'; id: string } | { t: 'ra'; id: string } | { t: 'rp' };
  * the match falls back to a public MQTT broker over secure websockets: slower than peer to peer, but it goes through
  * anything that can load a web page. The host listens on every broker that answers; the guest uses the first one.
  */
-const RELAY_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+// campus networks (eduroam) often only let ports 80 / 443 out, so the brokers listening on 443 come first
+const RELAY_BROKERS: (string | { url: string; username: string; password: string })[] = [
+  { url: 'wss://public.cloud.shiftr.io', username: 'public', password: 'public' },
+  'wss://mqtt.eclipseprojects.io:443/mqtt',
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
+];
 const RELAY_NS = 'tianque-1v1/v1/';
 /** how long the guest gives peer to peer before switching to the relay */
 const P2P_GRACE_MS = 9000;
@@ -270,16 +277,19 @@ export class NetSession {
         return false;
       }
       const mine = this.role === 'host' ? 'h' : 'g';
-      const brokers: string[] = (globalThis as any).__TQ_RELAY || RELAY_BROKERS; // tests point this at a local broker
-      const tryOne = (url: string) =>
+      const brokers: (string | { url: string; username: string; password: string })[] = (globalThis as any).__TQ_RELAY || RELAY_BROKERS; // tests point this at a local broker
+      const tryOne = (b: string | { url: string; username: string; password: string }) =>
         new Promise<any>((res) => {
-          const cl = mqtt.connect(url, { clean: true, connectTimeout: 7000, reconnectPeriod: 3000, keepalive: 20, clientId: 'tq_' + this.relayId + '_' + Math.random().toString(36).slice(2, 6) });
+          const url = typeof b === 'string' ? b : b.url;
+          const auth = typeof b === 'string' ? {} : { username: b.username, password: b.password };
+          const cl = mqtt.connect(url, { ...auth, clean: true, connectTimeout: 7000, reconnectPeriod: 3000, keepalive: 20, clientId: 'tq_' + this.relayId + '_' + Math.random().toString(36).slice(2, 6) });
           const to = window.setTimeout(() => {
             cl.end(true);
             res(null);
           }, 8000);
           cl.once('connect', () => {
             window.clearTimeout(to);
+            cl.__tqName = url.replace(/^wss:\/\//, '').split(/[:/]/)[0];
             cl.subscribe(this.topic(mine), { qos: 0 });
             cl.on('message', (_t: string, payload: Uint8Array) => this.relayReceive(cl, payload));
             res(cl);
@@ -289,6 +299,8 @@ export class NetSession {
       if (this.role === 'host') {
         const all = await Promise.all(brokers.map(tryOne));
         this.relays = all.filter(Boolean);
+        this.relayState = this.relays.length ? `中转待命 ${this.relays.length} 条` : '中转服务器都连不上，只能直连';
+        this.changed();
       } else {
         for (const url of brokers) {
           const cl = await tryOne(url);
@@ -368,6 +380,8 @@ export class NetSession {
       this.changed('error', reason || '连不上房主，中转服务器也连不上。检查网络后重试，或换个网络（比如手机热点）。');
       return;
     }
+    this.relayState = `已连上中转（${this.relays[0].__tqName}），等房主回应`;
+    this.changed();
     const knock = window.setInterval(() => {
       if (this.via) return window.clearInterval(knock);
       for (const cl of this.relays) this.relaySend({ t: 'rj', id: this.relayId }, cl);
@@ -376,7 +390,7 @@ export class NetSession {
     window.clearTimeout(this.joinTimer);
     this.joinTimer = window.setTimeout(() => {
       if (this.status === 'connecting')
-        this.changed('error', '连不上房主：直连和中转都没打通。确认房间号，让房主刷新后重开房间，再用新房间号加入。');
+        this.changed('error', `连上了中转（${this.relays[0]?.__tqName}），但房主没回应。让房主刷新页面（确认是新版）重开房间，再用新房间号加入。`);
     }, 14000);
   }
   /** shown while joining */

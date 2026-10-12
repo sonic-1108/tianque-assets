@@ -737,7 +737,9 @@ export default function App() {
             {/* ONLINE 1v1 */}
             <div className="mb-4 bg-zinc-900/80 border border-sky-700/60 rounded-2xl p-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-black text-sky-300">🌐 联机对战（1v1）</span>
+                <span className="text-sm font-black text-sky-300">
+                  🌐 联机对战（1v1）<span className="ml-2 text-[10px] font-normal text-zinc-500">版本 {__BUILD__}</span>
+                </span>
                 {net && (
                   <button onClick={leaveNet} className="text-[11px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded-lg px-2 py-0.5">
                     退出联机
@@ -781,7 +783,12 @@ export default function App() {
                     </div>
                   )}
                   {net.status === 'opening' && <div>正在连接联机服务器…</div>}
-                  {net.status === 'waiting' && <div>把房间号发给朋友，让他打开同一个网址，在这里输入房间号加入。等待对手…</div>}
+                  {net.status === 'waiting' && (
+                    <div>
+                      把房间号发给朋友，让他打开同一个网址，在这里输入房间号加入。等待对手…
+                      {net.relayState && <span className="ml-2 text-[11px] text-zinc-400">{net.relayState}</span>}
+                    </div>
+                  )}
                   {net.status === 'connecting' && (
                     <div>
                       正在加入房间 {net.code}…
