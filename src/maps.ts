@@ -130,6 +130,12 @@ export function underTempleRoof(x: number, z: number, y: number) {
   const [lx, lz] = worldToTemple(x, z);
   return Math.abs(lx) < FOREST.temple.w / 2 + 1.6 && Math.abs(lz) < FOREST.temple.d / 2 + 1.6 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 10;
 }
+/** under any roof on the hill (the hall, or the bell pavilion): dry floor, and lightning can't reach you */
+export function sheltered(x: number, z: number, y: number) {
+  if (underTempleRoof(x, z, y)) return true;
+  const [lx, lz] = worldToTemple(x, z);
+  return Math.abs(lx + 7.2) < 1.9 && Math.abs(lz - 8.6) < 1.9 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 5;
+}
 /** the altar's world position (candles are taken here) */
 export function altarPos(): [number, number] {
   return templeToWorld(0, -2.4);

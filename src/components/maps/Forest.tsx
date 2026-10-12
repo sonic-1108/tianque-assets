@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { loadBuddha, makeBuddhaMaterial } from './buddhaMesh';
+import { apsaraMural, sermonMural, thousandBuddhas } from './murals';
 import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -1652,6 +1653,7 @@ function hipRoof(w: number, d: number, rise: number, ridge: number, sweep: numbe
 }
 
 const buddhaMat = makeBuddhaMaterial();
+const NO_MURAL = typeof location !== 'undefined' && location.search.includes('nomural');
 
 /** one seated Buddha: lotus throne, crossed legs, robed body, head with ushnisha, a halo and a flame-shaped mandorla */
 function Buddha({ mats, scale = 1 }: { mats: Record<string, any>; scale?: number }) {
@@ -2044,6 +2046,14 @@ function Temple() {
     }
   });
   const colX = [-T.w / 2, -T.w / 6, T.w / 6, T.w / 2];
+  const murals = useMemo(
+    () => NO_MURAL ? ({} as any) : ({
+      apsara: new THREE.MeshStandardMaterial({ map: apsaraMural(), roughness: 0.92 }),
+      sermon: new THREE.MeshStandardMaterial({ map: sermonMural(), roughness: 0.92 }),
+      thousand: new THREE.MeshStandardMaterial({ map: thousandBuddhas(), roughness: 0.92 }),
+    }),
+    []
+  );
   return (
     <group position={[H.x, H.h, H.z]} rotation={[0, TEMPLE_YAW, 0]}>
       {/* forecourt paving */}
@@ -2083,6 +2093,29 @@ function Temple() {
           </group>
         ))
       )}
+      {/* wall paintings: apsaras on the west wall, the sermon on the east, thousand-Buddha strips on the back */}
+      {!NO_MURAL && [-1, 1].map((sx) => (
+        <group key={'mu' + sx} position={[sx * (T.w / 2 - 0.09), P + 2.85, 0]} rotation={[0, -sx * (Math.PI / 2), 0]}>
+          <mesh material={sx < 0 ? murals.apsara : murals.sermon}>
+            <planeGeometry args={[9, 3.75]} />
+          </mesh>
+          {[-1, 1].map((sy) => (
+            <mesh key={'h' + sy} position={[0, sy * 1.93, 0.03]} material={mats.lacquer}>
+              <boxGeometry args={[9.3, 0.12, 0.06]} />
+            </mesh>
+          ))}
+          {[-1, 1].map((sz) => (
+            <mesh key={'v' + sz} position={[sz * 4.58, 0, 0.03]} material={mats.lacquer}>
+              <boxGeometry args={[0.12, 3.98, 0.06]} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      {!NO_MURAL && [-1, 1].map((sx) => (
+        <mesh key={'tb' + sx} position={[sx * 6.0, P + 2.7, -T.d / 2 + 0.09]} material={murals.thousand}>
+          <planeGeometry args={[1.4, 4.2]} />
+        </mesh>
+      ))}
       {/* walls */}
       <mesh position={[0, P + C / 2, -T.d / 2 - 0.12]} material={mats.wall} castShadow receiveShadow>
         <boxGeometry args={[T.w, C, 0.4]} />

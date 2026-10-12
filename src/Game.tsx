@@ -12,7 +12,7 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, CANDLE_POINTS } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -3571,8 +3571,16 @@ function GameImpl({
     }
 
     function updateGrip(i: number, c: CombatantState) {
-      // under the temple roof the stone floor is dry, whatever the weather
-      const rain = underTempleRoof(c.pos[0], c.pos[2], c.pos[1]) ? 0 : mapRuntime.rain;
+      // under a roof the stone floor is dry, whatever the weather: full footing, and any wobble from outside settles
+      const dry = sheltered(c.pos[0], c.pos[2], c.pos[1]);
+      if (dry) {
+        c.grip = GRIP[c.classId] ?? 0.85;
+        c.slip = Math.max(0, (c.slip ?? 0) - dt * 3);
+        slipPrevRef.current[i][0] = c.vel[0];
+        slipPrevRef.current[i][1] = c.vel[2];
+        return;
+      }
+      const rain = mapRuntime.rain;
       let g = GRIP[c.classId] ?? 0.85;
       g *= 1 - rain * 0.36 - (rain > 0 ? mapRuntime.storm * 0.2 : 0);
       const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
@@ -3691,13 +3699,19 @@ function GameImpl({
           if (W.strike <= 0) {
             W.strike = 2.6 + Math.random() * 2.2;
             // aim at the highest fighter (whoever is up a tree), else either one, leading their run a little
-            const alive = fighters.filter((f) => f.hp > 0);
+            // nobody under a roof can be struck: the bolt goes for whoever is out in the open
+            const alive = fighters.filter((f) => f.hp > 0 && !sheltered(f.pos[0], f.pos[2], f.pos[1]));
             if (alive.length) {
               const hi = alive.reduce((a, b) => (b.pos[1] - terrainHeight(map.id, b.pos[0], b.pos[2]) > a.pos[1] - terrainHeight(map.id, a.pos[0], a.pos[2]) ? b : a));
               const up = hi.pos[1] - terrainHeight(map.id, hi.pos[0], hi.pos[2]) > 2.5;
               const tgt = up ? hi : alive[Math.floor(Math.random() * alive.length)];
-              const x = tgt.pos[0] + tgt.vel[0] * 0.8 + (up ? 0 : (Math.random() - 0.5) * 3);
-              const z = tgt.pos[2] + tgt.vel[2] * 0.8 + (up ? 0 : (Math.random() - 0.5) * 3);
+              let x = tgt.pos[0] + tgt.vel[0] * 0.8 + (up ? 0 : (Math.random() - 0.5) * 3);
+              let z = tgt.pos[2] + tgt.vel[2] * 0.8 + (up ? 0 : (Math.random() - 0.5) * 3);
+              if (sheltered(x, z, fy(x, z) + 0.1)) {
+                // leading them would put the bolt through a roof: strike where they stand
+                x = tgt.pos[0];
+                z = tgt.pos[2];
+              }
               mapRuntime.boltX = x;
               mapRuntime.boltZ = z;
               mapRuntime.boltY = up ? tgt.pos[1] : Math.max(fy(x, z), FOREST.waterY);
@@ -3731,6 +3745,7 @@ function GameImpl({
         const wet = waterDepth(x, z) > 0.05 || Math.abs(z - riverZ(x)) < FOREST.bankHalf;
         fighters.forEach((c, i) => {
           const d = Math.hypot(c.pos[0] - x, c.pos[2] - z);
+          if (sheltered(c.pos[0], c.pos[2], c.pos[1])) return; // safe under a roof
           if (d < 2.6 && Math.abs(c.pos[1] - y) < 3) envHit(i, 130, 6, '雷击');
           else if (wet && d < 13 && (c.swimming || (waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY))) {
             envHit(i, 60, 0, '导电');
