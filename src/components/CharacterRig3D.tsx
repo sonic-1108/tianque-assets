@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { applyMonkGold } from './monkGold';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
@@ -413,6 +414,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           // 金身: let the gilded skin catch the light
           m.envMapIntensity = 1.6;
           m.roughness = Math.min(m.roughness ?? 1, 0.85);
+          applyMonkGold(m, isPlayer);
         }
         o.material = m;
         mats.push(m);

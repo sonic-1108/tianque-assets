@@ -1091,6 +1091,9 @@ export class VFXSystem {
     this.monk.zenField(slot, pos, radius, dur);
   }
 
+  glyph(idx: number, from: THREE.Vector3, vel: THREE.Vector3, targetSlot: number) {
+    this.monk.glyph(idx, from, vel, targetSlot);
+  }
   followFighter(slot: number, p: THREE.Vector3) {
     this.monk.follow(slot, p);
     const sl = this.slots[slot];

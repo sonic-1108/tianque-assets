@@ -210,7 +210,7 @@ export const MONK_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPhas
   attack_3: { totalDuration: 0.62, startup: 0.2, active: 0.14, recovery: 0.28, canMoveRatio: 0, forwardMomentum: 3, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
   skill_1: { totalDuration: 0.7, startup: 0.15, active: 0.2, recovery: 0.35, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: false, allowAirCast: false },
   skill_2: { totalDuration: 0.5, startup: 0.2, active: 0.1, recovery: 0.2, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
-  skill_3: { totalDuration: 0.9, startup: 0.45, active: 0.15, recovery: 0.3, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: false, allowAirCast: false },
+  skill_3: { totalDuration: 0.85, startup: 0.25, active: 0.5, recovery: 0.1, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: false, allowAirCast: false },
   skill_4: { totalDuration: 0.45, startup: 0.1, active: 0.1, recovery: 0.25, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
   ultimate: { totalDuration: 2.6, startup: 0.4, active: 1.9, recovery: 0.3, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: false, cancelableBySkill: false, cancelableByJump: false, allowAirCast: false },
 };
@@ -360,7 +360,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     skills: [
       { id: 'vajra_palm', name: '金刚掌', key: '1', description: '向前疾冲一步推出金色掌印（160伤害），把对手震飞一大段距离；撞上墙壁或柱子会额外眩晕。', mpCost: 20, cooldown: 5, icon: '✋' },
       { id: 'zen_domain', name: '禅定结界', key: '2', description: '在脚下展开半径4.5米的金色法阵，持续5秒。对手在阵中移动减速一半，翻滚多耗体力。', mpCost: 25, cooldown: 11, icon: '☸️' },
-      { id: 'six_syllable_mantra', name: '六字真言', key: '3', description: '合掌念诵约半秒后爆出一圈真言音波（半径5米，100伤害）：打断对手正在放的任何技能，霸体和大招也挡不住，并把人震退。', mpCost: 25, cooldown: 9, icon: '📿' },
+      { id: 'six_syllable_mantra', name: '六字真言', key: '3', description: '合掌一念，身边先震出一圈音波（近身打断施法），随后唵嘛呢叭咪吽六个金字依次飞出、自动追踪对手。前五字各32伤害并让人僵一下；最后一个「吽」字无视格挡和霸体，90伤害并「封印」对手2.2秒，期间放不了任何技能和大招。翻滚可以躲字。', mpCost: 25, cooldown: 9, icon: '📿' },
       { id: 'golden_bell_shield', name: '金钟罩', key: '4', description: '金钟罩身4秒：受到的伤害降低65%，不会被打断，近身打你的人会被反震三成伤害。罩子散去时会有半秒气竭硬直。', mpCost: 30, cooldown: 14, icon: '🔔' },
       { id: 'ten_thousand_buddhas', name: '万佛朝宗', key: 'R', description: '盘坐结印，身后浮现金佛法相，九道巨大掌印从天而降追着对手拍下，最后一掌把人拍倒。施法期间霸体。', mpCost: 60, cooldown: 24, icon: '🧘', isSuper: true },
     ],

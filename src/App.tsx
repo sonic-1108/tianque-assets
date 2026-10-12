@@ -97,8 +97,8 @@ const MONK_HOTBAR: HotbarEntry[] = [
     tip: '把对手往墙边或柱子方向推，撞上去会额外眩晕；也是梵音最好的贴身手段。' },
   { id: 'zen_domain', key: '2', name: MS[1].name, icon: MS[1].icon, short: '减速法阵', cdKey: 'skill2', meta: mMeta(1), desc: MS[1].description,
     tip: '贴身时放在脚下，对手在阵里跑不快也翻不远，接拳掌连招。' },
-  { id: 'mantra', key: '3', name: MS[2].name, icon: MS[2].icon, short: '打断音波', cdKey: 'skill3', meta: mMeta(2), desc: MS[2].description,
-    tip: '专门留着打断：狂刃起旋风刃或天崩、沈惊鸿腾空放暴雨梨花时，靠近按 3。' },
+  { id: 'mantra', key: '3', name: MS[2].name, icon: MS[2].icon, short: '追踪封印', cdKey: 'skill3', meta: mMeta(2), desc: MS[2].description,
+    tip: '中远距离也能用：六字会拐弯追人，专克风筝的沈惊鸿。最后的「吽」封印2秒，趁这段时间贴上去打，对方交不出保命技能。' },
   { id: 'golden_bell', key: '4', name: MS[3].name, icon: MS[3].icon, short: '减伤反震', cdKey: 'skill4', meta: mMeta(3), desc: MS[3].description,
     tip: '对手连招打过来时开，硬吃着打回去；罩子散的那半秒别贪刀。' },
   { id: 'buddhas', key: 'R', name: MS[4].name, icon: MS[4].icon, short: '九掌天降', cdKey: 'ultimate', super: true, meta: mMeta(4), desc: MS[4].description,
@@ -486,6 +486,8 @@ export default function App() {
   const [hudMirror, setHudMirror] = useState({
     p1Bell: 0,
     dBell: 0,
+    p1Seal: 0,
+    dSeal: 0,
     p1Zen: false,
     dZen: false,
     p1Hp: 1600,
@@ -547,6 +549,8 @@ export default function App() {
       setHudMirror({
         p1Bell: p1.bellTimer || 0,
         dBell: dummy.bellTimer || 0,
+        p1Seal: p1.silenceTimer || 0,
+        dSeal: dummy.silenceTimer || 0,
         p1Zen: zenHas(dummy, p1),
         dZen: zenHas(p1, dummy),
         p1Hp: p1.hp,
@@ -1002,6 +1006,7 @@ export default function App() {
           if (hudMirror.protect) meChips.push({ text: '保护', tone: 'slate' });
           if (hudMirror.p1Bell > 0) meChips.push({ text: `金钟罩 ${hudMirror.p1Bell.toFixed(1)}s`, tone: 'gold', pulse: hudMirror.p1Bell < 1 });
           if (hudMirror.p1Zen) meChips.push({ text: '禅定 减速', tone: 'amber', pulse: true });
+          if (hudMirror.p1Seal > 0) meChips.push({ text: `封印 ${hudMirror.p1Seal.toFixed(1)}s`, tone: 'gold', pulse: true });
           if (hudMirror.p1Poisoned) meChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.p1Rooted) meChips.push({ text: '定身', tone: 'teal', pulse: true });
           if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
@@ -1028,6 +1033,7 @@ export default function App() {
           if (hudMirror.dProtect) foeChips.push({ text: '保护', tone: 'slate' });
           if (hudMirror.dBell > 0) foeChips.push({ text: '金钟罩', tone: 'gold' });
           if (hudMirror.dZen) foeChips.push({ text: '禅定 减速', tone: 'amber', pulse: true });
+          if (hudMirror.dSeal > 0) foeChips.push({ text: `封印 ${hudMirror.dSeal.toFixed(1)}s`, tone: 'gold', pulse: true });
           if (hudMirror.dPoisoned) foeChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.dRooted) foeChips.push({ text: '定身', tone: 'teal', pulse: true });
           const foe: UnitStats = {

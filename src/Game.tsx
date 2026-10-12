@@ -14,6 +14,7 @@ import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
 import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
+import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
 import type { NetSession } from './net';
 
@@ -203,6 +204,8 @@ export function Game({
     pendingResetRef.current = true;
   }, [mapId, playerClass, enemyClass]);
   const projRef = useRef<Projectile[]>([]);
+  /** 六字真言 syllables in flight (host / offline only; the guest sees them through the vfx replay) */
+  const glyphRef = useRef<{ idx: number; slot: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
   const lastSnapRef = useRef<unknown>(null);
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
@@ -229,7 +232,7 @@ export function Game({
   // Online host: record every top-level effect and sound so the guest can replay them
   useEffect(() => {
     if (!net || net.role !== 'host') return;
-    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail', 'palmStrike', 'palmPush', 'buddha', 'bell', 'bellHit', 'zenField'];
+    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail', 'palmStrike', 'palmPush', 'buddha', 'bell', 'bellHit', 'zenField', 'glyph'];
     const enc = (x: any) =>
       x instanceof THREE.Vector3 ? { v3: [+x.x.toFixed(3), +x.y.toFixed(3), +x.z.toFixed(3)] } : x instanceof THREE.Color ? '#' + x.getHexString() : typeof x === 'function' ? null : x;
     let depth = 0;
@@ -353,6 +356,7 @@ export function Game({
       if (!stunnedNow && (c.stunLoad ?? 0) > 0) c.stunLoad = Math.max(0, (c.stunLoad ?? 0) - dt * 4);
       if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
       if (c.zenField && c.zenField.t > 0) c.zenField.t -= dt;
+      if ((c.silenceTimer ?? 0) > 0) c.silenceTimer = (c.silenceTimer ?? 0) - dt;
       if ((c.bellTimer ?? 0) > 0) {
         c.bellTimer = (c.bellTimer ?? 0) - dt;
         if ((c.bellTimer ?? 0) <= 0 && c.hp > 0) {
@@ -460,6 +464,7 @@ export function Game({
     resolveAttacks(0, p1, en);
     resolveAttacks(1, en, p1);
     updateProjectiles(dt);
+    updateGlyphs(dt);
 
     // ================= PHYSICS =================
     for (let i = 0; i < 2; i++) {
@@ -813,6 +818,7 @@ export function Game({
         const args = (ev[2] as any[]).map((x) => (x && typeof x === 'object' && 'v3' in x ? new THREE.Vector3(x.v3[0], x.v3[1], x.v3[2]) : x));
         // slot-indexed effects: the host's slot 0 is our opponent
         if ((ev[1] === 'setVortex' || ev[1] === 'pillarAt') && typeof args[2] === 'number') args[2] = 1 - args[2];
+        if (ev[1] === 'glyph' && typeof args[3] === 'number') args[3] = 1 - args[3];
         fn.apply(vfx, args);
       }
       // sky tint from lightning / eruption, same as on the host
@@ -903,6 +909,7 @@ export function Game({
       const paySkill = (idx: number, key: string, label: string) => {
         const sk = skills[idx];
         if (c.cooldowns[key] > 0) return report(`${label}: ${sk.name}`, `冷却中 (${c.cooldowns[key].toFixed(1)}s)`), false;
+        if ((c.silenceTimer ?? 0) > 0) return report(`${label}: ${sk.name}`, `被封印 (${(c.silenceTimer ?? 0).toFixed(1)}s)`), false;
         if (c.mp < sk.mpCost) return report(`${label}: ${sk.name}`, `MP不足 (需 ${sk.mpCost})`), false;
         if (!canSkill) return report(`${label}: ${sk.name}`, `被 [${cur} ${phase}] 占用`), false;
         c.mp -= sk.mpCost;
@@ -1162,7 +1169,7 @@ export function Game({
         }
         case 'skill4': {
           const sk = skills[3];
-          if (c.cooldowns.skill4 > 0 || !canSkill) return report(`4: ${sk.name}`, '无法施放'), false;
+          if (c.cooldowns.skill4 > 0 || !canSkill || (c.silenceTimer ?? 0) > 0) return report(`4: ${sk.name}`, '无法施放'), false;
           c.hp = Math.max(1, c.hp - Math.round(c.hp * 0.1));
           c.cooldowns.skill4 = sk.cooldown;
           start('skill_4');
@@ -1700,6 +1707,7 @@ export function Game({
           if (!paySkill(2, 'skill3', '3')) return false;
           start('skill_3');
           c.mantraDone = false;
+          c.mantraShots = 0;
           gameAudio.playPowerupChime();
           return true;
         }
@@ -1800,28 +1808,41 @@ export function Game({
         vfx.embers(vB.set(zx, fy(zx, zz) + 0.1, zz), 1, '#ffd36a', 0.1, 1.6, 0.06);
       }
 
-      // 六字真言: chant, then a burst that interrupts anything
+      // 六字真言: a short chant, a close burst that interrupts, then six syllables of light hunt the foe.
+      // The first five chip and make them flinch, the last one 吽 breaks armour and seals their skills.
       if (st === 'skill_3' && cfg) {
+        c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 10, dt);
+        c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 10, dt);
         if (t < cfg.startup && Math.random() < 0.6) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), 2, '#ffe9a8', 0.5, 1.2, 0.07);
         if (t >= cfg.startup && !c.mantraDone) {
           c.mantraDone = true;
           vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]);
-          vfx.ring(vB, 5, '#ffe9a8', 0.5, 0.2, 0.15);
-          vfx.later(0.08, () => vfx.ring(new THREE.Vector3(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 5.5, color, 0.55, 0.12));
-          vfx.flash(vA.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), '#ffe2a0', 60, 0.25, 12);
-          vfx.sparkBurst(vA, 40, '#ffe9a8', 10, 0.08, UP, 1.6);
-          vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.6, c.pos[2]), '唵嘛呢叭咪吽', true, '#fde68a');
+          vfx.ring(vB, 2.8, '#ffe9a8', 0.4, 0.18, 0.15);
+          vfx.flash(vA.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), '#ffe2a0', 40, 0.2, 8);
           gameAudio.playGong();
-          controller?.addShake(slot === 0 ? 0.3 : 0.15);
+          controller?.addShake(slot === 0 ? 0.2 : 0.1);
           const d3 = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-          if (d3 < 5 && Math.abs(foe.pos[1] - c.pos[1]) < 3 && foe.hp > 0) {
+          if (d3 < 2.8 && Math.abs(foe.pos[1] - c.pos[1]) < 2.5 && foe.hp > 0) {
             const casting = foe.actionState.startsWith('skill_') || foe.actionState === 'ultimate';
-            applyHit(slot, c, foe, 100, { heavy: true, knock: 9, state: 'hitstun', dur: 0.6, unblockable: true, breakArmor: true });
+            applyHit(slot, c, foe, 40, { knock: 5, state: 'hitstun', dur: 0.45, unblockable: true, breakArmor: true });
             if (casting && foe.actionState === 'hitstun') {
               vfx.setVortex(false, 0, slot === 0 ? 1 : 0);
               vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.5, foe.pos[2]), '打断!', true, '#fde68a');
             }
           }
+        }
+        const shots = c.mantraShots ?? 0;
+        if (shots < 6 && t >= cfg.startup + 0.04 + shots * 0.085) {
+          c.mantraShots = shots + 1;
+          // fan the syllables out behind and around the monk like a halo, then let them hunt
+          const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+          const ang = (shots - 2.5) * 0.55;
+          const from = new THREE.Vector3(c.pos[0], c.pos[1] + 2.0 + Math.cos(ang) * 0.35, c.pos[2]).addScaledVector(side, Math.sin(ang) * 1.1).addScaledVector(fwd, -0.3);
+          const vel = side.clone().multiplyScalar(Math.sin(ang) * 6).addScaledVector(fwd, 2.5).add(new THREE.Vector3(0, 2.2 + Math.cos(ang) * 1.5, 0));
+          glyphRef.current.push({ idx: shots, slot, pos: from.clone(), vel: vel.clone(), age: 0 });
+          vfx.glyph(shots, from, vel, 1 - slot);
+          if (shots === 0 || shots === 5) gameAudio.playPowerupChime();
+          if (shots === 5) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.8, c.pos[2]), '唵嘛呢叭咪吽', true, '#fde68a');
         }
       }
 
@@ -2060,6 +2081,44 @@ export function Game({
       p.stuck = seconds;
       p.spent = true;
       if (!p.noStop || Math.random() < 0.2) gameAudio.playDartStick();
+    }
+
+    function updateGlyphs(step: number) {
+      const list = glyphRef.current;
+      for (let n = list.length - 1; n >= 0; n--) {
+        const g = list[n];
+        const owner = fighters[g.slot];
+        const def = fighters[1 - g.slot];
+        g.age += step;
+        const tgt = vC.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]);
+        glyphSteer(g.pos, g.vel, tgt, g.age, step);
+        if (g.age > 2.4 || def.hp <= 0 || owner.hp <= 0) {
+          list.splice(n, 1);
+          continue;
+        }
+        if (g.pos.distanceTo(tgt) > 0.75) continue;
+        list.splice(n, 1);
+        const last = g.idx === 5;
+        if (def.dodgeIframeTimer > 0) {
+          vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.2, def.pos[2]), '闪', false, '#e5e7eb');
+          continue;
+        }
+        const before = def.hp;
+        if (last) {
+          applyHit(g.slot, owner, def, 90, { knock: 5, state: 'hitstun', dur: 0.5, unblockable: true, breakArmor: true, ranged: true, noMark: true, crit: true, shake: 0.25 });
+          if (def.hp < before && def.hp > 0) {
+            def.silenceTimer = 2.2;
+            vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.6, def.pos[2]), '封印', true, '#fbbf24');
+            vfx.ring(vB.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 1.6, '#fbbf24', 0.5, 0.14, 0.4);
+          }
+          vfx.flash(vB.copy(tgt), '#ffd36a', 50, 0.2, 9);
+          vfx.sparkBurst(vB.copy(tgt), 30, '#ffe9a8', 9, 0.08, UP, 1.4);
+          gameAudio.playGong();
+        } else {
+          applyHit(g.slot, owner, def, 32, { knock: 1, dur: 0.15, flinch: true, ranged: true, noMark: true });
+          vfx.sparkBurst(vB.copy(tgt), 8, '#ffe9a8', 5, 0.05);
+        }
+      }
     }
 
     function updateProjectiles(step: number) {
@@ -2360,10 +2419,13 @@ export function Game({
         c.bellTimer = 0;
         c.zenField = undefined;
         c.palmsThrown = 0;
+        c.silenceTimer = 0;
+        c.mantraShots = 0;
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
       projRef.current = [];
+      glyphRef.current = [];
       p1.pos = [map.spawnPlayer[0], fy(map.spawnPlayer[0], map.spawnPlayer[1]), map.spawnPlayer[1]];
       en.pos = [map.spawnEnemy[0], fy(map.spawnEnemy[0], map.spawnEnemy[1]), map.spawnEnemy[1]];
       p1.rotY = p1.targetRotY = yawTo(p1.pos, en.pos);
@@ -3085,7 +3147,7 @@ export function Game({
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
         const foeCasting = (foe.actionState.startsWith('skill_') || foe.actionState === 'ultimate') && phaseOf(foe).phase !== 'recovery';
-        if (foeCasting && dist < 5 && ready('skill3') && me.mp >= 25 && r < 0.8) ask('skill3');
+        if (foeCasting && dist < 2.8 && ready('skill3') && me.mp >= 25 && r < 0.8) ask('skill3');
         else if (foeAttacking && dist < 3.6 && r < 0.45) {
           if (r < 0.2 && me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
             ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
@@ -3096,6 +3158,7 @@ export function Game({
           }
         } else if (me.hp < me.maxHp * 0.6 && dist < 4 && ready('skill4') && me.mp >= 30 && r < 0.35) ask('skill4');
         else if (ready('ultimate') && me.mp >= 60 && dist < 8 && r < 0.15) ask('ultimate');
+        else if (dist > 4 && dist < 16 && ready('skill3') && me.mp >= 25 && r < 0.3) ask('skill3');
         else if (dist > 7) {
           ai.plan = 'approach';
           ai.planTimer = 0.6;

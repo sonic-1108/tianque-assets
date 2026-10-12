@@ -178,6 +178,8 @@ export interface CombatantState {
   dodgeEndAt?: number;
   /** 梵音 (monk) runtime */
   bellTimer?: number; // 金钟罩 seconds left
+  silenceTimer?: number; // 封印: can't cast skills
+  mantraShots?: number; // 六字真言 syllables released so far
   zenField?: { x: number; z: number; t: number }; // 禅定结界 centre and seconds left
   palmsThrown?: number; // 万佛朝宗 palms already called down
   mantraDone?: boolean;

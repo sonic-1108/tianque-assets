@@ -257,6 +257,63 @@ function bellGeometry() {
   return new THREE.LatheGeometry(pts, 48);
 }
 
+export const MANTRA = ['唵', '嘛', '呢', '叭', '咪', '吽'];
+
+function glyphTexture(ch: string, halo: boolean) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  if (halo) {
+    const rg = g.createRadialGradient(64, 64, 4, 64, 64, 62);
+    rg.addColorStop(0, ch ? 'rgba(255,200,90,0.25)' : 'rgba(255,200,90,0.8)');
+    rg.addColorStop(0.45, ch ? 'rgba(255,150,40,0.1)' : 'rgba(255,150,40,0.3)');
+    rg.addColorStop(1, 'rgba(255,120,20,0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, 128, 128);
+  }
+  g.font = 'bold 88px "Noto Serif SC","Songti SC","STSong","SimSun","Noto Sans CJK SC","Microsoft YaHei",serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  if (halo) {
+    if (ch) {
+      g.shadowColor = 'rgba(255,190,80,1)';
+      g.shadowBlur = 16;
+      g.fillStyle = 'rgba(255,225,160,0.7)';
+      g.fillText(ch, 64, 68);
+    }
+  } else {
+    g.lineJoin = 'round';
+    g.lineWidth = 9;
+    g.strokeStyle = 'rgba(90,30,0,0.95)';
+    g.strokeText(ch, 64, 68);
+    const lg = g.createLinearGradient(0, 24, 0, 108);
+    lg.addColorStop(0, '#fff6c8');
+    lg.addColorStop(0.5, '#ffd257');
+    lg.addColorStop(1, '#f59e0b');
+    g.fillStyle = lg;
+    g.fillText(ch, 64, 68);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Homing step shared by the gameplay sim and the visual so both fly the same arc */
+export function glyphSteer(pos: THREE.Vector3, vel: THREE.Vector3, target: THREE.Vector3, age: number, dt: number) {
+  // first 0.18 s the glyph drifts out of its fan, then it hunts the target harder and harder
+  const want = target.clone().sub(pos);
+  const d = want.length();
+  if (age > 0.18 && d > 1e-3) {
+    const speed = Math.min(26, 11 + (age - 0.18) * 34);
+    want.multiplyScalar(speed / d);
+    const k = 1 - Math.exp(-dt * (4 + age * 10));
+    vel.lerp(want, k);
+  } else {
+    vel.multiplyScalar(Math.exp(-dt * 2.5));
+  }
+  pos.addScaledVector(vel, dt);
+}
+
 export class MonkFX {
   private palms: PalmFx[] = [];
   private buddhaSprite: THREE.Sprite;
@@ -265,8 +322,28 @@ export class MonkFX {
   private bells: { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; life: number; max: number; hit: number }[] = [];
   private zens: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; life: number; max: number; radius: number }[] = [];
   private time = 0;
+  private targets = [new THREE.Vector3(), new THREE.Vector3()];
+  private glyphs: { spr: THREE.Sprite; ghosts: THREE.Sprite[]; trail: THREE.Vector3[]; pos: THREE.Vector3; vel: THREE.Vector3; age: number; slot: number; big: boolean; active: boolean; dying: number }[] = [];
+  private glyphTex: THREE.Texture[] = [];
+  private haloTex: THREE.Texture[] = [];
+  private discTex!: THREE.Texture;
 
   constructor(root: THREE.Object3D) {
+    this.glyphTex = MANTRA.map((ch) => glyphTexture(ch, false));
+    this.haloTex = MANTRA.map((ch) => glyphTexture(ch, true));
+    this.discTex = glyphTexture('', true);
+    for (let i = 0; i < 14; i++) {
+      const mk = (o: number, solid = false) => {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.glyphTex[0], transparent: true, depthWrite: false, depthTest: true, blending: solid ? THREE.NormalBlending : THREE.AdditiveBlending, color: new THREE.Color(1.6, 1.15, 0.5), toneMapped: false, opacity: o }));
+        sp.visible = false;
+        sp.renderOrder = solid ? 16 : 15;
+        root.add(sp);
+        return sp;
+      };
+      const spr = mk(1, true);
+      const ghosts = [mk(0.8), mk(0.5), mk(0.25)];
+      this.glyphs.push({ spr, ghosts, trail: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], pos: new THREE.Vector3(), vel: new THREE.Vector3(), age: 0, slot: 0, big: false, active: false, dying: 0 });
+    }
     const palmTex = palmTexture();
     const plane = new THREE.PlaneGeometry(1, 1);
     for (let i = 0; i < 12; i++) {
@@ -371,12 +448,69 @@ export class MonkFX {
     z.mesh.visible = true;
   }
 
+  /** One syllable of 六字真言 leaves the monk and hunts fighter `targetSlot` */
+  glyph(idx: number, from: THREE.Vector3, vel: THREE.Vector3, targetSlot: number) {
+    const g = this.glyphs.find((x) => !x.active) ?? this.glyphs[0];
+    const big = idx === 5;
+    g.active = true;
+    g.dying = 0;
+    g.age = 0;
+    g.slot = targetSlot;
+    g.big = big;
+    g.pos.copy(from);
+    g.vel.copy(vel);
+    for (const t of g.trail) t.copy(from);
+    for (const sp of [g.spr, ...g.ghosts]) {
+      const solid = sp === g.spr;
+      (sp.material as THREE.SpriteMaterial).map = sp === g.ghosts[0] ? this.discTex : (solid ? this.glyphTex : this.haloTex)[idx % 6];
+      if (solid) (sp.material as THREE.SpriteMaterial).color.setRGB(1.25, 1.15, 1.0);
+      else (sp.material as THREE.SpriteMaterial).color.setRGB(big ? 2.4 : 1.7, big ? 1.3 : 1.05, big ? 0.35 : 0.4);
+      sp.material.needsUpdate = true;
+      sp.visible = true;
+      sp.position.copy(from);
+    }
+  }
+
   follow(slot: number, p: THREE.Vector3) {
+    this.targets[slot].set(p.x, p.y + 1.15, p.z);
     this.bells[slot].mesh.position.set(p.x, p.y - 0.05, p.z);
   }
 
   update(dt: number) {
     this.time += dt;
+    for (const g of this.glyphs) {
+      if (!g.active) continue;
+      g.age += dt;
+      if (g.dying > 0) {
+        g.dying -= dt;
+        const k = Math.max(0, g.dying / 0.22);
+        const s = (g.big ? 1.6 : 1.0) * (1 + (1 - k) * 1.6);
+        g.spr.scale.set(s, s, 1);
+        g.spr.material.opacity = k;
+        for (const gh of g.ghosts) gh.visible = false;
+        if (g.dying <= 0) {
+          g.active = false;
+          g.spr.visible = false;
+        }
+        continue;
+      }
+      glyphSteer(g.pos, g.vel, this.targets[g.slot], g.age, dt);
+      // ghosts lag a few frames behind for a short golden streak
+      g.trail[2].lerp(g.trail[1], Math.min(1, dt * 22));
+      g.trail[1].lerp(g.trail[0], Math.min(1, dt * 22));
+      g.trail[0].lerp(g.pos, Math.min(1, dt * 22));
+      const base = g.big ? 1.7 : 1.15;
+      const s = base * Math.min(1, g.age * 6) * (1 + 0.08 * Math.sin(this.time * 18 + g.age * 5));
+      g.spr.position.copy(g.pos);
+      g.spr.scale.set(s, s, 1);
+      g.spr.material.opacity = 1;
+      g.ghosts.forEach((gh, i) => {
+        gh.position.copy(i === 0 ? g.pos : g.trail[i]);
+        const gs = s * (i === 0 ? 1.7 : 1.0 - i * 0.12);
+        gh.scale.set(gs, gs, 1);
+      });
+      if (g.pos.distanceTo(this.targets[g.slot]) < 0.6 || g.age > 2.4) g.dying = 0.22;
+    }
     for (const p of this.palms) {
       if (!p.active) continue;
       p.t += dt;
