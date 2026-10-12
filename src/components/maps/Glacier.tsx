@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { MAPS, GLACIER, glacierHeight, glacierPath, mapRuntime } from '../../maps';
+import { MAPS, GLACIER, GLACIER_PINES, GLACIER_ROCKS, glacierHeight, glacierPath, mapRuntime } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -636,23 +636,8 @@ function PrayerFlags({ top }: { top: THREE.Vector3 }) {
 
 /** Rock outcrops breaking through the snow on the flanks */
 function Outcrops() {
-  const items = useMemo(() => {
-    const rand = seeded(44);
-    const [sx, sz] = GLACIER.summit;
-    const out: { p: THREE.Vector3; s: THREE.Vector3; r: THREE.Euler }[] = [];
-    for (let k = 0; k < 120 && out.length < 45; k++) {
-      const a = rand() * Math.PI * 2;
-      const r = 5 + rand() * 22;
-      const x = sx + Math.cos(a) * r;
-      const z = sz + Math.sin(a) * r;
-      if (Math.hypot(x, z) > 38) continue;
-      if (glacierPath(x, z).d < GLACIER.pathHalf + 2.2) continue; // keep the road clear
-      if (x > GLACIER.avalancheX[0] - 1 && x < GLACIER.avalancheX[1] + 1 && z > GLACIER.avalancheTop) continue;
-      const s = 0.6 + rand() * 1.1;
-      out.push({ p: new THREE.Vector3(x, glacierHeight(x, z) - s * 0.35, z), s: new THREE.Vector3(s * (1 + rand()), s * (0.6 + rand() * 0.5), s * (0.8 + rand() * 0.6)), r: new THREE.Euler(rand() * 0.4, rand() * 6, rand() * 0.4) });
-    }
-    return out;
-  }, []);
+  // positions come from maps.ts so they match the collision
+  const items = useMemo(() => GLACIER_ROCKS.map((k) => ({ p: new THREE.Vector3(k.x, k.y, k.z), s: new THREE.Vector3(k.sx, k.sy, k.sz), r: new THREE.Euler(k.rx, k.ry, k.rz) })), []);
   const geo = useMemo(() => {
     const g = new THREE.DodecahedronGeometry(1, 1);
     const p = g.attributes.position as THREE.BufferAttribute;
@@ -710,38 +695,7 @@ function Avalanche() {
 
 export function GlacierMap() {
   const def = MAPS.glacier;
-  const pines = useMemo(() => {
-    const rand = seeded(88);
-    const out: [number, number, number][] = [];
-    const [sx, sz] = GLACIER.summit;
-    // forest on the shelf ringing the valley, outside the arena
-    for (let k = 0; k < 420; k++) {
-      const a = rand() * Math.PI * 2;
-      const r = 41.5 + Math.pow(rand(), 0.8) * 55;
-      out.push([Math.cos(a) * r, Math.sin(a) * r, 1.0 + rand() * 1.2]);
-    }
-    // a few on the lower terraces, never on the road or in the avalanche chute
-    for (let k = 0; k < 400 && out.length < 500; k++) {
-      const a = rand() * Math.PI * 2;
-      const r = 9 + rand() * 20;
-      const x = sx + Math.cos(a) * r;
-      const z = sz + Math.sin(a) * r;
-      if (Math.hypot(x, z) > 38.5) continue;
-      if (glacierPath(x, z).d < GLACIER.pathHalf + 2.4) continue;
-      if (x > GLACIER.avalancheX[0] - 2 && x < GLACIER.avalancheX[1] + 2 && z > GLACIER.avalancheTop) continue;
-      out.push([x, z, 0.7 + rand() * 0.5]);
-    }
-    // valley edges
-    for (let k = 0; k < 60; k++) {
-      const a = rand() * Math.PI * 2;
-      const r = 38 + rand() * 3;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      if (Math.hypot(x - sx, z - sz) < GLACIER.footR + 2) continue;
-      out.push([x, z, 0.9 + rand() * 0.6]);
-    }
-    return out;
-  }, []);
+  const pines = GLACIER_PINES; // shared with the collision in maps.ts
   // wooden stakes with red ribbons along the outer (downhill) edge of the road
   const stakes = useMemo(() => {
     const out: [number, number, number][] = [];

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
-import { collectLimbs, applyClimbPose, Limbs } from './climbPose';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
@@ -371,11 +370,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const leanRef = useRef(new THREE.Vector2());
   const weaponScaledRef = useRef(false);
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
-  const limbsRef = useRef<Limbs | null>(null);
-  const climbBlendRef = useRef(0);
-  const climbPhaseRef = useRef(0);
-  const lastClimbYRef = useRef(0);
-  const climbFwd = useMemo(() => new THREE.Vector3(), []);
+  const climbKickRef = useRef(-1);
   const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife>; left?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife> }>({});
 
   useEffect(() => {
@@ -448,7 +443,6 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       actions[key] = a;
     }
     actionsRef.current = actions;
-    limbsRef.current = collectLimbs(model);
     currentKeyRef.current = '';
     if (actions.idle) {
       actions.idle.play();
@@ -580,7 +574,13 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const lm = c.localMove || [0, 0];
     let backward = false;
     if (c.treeClimb !== undefined) {
-      key = 'idle'; // the climbing pose is layered on procedurally below
+      // 梯云纵: a fresh jump at each of the three kicks, the ranger's own flip for the last one
+      const kick = Math.min(2, Math.floor(((c.climbT ?? 0) / 1.0) * 3));
+      key = kick === 2 && actionsRef.current.r_flip ? 'r_flip' : 'jump';
+      if (kick !== climbKickRef.current) {
+        climbKickRef.current = kick;
+        currentKeyRef.current = '';
+      }
     } else if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
       key = 'r_kick';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
@@ -627,19 +627,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     if (cur && currentKeyRef.current === 'skill_3') cur.setEffectiveTimeScale(2.0);
     if (cur && currentKeyRef.current === 'swim') cur.setEffectiveTimeScale(speed > 0.6 ? THREE.MathUtils.clamp(speed / 3.5, 0.7, 1.4) : 0.45);
-    if (cur && currentKeyRef.current === 'climb') cur.setEffectiveTimeScale(c.climbRate ?? 0);
 
     mixer.update(delta);
 
-    // 青冥古林 tree climbing: hands over hands up the trunk, layered on top of the idle clip
     const climbingNow = c.treeClimb !== undefined;
-    climbBlendRef.current = THREE.MathUtils.damp(climbBlendRef.current, climbingNow ? 1 : 0, 12, delta);
-    if (climbingNow) climbPhaseRef.current += (c.pos[1] - lastClimbYRef.current) * 2.6;
-    lastClimbYRef.current = c.pos[1];
-    if (limbsRef.current && climbBlendRef.current > 0.01) {
-      const fwd = climbFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY));
-      applyClimbPose(limbsRef.current, fwd, climbPhaseRef.current, climbBlendRef.current);
-    }
+    if (!climbingNow) climbKickRef.current = -1;
     // no weapons in hand while swimming or climbing
     const handsBusy = climbingNow || !!c.swimming;
     if (classId !== 'BuddhistMage') {
@@ -670,6 +662,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // Ultimate: forward somersault on the way up
     if (st === 'ultimate' && key === 'ult_air') flipRef.current = THREE.MathUtils.clamp(c.stateTimer / 0.55, 0, 1) * Math.PI * 2;
     else if ((c.doubleJumpTimer ?? 0) > 0 && !c.isGrounded && !actionsRef.current.r_flip) flipRef.current = (1 - (c.doubleJumpTimer ?? 0) / 0.45) * Math.PI * 2;
+    else if (c.treeClimb !== undefined && (c.climbT ?? 0) > 0.66 && !actionsRef.current.r_flip) flipRef.current = THREE.MathUtils.smootherstep(((c.climbT ?? 0) - 0.66) / 0.34, 0, 1) * Math.PI * 2;
     else flipRef.current = 0;
 
     let leanX = 0;

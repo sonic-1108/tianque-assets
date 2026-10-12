@@ -1068,22 +1068,8 @@ function Stones() {
     };
     return m;
   }, []);
-  const rocks = useMemo(() => {
-    const rand = seeded(97);
-    const out: { p: [number, number, number]; s: [number, number, number]; r: number }[] = [];
-    for (let k = 0; k < 2000 && out.length < 90; k++) {
-      const a = rand() * Math.PI * 2;
-      const d = 6 + rand() * (R + 4);
-      const x = Math.cos(a) * d;
-      const z = Math.sin(a) * d;
-      if (blocked(x, z, 1)) continue;
-      const bank = Math.abs(Math.abs(z - riverZ(x)) - FOREST.deepHalf - 1.5) < 2.5;
-      if (!bank && d < R - 2 && rand() < 0.8) continue; // boulders crowd the banks and the edge, the fighting ground stays clear
-      const s = 0.25 + rand() * (bank ? 0.9 : 0.5);
-      out.push({ p: [x, floorAt(x, z) + s * 0.2, z], s: [s * 1.3, s * 0.7, s], r: rand() * 6 });
-    }
-    return out;
-  }, []);
+  // positions come from maps.ts so they match the collision
+  const rocks = useMemo(() => FOREST.rocks.map(([x, z, sc, yaw]) => ({ p: [x, floorAt(x, z) + sc * 0.2, z] as [number, number, number], s: [sc * 1.3, sc * 0.7, sc] as [number, number, number], r: yaw })), []);
   return (
     <group>
       {FOREST.stones.map(([x, z], i) => (

@@ -931,23 +931,8 @@ export function Game({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
-      if (c.treeClimb !== undefined) {
-        if (req !== 'jump') return report('出招', '攀爬中，先跳下来'), false;
-        // kick off the trunk, away from it
-        const pl = (map.pillars || [])[c.treeClimb];
-        const ox = c.pos[0] - pl.x;
-        const oz = c.pos[2] - pl.z;
-        const od = Math.hypot(ox, oz) || 1;
-        c.treeClimb = undefined;
-        c.climbing = false;
-        c.isGrounded = false;
-        c.vel = [(ox / od) * 6, 7, (oz / od) * 6];
-        c.actionState = 'jump';
-        c.stateDuration = 0;
-        c.rotY = c.targetRotY = Math.atan2(-ox, -oz) + Math.PI;
-        gameAudio.playJump();
-        return true;
-      }
+      if (c.treeClimb !== undefined) return report('出招', '梯云纵上树中'), false;
+      if (req === 'jump' && startTreeRun(c, intent)) return true;
       if (c.swimming && req !== 'dodge' && req !== 'jump') return report('出招', '游泳中无法出招'), false;
       if (c.swimming && req === 'jump') {
         // scramble out onto a bank or a stepping stone if one is within reach, otherwise just bob
@@ -1310,96 +1295,103 @@ export function Game({
     }
 
     /**
-     * 青冥古林 lookout trees: push into a trunk for a moment and you start climbing. Forward climbs, back lets go,
-     * left / right circle the trunk, jump kicks off. Climbing costs stamina; at the top you step onto the deck.
-     * Returns true while clinging (normal movement is skipped).
+     * 青冥古林 lookout trees, 梯云纵: run at a lookout tree and jump, and you go up it in three kicks off the bark,
+     * spiralling round the trunk, then flip over the rail onto the deck. About one second, costs stamina.
+     * A hit on the way up knocks you off. Returns true while the move is running (normal movement is skipped).
      */
-    function treeClimb(c: CombatantState, intent: Intent) {
-      const pillars = map.pillars || [];
+    const TREE_RUN_T = 1.0;
+    function startTreeRun(c: CombatantState, intent: Intent): boolean {
+      if (map.id !== 'forest' || !c.isGrounded || c.swimming || c.hp <= 0) return false;
       const i = fighters.indexOf(c);
       const mv = intent.move;
-      if (c.treeClimb === undefined) {
-        const st = c.actionState;
-        if (c.hp <= 0 || c.swimming || !(st === 'idle' || st === 'run' || st === 'jump') || mv.lengthSq() < 0.25 || (c.stamina ?? 0) < 12) {
-          c.climbPush = 0;
-          return false;
+      const dir = mv.lengthSq() > 0.04 ? vA.set(mv.x, 0, mv.z).normalize() : vA.copy(fwdOf(c.rotY));
+      let best = -1;
+      let bestD = 1e9;
+      (map.pillars || []).forEach((pl, k) => {
+        if (!pl.climb || c.pos[1] > (pl.h ?? 0) - 0.6) return;
+        const dx = pl.x - c.pos[0];
+        const dz = pl.z - c.pos[2];
+        const d = Math.hypot(dx, dz);
+        if (d > pl.r + 1.8 || (dir.x * dx + dir.z * dz) / d < 0.3) return;
+        // the AI only goes up after you
+        if (aiOn && i === 1 && !(fighters[0].pos[1] > (pl.h ?? 0) - 1 && Math.hypot(fighters[0].pos[0] - pl.x, fighters[0].pos[2] - pl.z) < (pl.deck ?? pl.r) + 0.5)) return;
+        if (d < bestD) {
+          bestD = d;
+          best = k;
         }
-        let hit = -1;
-        pillars.forEach((pl, k) => {
-          if (!pl.climb || c.pos[1] > (pl.h ?? 0) - 0.6) return;
-          const dx = pl.x - c.pos[0];
-          const dz = pl.z - c.pos[2];
-          const d = Math.hypot(dx, dz);
-          if (d > pl.r + 0.62) return;
-          if ((mv.x * dx + mv.z * dz) / (d * Math.max(0.001, mv.length())) < 0.55) return;
-          // the AI only climbs to chase you up a tree
-          if (aiOn && i === 1 && !(fighters[0].pos[1] > (pl.h ?? 0) - 1 && Math.hypot(fighters[0].pos[0] - pl.x, fighters[0].pos[2] - pl.z) < (pl.deck ?? pl.r) + 0.5)) return;
-          hit = k;
-        });
-        if (hit < 0) {
-          c.climbPush = 0;
-          return false;
-        }
-        c.climbPush = (c.climbPush ?? 0) + dt;
-        if (c.climbPush < 0.22) return false;
-        c.climbPush = 0;
-        c.treeClimb = hit;
-        c.isGrounded = true;
-        c.vel = [0, 0, 0];
-        c.actionState = 'idle';
-        c.stateDuration = 0;
+      });
+      if (best < 0) return false;
+      if ((c.stamina ?? 0) < 25) {
+        if (i === 0) onRoundEvent?.({ type: 'toast', text: '体力不够，上不去树' });
+        return false;
       }
-      const pl = pillars[c.treeClimb!];
-      const ox = c.pos[0] - pl.x;
-      const oz = c.pos[2] - pl.z;
-      const od = Math.hypot(ox, oz) || 1;
-      const nx = ox / od; // outward from the trunk
-      const nz = oz / od;
-      const ml = mv.length();
-      const toward = ml > 0.1 ? -(mv.x * nx + mv.z * nz) / ml : 0; // +1 = pushing into the tree = up
-      const side = ml > 0.1 ? (mv.x * -nz + mv.z * nx) / ml : 0;
-      const up = toward > 0.3;
-      const vy = up ? 3.0 : toward < -0.3 ? -5 : -0.5;
-      c.stamina = Math.max(0, (c.stamina ?? 0) - dt * (up ? 13 : 5));
-      c.staminaDelay = 0.8;
+      const pl = map.pillars![best];
+      c.stamina = (c.stamina ?? 0) - 25;
+      c.staminaDelay = 1.2;
+      c.treeClimb = best;
+      c.climbT = 0;
+      c.climbA0 = Math.atan2(c.pos[2] - pl.z, c.pos[0] - pl.x);
+      c.climbY0 = c.pos[1];
+      // spiral the way you were drifting round the trunk
+      const tx = -(c.pos[2] - pl.z);
+      const tz = c.pos[0] - pl.x;
+      c.climbSide = mv.x * tx + mv.z * tz < 0 ? -1 : 1;
       c.climbing = true;
-      c.climbRate = up ? 1 : toward < -0.3 ? -1.4 : 0.15;
-      const R0 = pl.r + 0.47;
-      const ang = Math.atan2(oz, ox) + (Math.abs(side) > 0.3 ? (side * 2.2 * dt) / R0 : 0);
-      c.pos[0] = pl.x + Math.cos(ang) * R0;
-      c.pos[2] = pl.z + Math.sin(ang) * R0;
-      c.pos[1] += vy * dt;
+      c.isGrounded = true;
+      c.vel = [0, 0, 0];
+      c.actionState = 'jump';
+      c.stateTimer = 0;
+      c.stateDuration = 0;
+      gameAudio.playJump();
+      return true;
+    }
+
+    function treeClimb(c: CombatantState, _intent: Intent) {
+      if (c.treeClimb === undefined) return false;
+      const pl = (map.pillars || [])[c.treeClimb];
+      const T = TREE_RUN_T;
+      const prevT = c.climbT ?? 0;
+      const t = Math.min(T, prevT + dt);
+      c.climbT = t;
+      const u = t / T;
+      // three kicks: each one a quick rise, then a short hang
+      const steps = 3;
+      const k = Math.min(steps - 1, Math.floor(u * steps));
+      const f = u * steps - k;
+      const rise = (k + THREE.MathUtils.smootherstep(f, 0, 0.75)) / steps;
+      const top = (pl.h ?? 0) + 0.9; // clear the rail
+      const y0 = c.climbY0 ?? c.pos[1];
+      const a = (c.climbA0 ?? 0) + (c.climbSide ?? 1) * 1.1 * u;
+      const R0 = pl.r + 0.55 + Math.sin(Math.min(1, f / 0.75) * Math.PI) * 0.3;
+      c.pos[0] = pl.x + Math.cos(a) * R0;
+      c.pos[2] = pl.z + Math.sin(a) * R0;
+      c.pos[1] = y0 + (top - y0) * rise;
       c.vel = [0, 0, 0];
       c.rotY = c.targetRotY = yawTo(c.pos, [pl.x, 0, pl.z]);
-      const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
-      const letGo = () => {
+      // a puff of bark and a ring of qi at every kick
+      if (Math.floor(prevT / (T / steps)) !== k || prevT === 0) {
+        const bx = pl.x + Math.cos(a) * pl.r;
+        const bz = pl.z + Math.sin(a) * pl.r;
+        vfx.dustPuff(vB.set(bx, c.pos[1] + 0.2, bz), 6, 0.25, 1.4, 0.4, '#9a8a6a');
+        vfx.ring(vC.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 0.9, '#e0f2fe', 0.35, 0.06, 0.2);
+        if (prevT > 0) gameAudio.playDodge();
+      }
+      if (t >= T) {
+        // over the rail and onto the deck, facing out over the forest
         c.treeClimb = undefined;
         c.climbing = false;
-        c.climbRate = 0;
-      };
-      if (c.pos[1] >= (pl.h ?? 0) - 0.05) {
-        // haul up onto the deck
-        letGo();
-        const Rd = pl.r + 0.75;
-        c.pos[0] = pl.x + Math.cos(ang) * Rd;
-        c.pos[2] = pl.z + Math.sin(ang) * Rd;
-        c.pos[1] = pl.h ?? 0;
+        const Rd = pl.r + 0.8;
+        c.pos[0] = pl.x + Math.cos(a) * Rd;
+        c.pos[2] = pl.z + Math.sin(a) * Rd;
+        c.pos[1] = pl.h ?? c.pos[1];
         c.isGrounded = true;
-        vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 4, 0.3, 1, 0.4, '#9a8a6a');
+        c.actionState = 'idle';
+        c.rotY = c.targetRotY = yawTo([pl.x, 0, pl.z], c.pos);
+        vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 6, 0.3, 1.2, 0.4, '#9a8a6a');
         gameAudio.playLand();
-      } else if (c.pos[1] <= floor + 0.02 && !up) {
-        letGo();
-        c.pos[1] = floor;
-        c.isGrounded = true;
-      } else if ((c.stamina ?? 0) <= 0) {
-        // no grip left: drop
-        letGo();
-        c.isGrounded = false;
-        c.vel = [nx * 2, 0, nz * 2];
-        c.actionState = 'jump';
-        if (i === 0) onRoundEvent?.({ type: 'toast', text: '体力耗尽，抓不住了' });
+        return false;
       }
-      return c.treeClimb !== undefined;
+      return true;
     }
 
     /**
@@ -3417,7 +3409,21 @@ export function Game({
     // ------------------------------------------------------
     /** 青冥古林 AI: up on a lookout deck while the target is down below: walk to the edge and jump off toward them */
     function leaveLookout(me: CombatantState, foe: CombatantState, out: Intent) {
-      if (me.treeClimb !== undefined || !me.isGrounded || foe.pos[1] > me.pos[1] - 2) return;
+      if (me.treeClimb !== undefined || !me.isGrounded) return;
+      // you're up a lookout: go to that tree and 梯云纵 up after you
+      if (foe.pos[1] > me.pos[1] + 3 && foe.isGrounded) {
+        const pl = (map.pillars || []).find((p) => p.climb && Math.abs(foe.pos[1] - (p.h ?? 0)) < 0.4 && Math.hypot(foe.pos[0] - p.x, foe.pos[2] - p.z) < (p.deck ?? 0) + 0.3);
+        if (pl) {
+          const dx = pl.x - me.pos[0];
+          const dz = pl.z - me.pos[2];
+          const d = Math.hypot(dx, dz) || 1;
+          out.move.set(dx / d, 0, dz / d);
+          if (d < pl.r + 1.5 && (me.stamina ?? 0) >= 25) out.request = 'jump';
+          else if (out.request === 'jump') out.request = null;
+        }
+        return;
+      }
+      if (foe.pos[1] > me.pos[1] - 2) return;
       const pl = (map.pillars || []).find((p) => p.deck && Math.abs(me.pos[1] - (p.h ?? 0)) < 0.3 && Math.hypot(me.pos[0] - p.x, me.pos[2] - p.z) < (p.deck ?? 0) + 0.2);
       if (!pl) return;
       // head out away from the trunk on the side facing the target

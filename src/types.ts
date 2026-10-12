@@ -199,8 +199,10 @@ export interface CombatantState {
   stamina?: number; // 体力: dodges, double jumps and climbing spend it
   climbing?: boolean; // 雪岭冰峰: hauling up a steep slope / 青冥古林: up a tree
   treeClimb?: number; // 青冥古林: index of the pillar (lookout tree) being climbed
-  climbPush?: number; // seconds spent pushing into a climbable trunk
-  climbRate?: number; // -1..1 how fast the climb animation runs (up / sliding down)
+  climbT?: number; // 梯云纵: seconds into the run up the tree
+  climbA0?: number; // angle round the trunk where it started
+  climbY0?: number; // height it started from
+  climbSide?: number; // which way it spirals
   swimming?: boolean; // 青冥古林: floating in deep water
   ledgeBlocked?: number; // walking was stopped at a sheer drop (AI uses it to steer)
   sliding?: boolean; // out of stamina on a steep slope

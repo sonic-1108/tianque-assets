@@ -93,6 +93,8 @@ export const FOREST = {
   /** stepping stones across the ford (x, z) */
   stones: [] as [number, number][],
   deckR: 1.25, // how far the lookout platform reaches beyond the trunk
+  /** boulders: x, z, size, yaw */
+  rocks: [] as [number, number, number, number][],
 };
 (() => {
   const rand = frand(1234);
@@ -136,6 +138,22 @@ export const FOREST = {
     const near = (px: number, pz: number) => FOREST.trees.some(([tx, tz, r]) => Math.hypot(tx - px, tz - pz) < r + 3) || FOREST.logs.some(([a0, b0, a1, b1]) => Math.hypot((a0 + a1) / 2 - px, (b0 + b1) / 2 - pz) < 8);
     if (near(x, z) || near(x1, z1) || near((x + x1) / 2, (z + z1) / 2)) continue;
     FOREST.logs.push([x, z, x1, z1]);
+  }
+  // boulders: crowding the banks and the edge, the fighting ground stays clear. You can step up onto them.
+  {
+    const rr = frand(97);
+    const blockedT = (x: number, z: number, pad: number) => FOREST.trees.some(([tx, tz, r]) => Math.hypot(x - tx, z - tz) < r + pad);
+    for (let k = 0; k < 2000 && FOREST.rocks.length < 90; k++) {
+      const a = rr() * Math.PI * 2;
+      const d = 6 + rr() * (FOREST.radius + 4);
+      const x = Math.cos(a) * d;
+      const z = Math.sin(a) * d;
+      if (blockedT(x, z, 1)) continue;
+      const bank = Math.abs(Math.abs(z - riverZ(x)) - FOREST.deepHalf - 1.5) < 2.5;
+      if (!bank && d < FOREST.radius - 2 && rr() < 0.8) continue;
+      const sc = 0.25 + rr() * (bank ? 0.9 : 0.5);
+      FOREST.rocks.push([x, z, sc, rr() * 6]);
+    }
   }
   // stepping stones zig-zag across the ford
   const [f0, f1] = FOREST.ford;
@@ -193,6 +211,7 @@ function forestPillars(): Circle[] {
     for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH + forestFloor(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n) });
   }
   for (const [x, z] of FOREST.stones) out.push({ x, z, r: 0.62, h: FOREST.waterY + 0.2 });
+  for (const [x, z, sc] of FOREST.rocks) out.push({ x, z, r: sc * 1.15 + 0.1, h: forestFloor(x, z) + sc * 0.2 + sc * 0.7 * 0.9 });
   return out;
 }
 
@@ -403,8 +422,8 @@ MAPS.forest = {
   mechanics: [
     '50Q 大地图：面积是普通地图的五倍多，开局两人隔河相望',
     '大河横穿中间：深水区要游泳（游得慢、不能出招，只能翻滚潜游），西边有浅滩可以蹚过去，东边有一座木桥',
-    '七棵古树上搭着猎人瞭望台：贴着树干往前推就会往上爬（耗体力），爬到顶站在台上居高临下，跳一下就下来',
-    '古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕；倒木可以跳上去',
+    '七棵古树上搭着猎人瞭望台：朝树跑过去按跳跃，施展「梯云纵」三步蹬上树顶（耗体力，途中被打会掉下来），站在台上居高临下；走到台边再跳就下来',
+    '古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕；倒木和河边的石头可以站上去',
     '山风一起，枯枝会砸下来，落点先出现红圈',
   ],
   homeClass: 'Ranger',
@@ -576,6 +595,56 @@ export function glacierGradient(x: number, z: number): [number, number] {
   const e = 0.25;
   return [(glacierHeight(x + e, z) - glacierHeight(x - e, z)) / (2 * e), (glacierHeight(x, z + e) - glacierHeight(x, z - e)) / (2 * e)];
 }
+
+/**
+ * 雪岭 scenery that you can bump into: spruces and rock outcrops. Generated here (same seeds the renderer used)
+ * so the physics and the meshes agree; both become solid pillars.
+ */
+export const GLACIER_PINES: [number, number, number][] = [];
+export const GLACIER_ROCKS: { x: number; y: number; z: number; sx: number; sy: number; sz: number; rx: number; ry: number; rz: number }[] = [];
+(() => {
+  const [sx, sz] = GLACIER.summit;
+  let rand = frand(88);
+  for (let k = 0; k < 420; k++) {
+    const a = rand() * Math.PI * 2;
+    const r = 41.5 + Math.pow(rand(), 0.8) * 55;
+    GLACIER_PINES.push([Math.cos(a) * r, Math.sin(a) * r, 1.0 + rand() * 1.2]);
+  }
+  for (let k = 0; k < 400 && GLACIER_PINES.length < 500; k++) {
+    const a = rand() * Math.PI * 2;
+    const r = 9 + rand() * 20;
+    const x = sx + Math.cos(a) * r;
+    const z = sz + Math.sin(a) * r;
+    if (Math.hypot(x, z) > 38.5) continue;
+    if (glacierPath(x, z).d < GLACIER.pathHalf + 2.4) continue;
+    if (x > GLACIER.avalancheX[0] - 2 && x < GLACIER.avalancheX[1] + 2 && z > GLACIER.avalancheTop) continue;
+    GLACIER_PINES.push([x, z, 0.7 + rand() * 0.5]);
+  }
+  for (let k = 0; k < 60; k++) {
+    const a = rand() * Math.PI * 2;
+    const r = 38 + rand() * 3;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    if (Math.hypot(x - sx, z - sz) < GLACIER.footR + 2) continue;
+    GLACIER_PINES.push([x, z, 0.9 + rand() * 0.6]);
+  }
+  rand = frand(44);
+  for (let k = 0; k < 120 && GLACIER_ROCKS.length < 45; k++) {
+    const a = rand() * Math.PI * 2;
+    const r = 5 + rand() * 22;
+    const x = sx + Math.cos(a) * r;
+    const z = sz + Math.sin(a) * r;
+    if (Math.hypot(x, z) > 38) continue;
+    if (glacierPath(x, z).d < GLACIER.pathHalf + 2.2) continue;
+    if (x > GLACIER.avalancheX[0] - 1 && x < GLACIER.avalancheX[1] + 1 && z > GLACIER.avalancheTop) continue;
+    const s = 0.6 + rand() * 1.1;
+    GLACIER_ROCKS.push({ x, z, y: glacierHeight(x, z) - s * 0.35, sx: s * (1 + rand()), sy: s * (0.6 + rand() * 0.5), sz: s * (0.8 + rand() * 0.6), rx: rand() * 0.4, ry: rand() * 6, rz: rand() * 0.4 });
+  }
+  // solid (no standing on them: on the slopes they would be steps up the mountain)
+  const P = MAPS.glacier.pillars!;
+  for (const [x, z, sc] of GLACIER_PINES) if (Math.hypot(x, z) < 41.5) P.push({ x, z, r: 1.05 * sc });
+  for (const rk of GLACIER_ROCKS) P.push({ x: rk.x, z: rk.z, r: Math.max(0.5, ((rk.sx + rk.sz) / 2) * 0.82) });
+})();
 
 // ----------------------------------------------------------------------
 // 雨夜屋顶 terrain: five tiled hall roofs joined by flat corridor roofs.
