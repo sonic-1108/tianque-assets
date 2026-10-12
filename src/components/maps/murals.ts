@@ -71,145 +71,226 @@ function flower(g: CanvasRenderingContext2D, x: number, y: number, r: number, c:
   g.fill();
 }
 
-/** a flying apsara: body arched like a bow, a lute or a flute, ribbons streaming far behind */
+type P2 = [number, number];
+/** points along a chain of cubic beziers: p0, c1, c2, p1, c3, c4, p2, ... */
+function chain(pts: P2[], per = 24): P2[] {
+  const out: P2[] = [];
+  for (let i = 0; i + 3 < pts.length; i += 3) {
+    const [a, b, c, d] = [pts[i], pts[i + 1], pts[i + 2], pts[i + 3]];
+    for (let k = i === 0 ? 0 : 1; k <= per; k++) {
+      const t = k / per;
+      const u = 1 - t;
+      out.push([
+        u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0],
+        u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1],
+      ]);
+    }
+  }
+  return out;
+}
+/**
+ * a painted band along a curve: tapers from w0 to w1, and (twist > 0) turns over on itself like a silk scarf in
+ * the wind, showing its narrow edge every so often. Filled, inked, with a lighter stroke down the middle.
+ */
+function band(g: CanvasRenderingContext2D, pts: P2[], w0: number, w1: number, fill: string, twist = 0, light?: string) {
+  const c = chain(pts);
+  const L: P2[] = [];
+  const R: P2[] = [];
+  for (let i = 0; i < c.length; i++) {
+    const p = c[Math.max(0, i - 1)];
+    const q = c[Math.min(c.length - 1, i + 1)];
+    let nx = -(q[1] - p[1]);
+    let ny = q[0] - p[0];
+    const l = Math.hypot(nx, ny) || 1;
+    nx /= l;
+    ny /= l;
+    const t = i / (c.length - 1);
+    let w = (w0 + (w1 - w0) * t) / 2;
+    if (twist) w *= 0.22 + 0.78 * Math.abs(Math.cos(t * Math.PI * twist));
+    L.push([c[i][0] + nx * w, c[i][1] + ny * w]);
+    R.push([c[i][0] - nx * w, c[i][1] - ny * w]);
+  }
+  g.beginPath();
+  g.moveTo(L[0][0], L[0][1]);
+  for (const p of L) g.lineTo(p[0], p[1]);
+  for (let i = R.length - 1; i >= 0; i--) g.lineTo(R[i][0], R[i][1]);
+  g.closePath();
+  g.fillStyle = fill;
+  g.fill();
+  g.strokeStyle = INK;
+  g.lineWidth = 1.3;
+  g.stroke();
+  if (light) {
+    g.strokeStyle = light;
+    g.lineWidth = Math.max(1, Math.min(w0, w1) * 0.18);
+    g.beginPath();
+    c.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
+    g.stroke();
+  }
+}
+
+/**
+ * a flying apsara, drawn like the cave paintings: the body arched in flight, a fluttering scarf looping over
+ * the head and streaming far behind, a long skirt sweeping back, a pipa or a dish of flowers in the hands
+ */
 function apsara(g: CanvasRenderingContext2D, x: number, y: number, s: number, flip: number, robe: string, ribbonA: string, ribbonB: string, seed: number) {
   const R = rng(seed);
+  const lute = R() < 0.5;
   g.save();
   g.translate(x, y);
   g.scale(s * flip, s);
-  g.lineCap = 'round';
   g.lineJoin = 'round';
-  // the long ribbons, three loops each, drawn first so the body sits on them
-  for (const [col, off, w] of [
-    [ribbonA, 0, 9],
-    [ribbonB, 14, 7],
-  ] as [string, number, number][]) {
-    g.strokeStyle = INK;
-    g.lineWidth = w + 3;
-    const path = () => {
-      g.beginPath();
-      g.moveTo(-10, -40 + off * 0.3);
-      g.bezierCurveTo(-90, -110 + off, -170, 20 + off, -250, -40 + off);
-      g.bezierCurveTo(-310, -90 + off, -360, -10 + off, -420 + R() * 30, -60 + off);
-    };
-    path();
-    g.stroke();
-    g.strokeStyle = col;
-    g.lineWidth = w;
-    path();
+  g.lineCap = 'round';
+  // the scarf: over the head in an arc, then away behind in long fluttering loops
+  const j = () => (R() - 0.5) * 30;
+  band(g, [[40, -38], [10, -120], [-60, -110], [-90, -60], [-130, -10], [-200, -90 + j()], [-260, -50], [-320, -10], [-380, -70 + j()], [-450, -40]], 14, 3, ribbonA, 4.5, 'rgba(255,245,220,0.55)');
+  band(g, [[20, -16], [-40, 30], [-120, -20], [-180, 20], [-240, 60], [-300, 0 + j()], [-360, 30], [-410, 60], [-460, 20 + j()], [-520, 40]], 12, 3, ribbonB, 4, 'rgba(255,245,220,0.5)');
+  // the skirt: a long sweep of cloth trailing behind the legs, with a patterned hem
+  band(g, [[0, 6], [-50, 14], [-100, 34], [-190, 34]], 40, 10, robe, 0, 'rgba(255,255,255,0.12)');
+  g.strokeStyle = 'rgba(42,26,18,0.6)';
+  g.lineWidth = 1;
+  for (let k = 0; k < 5; k++) {
+    g.beginPath();
+    g.moveTo(-14 - k * 6, -4 + k * 5);
+    g.bezierCurveTo(-60 - k * 10, 6 + k * 5, -110 - k * 8, 30, -170 - k * 4, 30 + k * 2);
     g.stroke();
   }
-  // the skirt: a sweeping tapered shape trailing behind the legs
-  g.fillStyle = robe;
+  band(g, [[-8, 26], [-60, 40], [-120, 52], [-196, 40]], 6, 3, GOLD); // hem border
+  // a foot peeking out under the hem
+  g.fillStyle = SKIN;
   g.strokeStyle = INK;
-  g.lineWidth = 2.2;
+  g.lineWidth = 1.2;
   g.beginPath();
-  g.moveTo(-6, 10);
-  g.bezierCurveTo(-60, 20, -120, 60, -170, 46);
-  g.bezierCurveTo(-130, 70, -60, 66, -10, 44);
-  g.bezierCurveTo(10, 34, 14, 18, -6, 10);
+  g.ellipse(-196, 34, 9, 4, 0.3, 0, Math.PI * 2);
   g.fill();
   g.stroke();
-  // folds on the skirt
-  g.lineWidth = 1.2;
-  for (let k = 0; k < 4; k++) {
-    g.beginPath();
-    g.moveTo(-20 - k * 22, 22 + k * 6);
-    g.quadraticCurveTo(-50 - k * 26, 40 + k * 5, -90 - k * 20, 44 + k * 2);
-    g.stroke();
-  }
-  // bare torso, leaning forward
+  // the torso, bare above a sash, arched forward
   g.fillStyle = SKIN;
-  g.lineWidth = 2;
   g.beginPath();
-  g.moveTo(-8, 12);
-  g.bezierCurveTo(-2, -10, 10, -26, 22, -34);
-  g.lineTo(34, -26);
-  g.bezierCurveTo(24, -12, 18, 4, 12, 16);
+  g.moveTo(-6, 18);
+  g.bezierCurveTo(-8, -6, 6, -28, 26, -40);
+  g.bezierCurveTo(36, -44, 44, -38, 42, -30);
+  g.bezierCurveTo(36, -14, 26, 4, 18, 20);
   g.closePath();
   g.fill();
   g.stroke();
-  // a jewelled necklace and a sash across the chest
-  g.strokeStyle = GOLD;
-  g.lineWidth = 2.4;
-  g.beginPath();
-  g.arc(26, -26, 9, 0.2, Math.PI * 0.9);
-  g.stroke();
-  // head with a high topknot and a crown band
+  band(g, [[-6, 10], [6, 4], [14, 10], [22, 14]], 9, 9, '#c9473a'); // waist sash
+  // necklace of beads and a pendant
+  g.fillStyle = GOLD;
+  for (let k = 0; k <= 8; k++) {
+    const a = 0.3 + (k / 8) * 2.2;
+    g.beginPath();
+    g.arc(32 + Math.cos(a) * 11, -34 + Math.sin(a) * 11, 1.8, 0, Math.PI * 2);
+    g.fill();
+  }
+  // the far arm, raised behind the head, scattering a flower
+  band(g, [[24, -38], [18, -60], [8, -78], [-4, -92]], 9, 6, SKIN);
+  g.fillStyle = GOLD;
+  g.fillRect(14, -64, 8, 3); // armlet
+  flower(g, -8, -100, 5, '#e4a3a3');
+  // the head in three-quarter profile: topknot, crown, earring, lowered eye, a calm small mouth
   g.fillStyle = SKIN;
   g.strokeStyle = INK;
-  g.lineWidth = 2;
+  g.lineWidth = 1.4;
   g.beginPath();
-  g.ellipse(36, -46, 10, 12, -0.3, 0, Math.PI * 2);
+  g.ellipse(46, -52, 11, 13, -0.35, 0, Math.PI * 2);
   g.fill();
   g.stroke();
   g.fillStyle = '#1d1712';
   g.beginPath();
-  g.ellipse(40, -60, 7, 8, -0.3, 0, Math.PI * 2);
+  g.ellipse(40, -62, 11, 7, -0.5, Math.PI * 0.9, Math.PI * 2.05);
+  g.fill();
+  g.beginPath();
+  g.ellipse(44, -76, 6, 7, -0.3, 0, Math.PI * 2);
   g.fill();
   g.fillStyle = GOLD;
-  g.fillRect(28, -56, 16, 3);
-  // calm features: brow, closed eye, a red mark
-  g.strokeStyle = INK;
-  g.lineWidth = 1;
   g.beginPath();
-  g.moveTo(39, -48);
-  g.lineTo(45, -47);
+  g.moveTo(36, -66);
+  g.lineTo(42, -78);
+  g.lineTo(50, -68);
+  g.closePath();
+  g.fill();
+  g.fillStyle = '#c9473a';
+  g.beginPath();
+  g.arc(42, -71, 2, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = GOLD;
+  g.beginPath();
+  g.arc(38, -44, 2.4, 0, Math.PI * 2); // earring
+  g.fill();
+  g.strokeStyle = INK;
+  g.lineWidth = 1.1;
+  g.beginPath();
+  g.arc(50, -54, 4, 0.1, Math.PI * 0.8); // brow
+  g.moveTo(49, -50);
+  g.lineTo(54, -50); // lowered eye
+  g.moveTo(52, -42);
+  g.quadraticCurveTo(54, -41, 56, -42); // mouth
   g.stroke();
   g.fillStyle = '#b3261e';
   g.beginPath();
-  g.arc(43, -40, 1.6, 0, Math.PI * 2);
+  g.arc(53, -55, 1.3, 0, Math.PI * 2);
   g.fill();
-  // arms: one forward holding the instrument, one raised trailing a scarf
-  g.strokeStyle = INK;
-  g.lineWidth = 6;
-  g.beginPath();
-  g.moveTo(28, -30);
-  g.quadraticCurveTo(48, -20, 62, -30);
-  g.stroke();
-  g.strokeStyle = SKIN;
-  g.lineWidth = 4;
-  g.stroke();
-  g.strokeStyle = INK;
-  g.lineWidth = 6;
-  g.beginPath();
-  g.moveTo(22, -32);
-  g.quadraticCurveTo(10, -62, 26, -80);
-  g.stroke();
-  g.strokeStyle = SKIN;
-  g.lineWidth = 4;
-  g.stroke();
-  // the instrument: a pipa or a flute
-  if (R() < 0.5) {
+  // the near arm: forward, holding the instrument or a dish of flowers
+  band(g, [[30, -32], [44, -20], [56, -20], [70, -26]], 9, 6, SKIN);
+  g.fillStyle = GOLD;
+  g.fillRect(44, -24, 3, 9);
+  if (lute) {
+    // a pipa held across the body
+    g.save();
+    g.translate(74, -30);
+    g.rotate(-0.7);
     g.fillStyle = '#8a5a2b';
     g.strokeStyle = INK;
-    g.lineWidth = 1.6;
+    g.lineWidth = 1.3;
     g.beginPath();
-    g.ellipse(64, -24, 12, 7, -0.6, 0, Math.PI * 2);
+    g.ellipse(0, 0, 16, 10, 0, 0, Math.PI * 2);
     g.fill();
     g.stroke();
-    g.beginPath();
-    g.moveTo(70, -32);
-    g.lineTo(86, -50);
-    g.lineWidth = 3;
-    g.stroke();
+    g.fillStyle = '#5a3a1c';
+    g.fillRect(14, -2.5, 26, 5);
+    g.strokeRect(14, -2.5, 26, 5);
+    g.strokeStyle = 'rgba(255,240,200,0.7)';
+    g.lineWidth = 0.6;
+    for (let k = -1; k <= 1; k++) {
+      g.beginPath();
+      g.moveTo(-10, k * 2);
+      g.lineTo(40, k * 1.2);
+      g.stroke();
+    }
+    g.restore();
   } else {
-    g.strokeStyle = '#6b4a22';
-    g.lineWidth = 3;
+    // a dish heaped with flowers
+    g.fillStyle = GOLD;
+    g.strokeStyle = INK;
+    g.lineWidth = 1.2;
     g.beginPath();
-    g.moveTo(50, -42);
-    g.lineTo(84, -28);
+    g.ellipse(80, -30, 14, 4, -0.1, 0, Math.PI * 2);
+    g.fill();
     g.stroke();
+    flower(g, 74, -36, 4, '#e4a3a3');
+    flower(g, 84, -37, 4, CREAM);
+    flower(g, 80, -42, 3.5, '#c9473a');
   }
-  // a halo behind the head
-  g.strokeStyle = GOLD;
-  g.lineWidth = 2;
-  g.globalAlpha = 0.8;
-  g.beginPath();
-  g.arc(36, -48, 18, 0, Math.PI * 2);
-  g.stroke();
-  g.globalAlpha = 1;
   g.restore();
+}
+
+/** a mottled pigment ground: overlapping washes, as if laid on by hand */
+function wash(g: CanvasRenderingContext2D, W: number, H: number, colors: string[], seed: number) {
+  const R = rng(seed);
+  for (let i = 0; i < 70; i++) {
+    const x = R() * W;
+    const y = R() * H;
+    const r = 60 + R() * 220;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    const c = colors[(R() * colors.length) | 0];
+    gr.addColorStop(0, c);
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalAlpha = 0.12 + R() * 0.12;
+    g.fillStyle = gr;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  g.globalAlpha = 1;
 }
 
 /** a seated figure: lotus base, robed body, halo; used large for the Buddha and tiny for the thousand Buddhas */
@@ -278,86 +359,160 @@ function seated(g: CanvasRenderingContext2D, x: number, y: number, s: number, ro
   g.beginPath();
   g.arc(0, -74, 3.5, 0, Math.PI * 2);
   g.fill();
+  if (s > 2) {
+    face(g, 0, -59, 8);
+    // arms in the robe, curving down to the hands in the lap
+    for (const sx of [-1, 1]) band(g, [[sx * 12, -44], [sx * 26, -36], [sx * 24, -18], [sx * 6, -13]], 8, 7, robe, 0, 'rgba(255,220,180,0.25)');
+    // hands resting in the lap and the robe's folds
+    g.fillStyle = SKIN;
+    g.strokeStyle = INK;
+    g.lineWidth = 0.6;
+    g.beginPath();
+    g.ellipse(0, -14, 9, 3.5, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.strokeStyle = 'rgba(42,26,18,0.7)';
+    for (let k = 0; k < 4; k++) {
+      g.beginPath();
+      g.moveTo(-14 + k * 3, -40 + k * 4);
+      g.quadraticCurveTo(-4 + k * 4, -26 + k * 2, 12, -18 + k * 3);
+      g.stroke();
+    }
+  }
   g.restore();
 }
 
-/** a standing bodhisattva: tall, swaying, crowned, holding a lotus */
+/** a calm face: arched brows, lowered eyes, a small mouth, the urna between the brows */
+function face(g: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  g.strokeStyle = INK;
+  g.lineWidth = Math.max(0.8, r * 0.09);
+  g.beginPath();
+  for (const sx of [-1, 1]) {
+    g.moveTo(x + sx * r * 0.62, y - r * 0.18);
+    g.quadraticCurveTo(x + sx * r * 0.35, y - r * 0.42, x + sx * r * 0.1, y - r * 0.24);
+    g.moveTo(x + sx * r * 0.55, y + r * 0.02);
+    g.quadraticCurveTo(x + sx * r * 0.35, y + r * 0.12, x + sx * r * 0.14, y + r * 0.02);
+  }
+  g.moveTo(x, y - r * 0.05);
+  g.lineTo(x - r * 0.08, y + r * 0.32);
+  g.lineTo(x + r * 0.06, y + r * 0.34);
+  g.stroke();
+  g.fillStyle = '#b3261e';
+  g.beginPath();
+  g.ellipse(x, y + r * 0.55, r * 0.17, r * 0.07, 0, 0, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.arc(x, y - r * 0.32, r * 0.07, 0, Math.PI * 2);
+  g.fill();
+}
+
+/** a standing bodhisattva in a gentle S-curve: crowned, jewelled, a lotus in one hand, scarves looping to the feet */
 function bodhisattva(g: CanvasRenderingContext2D, x: number, y: number, s: number, robe: string, sash: string, flip: number) {
   g.save();
   g.translate(x, y);
   g.scale(s * flip, s);
-  g.strokeStyle = INK;
-  g.lineWidth = 1.8;
-  g.fillStyle = GOLD;
-  g.globalAlpha = 0.85;
-  g.beginPath();
-  g.arc(2, -150, 22, 0, Math.PI * 2);
-  g.fill();
-  g.globalAlpha = 1;
-  g.stroke();
-  // long skirt with a slight S-sway
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  // halo: bands of colour
+  for (const [r, c] of [
+    [26, GOLD],
+    [21, MALA],
+    [16, CREAM],
+  ] as [number, string][]) {
+    g.fillStyle = c;
+    g.strokeStyle = INK;
+    g.lineWidth = 1.1;
+    g.beginPath();
+    g.arc(4, -150, r, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+  }
+  // the long scarf looping down both sides
+  band(g, [[-12, -118], [-36, -90], [-30, -40], [-22, -10]], 7, 4, sash, 2.5, 'rgba(255,245,220,0.5)');
+  band(g, [[18, -118], [40, -84], [36, -40], [30, -6]], 7, 4, sash, 2.5, 'rgba(255,245,220,0.5)');
+  // skirt: flaring from the hips, swaying, with folds and a dark hem
   g.fillStyle = robe;
-  g.beginPath();
-  g.moveTo(-14, -90);
-  g.bezierCurveTo(-24, -40, -8, -10, -18, 0);
-  g.lineTo(18, 0);
-  g.bezierCurveTo(14, -30, 22, -60, 12, -90);
-  g.closePath();
-  g.fill();
-  g.stroke();
-  // torso
-  g.fillStyle = SKIN;
-  g.beginPath();
-  g.moveTo(-12, -90);
-  g.bezierCurveTo(-14, -112, -8, -126, 4, -128);
-  g.bezierCurveTo(14, -126, 16, -110, 12, -90);
-  g.closePath();
-  g.fill();
-  g.stroke();
-  // sash looping round the arms and down past the knees
-  g.strokeStyle = sash;
-  g.lineWidth = 5;
-  g.beginPath();
-  g.moveTo(-14, -118);
-  g.bezierCurveTo(-34, -90, -30, -50, -20, -30);
-  g.moveTo(14, -118);
-  g.bezierCurveTo(34, -86, 30, -44, 24, -24);
-  g.stroke();
-  // head, crown and a lotus held up
   g.strokeStyle = INK;
-  g.lineWidth = 1.6;
-  g.fillStyle = SKIN;
+  g.lineWidth = 1.5;
   g.beginPath();
-  g.ellipse(2, -142, 9, 11, 0, 0, Math.PI * 2);
+  g.moveTo(-12, -86);
+  g.bezierCurveTo(-26, -50, -12, -24, -22, 0);
+  g.lineTo(24, 0);
+  g.bezierCurveTo(18, -26, 28, -56, 14, -86);
+  g.closePath();
   g.fill();
   g.stroke();
-  // hair piled high and a jewelled crown band
+  g.lineWidth = 0.9;
+  for (let k = 0; k < 4; k++) {
+    g.beginPath();
+    g.moveTo(-6 + k * 6, -80);
+    g.bezierCurveTo(-14 + k * 7, -50, -4 + k * 7, -26, -12 + k * 9, 0);
+    g.stroke();
+  }
+  band(g, [[-22, -2], [-6, 2], [8, 2], [24, -2]], 5, 5, GOLD);
+  // feet on a small lotus
+  flower(g, 2, 6, 7, '#e4a3a3');
+  // torso, hips swung out
+  g.fillStyle = SKIN;
+  g.lineWidth = 1.4;
+  g.beginPath();
+  g.moveTo(-12, -86);
+  g.bezierCurveTo(-16, -104, -10, -124, 4, -128);
+  g.bezierCurveTo(16, -126, 20, -108, 14, -86);
+  g.closePath();
+  g.fill();
+  g.stroke();
+  band(g, [[-12, -92], [0, -88], [8, -88], [14, -92]], 8, 8, '#c9473a'); // waist band
+  // necklace
+  g.fillStyle = GOLD;
+  for (let k = 0; k <= 10; k++) {
+    const a = 0.25 + (k / 10) * 2.6;
+    g.beginPath();
+    g.arc(3 + Math.cos(a) * 11, -126 + Math.sin(a) * 9, 1.6, 0, Math.PI * 2);
+    g.fill();
+  }
+  // arms: one down holding a water flask, one raised with a lotus
+  band(g, [[-10, -120], [-20, -104], [-22, -92], [-18, -78]], 7, 5, SKIN);
+  g.fillStyle = MALA_D;
+  g.strokeStyle = INK;
+  g.beginPath();
+  g.ellipse(-17, -70, 4, 7, 0, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+  band(g, [[16, -120], [28, -110], [30, -124], [26, -140]], 7, 5, SKIN);
+  g.strokeStyle = '#3b6b3b';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.moveTo(26, -140);
+  g.quadraticCurveTo(30, -156, 26, -168);
+  g.stroke();
+  flower(g, 26, -172, 5, '#e4a3a3');
+  // head, hair piled up, crown
+  g.fillStyle = SKIN;
+  g.strokeStyle = INK;
+  g.lineWidth = 1.3;
+  g.beginPath();
+  g.ellipse(4, -146, 9, 11, 0, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
   g.fillStyle = '#1d1712';
   g.beginPath();
-  g.ellipse(2, -156, 8, 7, 0, Math.PI, Math.PI * 2);
+  g.ellipse(4, -156, 9.5, 5, 0, Math.PI, Math.PI * 2);
+  g.fill();
+  g.beginPath();
+  g.ellipse(4, -164, 5, 6, 0, 0, Math.PI * 2);
   g.fill();
   g.fillStyle = GOLD;
-  g.fillRect(-8, -154, 20, 4);
-  g.fillStyle = '#b3261e';
   g.beginPath();
-  g.arc(2, -152, 2.2, 0, Math.PI * 2);
+  g.moveTo(-7, -157);
+  g.lineTo(-3, -166);
+  g.lineTo(4, -160);
+  g.lineTo(11, -166);
+  g.lineTo(15, -157);
+  g.closePath();
   g.fill();
-  // face: brows and lowered eyes
-  g.strokeStyle = INK;
-  g.lineWidth = 0.9;
-  g.beginPath();
-  g.moveTo(-3, -144);
-  g.lineTo(0, -144.5);
-  g.moveTo(4, -144.5);
-  g.lineTo(7, -144);
   g.stroke();
-  g.strokeStyle = '#3b6b3b';
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(18, -100);
-  g.quadraticCurveTo(28, -130, 24, -150);
-  g.stroke();
-  flower(g, 24, -154, 5, '#e4a3a3');
+  face(g, 4, -146, 9);
   g.restore();
 }
 
@@ -461,13 +616,14 @@ export function apsaraMural(): THREE.Texture {
   sky.addColorStop(1, MALA_D);
   g.fillStyle = sky;
   g.fillRect(0, 0, W, H);
+  wash(g, W, H, ['#c46a3e', '#7a3420', '#4f9a84', '#d9a066'], 5);
   const R = rng(7);
   for (let i = 0; i < 60; i++) flower(g, R() * W, 60 + R() * (H - 120), 4 + R() * 4, R() < 0.5 ? CREAM : '#e4a3a3');
   for (let i = 0; i < 9; i++) cloud(g, 80 + R() * (W - 160), 90 + R() * (H - 200), 0.9 + R() * 0.8, i % 2 ? MALA : CREAM);
-  apsara(g, 560, 260, 1.9, 1, LAPIS, MALA, CREAM, 3);
-  apsara(g, 1120, 230, 1.7, -1, MALA_D, CREAM, '#c9473a', 5);
-  apsara(g, 900, 500, 1.45, 1, '#c9473a', LAPIS, GOLD, 9);
-  apsara(g, 300, 520, 1.2, -1, MALA, '#c9473a', CREAM, 11);
+  apsara(g, 700, 250, 1.35, 1, LAPIS, MALA, CREAM, 3);
+  apsara(g, 1060, 400, 1.2, -1, MALA_D, CREAM, '#c9473a', 6);
+  apsara(g, 520, 470, 1.05, 1, '#c9473a', LAPIS, GOLD, 9);
+  apsara(g, 1390, 170, 0.85, 1, MALA, '#c9473a', CREAM, 12);
   scrollBand(g, 0, 0, W, 46, true);
   scrollBand(g, 0, H - 46, W, 46, true);
   age(g, W, H, 21);
@@ -489,6 +645,7 @@ export function sermonMural(): THREE.Texture {
   ground.addColorStop(1, MALA_D);
   g.fillStyle = ground;
   g.fillRect(0, 0, W, H);
+  wash(g, W, H, ['#c46a3e', '#8a3a24', '#d9a066', '#4f9a84'], 9);
   // the pond along the bottom
   g.fillStyle = LAPIS;
   g.fillRect(46, H - 150, W - 92, 104);
@@ -526,29 +683,8 @@ export function sermonMural(): THREE.Texture {
   for (const sx of [-1, 1]) {
     bodhisattva(g, W / 2 + sx * 300, 500, 1.9, sx < 0 ? LAPIS : MALA, sx < 0 ? '#c9473a' : CREAM, sx);
     bodhisattva(g, W / 2 + sx * 470, 500, 1.6, '#c9473a', LAPIS, sx);
-    // disciples' heads in a row behind
-    for (let k = 0; k < 3; k++) {
-      const dx = W / 2 + sx * (200 + k * 36);
-      const dy = 300 - k * 10;
-      g.strokeStyle = INK;
-      g.lineWidth = 1.4;
-      g.fillStyle = 'rgba(217,178,90,0.75)';
-      g.beginPath();
-      g.arc(dx, dy - 20, 17, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = k % 2 ? '#8a3a28' : MALA_D;
-      g.beginPath();
-      g.moveTo(dx - 18, dy + 24);
-      g.quadraticCurveTo(dx, dy - 6, dx + 18, dy + 24);
-      g.closePath();
-      g.fill();
-      g.stroke();
-      g.fillStyle = SKIN;
-      g.beginPath();
-      g.ellipse(dx, dy - 18, 9, 11, 0, 0, Math.PI * 2);
-      g.fill();
-      g.stroke();
-    }
+    // a third, smaller attendant in the row behind
+    bodhisattva(g, W / 2 + sx * 205, 420, 1.15, sx < 0 ? MALA_D : '#8a3a28', GOLD, sx);
     apsara(g, W / 2 + sx * 520, 130, 0.7, -sx, CREAM, MALA, '#c9473a', 30 + sx);
   }
   for (let i = 0; i < 6; i++) cloud(g, 120 + R() * (W - 240), 70 + R() * 120, 0.7 + R() * 0.5, CREAM);
