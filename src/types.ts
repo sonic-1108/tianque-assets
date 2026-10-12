@@ -203,6 +203,11 @@ export interface CombatantState {
   climbA0?: number; // angle round the trunk where it started
   climbY0?: number; // height it started from
   climbSide?: number; // which way it spirals
+  climbRate?: number; // ladder: vertical speed (drives the climbing animation)
+  climbMode?: 'run' | 'ladder'; // 梯云纵 up the bark, or hand over hand up the rope ladder
+  nearLadder?: boolean; // standing at the foot of a ladder (HUD hint)
+  grip?: number; // 0..1 effective friction underfoot (青冥古林 weather)
+  slip?: number; // 0..1 loss of balance; at 1 you fall
   swimming?: boolean; // 青冥古林: floating in deep water
   ledgeBlocked?: number; // walking was stopped at a sheer drop (AI uses it to steer)
   sliding?: boolean; // out of stamina on a steep slope

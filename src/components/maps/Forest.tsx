@@ -1,7 +1,8 @@
 import React, { useMemo, useRef } from 'react';
+import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime } from '../../maps';
+import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -20,7 +21,7 @@ const RIVER_GLSL = /* glsl */ `
 const floorAt = (x: number, z: number) => forestFloor(x, z);
 
 /** shared uniforms: time and wind gust */
-const shared = { uTime: { value: 0 }, uGust: { value: 0 } };
+const shared = { uTime: { value: 0 }, uGust: { value: 0 }, uRain: { value: 0 } };
 
 // ---------------------------------------------------------------
 // canvas textures
@@ -302,6 +303,7 @@ function Ground() {
       sh.uniforms.uTime = shared.uTime;
       sh.uniforms.uTrees = { value: trees };
       sh.uniforms.uWaterY = { value: FOREST.waterY };
+      sh.uniforms.uRain = shared.uRain;
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWP; varying vec3 vWN;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);');
@@ -309,7 +311,8 @@ function Ground() {
         .replace(
           '#include <common>',
           `#include <common>
-          uniform float uTime; uniform vec3 uTrees[${trees.length}]; uniform float uWaterY;
+          uniform float uTime; uniform vec3 uTrees[${trees.length}]; uniform float uWaterY; uniform float uRain;
+          float gPuddle;
           varying vec3 vWP; varying vec3 vWN;
           ${GLSL_NOISE}
           ${RIVER_GLSL}
@@ -358,18 +361,33 @@ function Ground() {
             // the river corridor is open sky: brighter
             float sky = 1.0 - smoothstep(6.0, 14.0, abs(vWP.z - riverZ(vWP.x)));
             diffuseColor.rgb = col * mix(shade, 1.1, sky * 0.7);
+            // rain: everything darkens and goes glossy, puddles gather in the worn hollows
+            gPuddle = smoothstep(0.55, 0.7, n1 + path * 0.3) * smoothstep(0.2, 0.7, uRain);
+            diffuseColor.rgb *= 1.0 - uRain * 0.3;
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.08, 0.1, 0.1), gPuddle * 0.6);
           }`
         )
         .replace(
           '#include <roughnessmap_fragment>',
           `#include <roughnessmap_fragment>
-          roughnessFactor = mix(0.95, 0.35, gWet);`
+          roughnessFactor = mix(0.95, 0.35, gWet);
+          roughnessFactor = mix(roughnessFactor, 0.45, uRain * 0.7);
+          roughnessFactor = mix(roughnessFactor, 0.05, gPuddle);`
         )
         .replace(
           '#include <normal_fragment_maps>',
           `#include <normal_fragment_maps>
           {
             float H = gH * 0.05;
+            // raindrop rings in the puddles
+            if (gPuddle > 0.01) {
+              vec2 cell = floor(vWP.xz * 1.5);
+              vec2 fr = fract(vWP.xz * 1.5) - 0.5;
+              float hh = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+              float ph = fract(uTime * 1.3 + hh);
+              float ring = sin(clamp((length(fr) - ph * 0.5) * 40.0, -3.14, 3.14)) * (1.0 - ph) * step(length(fr), ph * 0.5 + 0.08);
+              H += ring * 0.004 * gPuddle;
+            }
             vec3 sx = dFdx(vWP); vec3 sy = dFdy(vWP);
             vec3 nW = normalize(vWN);
             vec3 r1 = cross(sy, nW); vec3 r2 = cross(nW, sx);
@@ -744,7 +762,7 @@ function Lookouts() {
       {items.map(([x, z, r, h], i) => {
         const outer = r + FOREST.deckR;
         const posts = 10;
-        const ladderA = (i * 1.7) % (Math.PI * 2);
+        const ladderA = ladderAngle(i);
         const base = floorAt(x, z);
         return (
           <group key={i} position={[x, 0, z]}>
@@ -1189,7 +1207,7 @@ function GodRays() {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
-      uniforms: { uTime: shared.uTime, uColor: { value: new THREE.Color('#ffe2a0') } },
+      uniforms: { uTime: shared.uTime, uRain: shared.uRain, uColor: { value: new THREE.Color('#ffe2a0') } },
       vertexShader: /* glsl */ `
         varying vec2 vUv; varying float vSeed; varying vec3 vWP;
         void main(){
@@ -1200,13 +1218,13 @@ function GodRays() {
           gl_Position = projectionMatrix * viewMatrix * w;
         }`,
       fragmentShader: /* glsl */ `
-        uniform float uTime; uniform vec3 uColor; varying vec2 vUv; varying float vSeed; varying vec3 vWP;
+        uniform float uTime; uniform float uRain; uniform vec3 uColor; varying vec2 vUv; varying float vSeed; varying vec3 vWP;
         void main(){
           // soft across the beam, fading in under the canopy and out toward the ground
           float across = pow(sin(vUv.x * 3.14159), 2.0);
           float along = smoothstep(0.0, 0.25, vUv.y) * (1.0 - smoothstep(0.75, 1.0, vUv.y));
           float flick = 0.75 + 0.25 * sin(uTime * 0.7 + vSeed * 9.0) * sin(uTime * 0.31 + vSeed * 3.0);
-          float a = across * along * flick * 0.26 * smoothstep(-0.5, 1.0, vWP.y);
+          float a = across * along * flick * 0.26 * smoothstep(-0.5, 1.0, vWP.y) * (1.0 - smoothstep(0.05, 0.5, uRain));
           gl_FragColor = vec4(uColor * a, a);
         }`,
     });
@@ -1260,14 +1278,14 @@ function Motes() {
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
-      uniforms: { uTime: shared.uTime },
+      uniforms: { uTime: shared.uTime, uRain: shared.uRain },
       vertexShader: /* glsl */ `
-        uniform float uTime; attribute float seed; varying float vA;
+        uniform float uTime; uniform float uRain; attribute float seed; varying float vA;
         void main(){
           vec3 p = position + vec3(sin(uTime * 0.3 + seed * 30.0), sin(uTime * 0.2 + seed * 17.0) * 0.6, cos(uTime * 0.25 + seed * 23.0)) * 0.8;
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_PointSize = clamp(10.0 / -mv.z, 1.0, 4.0);
-          vA = (0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * (1.0 + seed * 2.0) + seed * 40.0), 4.0)) * (1.0 - smoothstep(14.0, 26.0, -mv.z));
+          vA = (0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * (1.0 + seed * 2.0) + seed * 40.0), 4.0)) * (1.0 - smoothstep(14.0, 26.0, -mv.z)) * (1.0 - smoothstep(0.05, 0.4, uRain));
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: /* glsl */ `
@@ -1418,10 +1436,168 @@ function FallingBranches() {
   );
 }
 
+// ---------------------------------------------------------------
+// weather: rain, storm clouds, lightning
+// ---------------------------------------------------------------
+/** Rain in a box that follows the camera: long streaks, slanted by the wind, thicker as the storm builds */
+function Rain() {
+  const { camera } = useThree();
+  const { obj, mat } = useMemo(() => {
+    const n = 9000;
+    const rand = seeded(151);
+    const pos = new Float32Array(n * 2 * 3);
+    const seed = new Float32Array(n * 2);
+    const end = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const x = rand() * 50;
+      const y = rand() * 30;
+      const z = rand() * 50;
+      const s = rand();
+      pos.set([x, y, z, x, y, z], i * 6);
+      seed[i * 2] = seed[i * 2 + 1] = s;
+      end[i * 2] = 0;
+      end[i * 2 + 1] = 1;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('seed', new THREE.BufferAttribute(seed, 1));
+    g.setAttribute('aEnd', new THREE.BufferAttribute(end, 1));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4);
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { uTime: shared.uTime, uRain: shared.uRain, uCam: { value: new THREE.Vector3() } },
+      vertexShader: /* glsl */ `
+        uniform float uTime; uniform float uRain; uniform vec3 uCam; attribute float seed; attribute float aEnd; varying float vA;
+        void main(){
+          float speed = 22.0 + seed * 10.0;
+          vec3 wind = vec3(3.5, 0.0, 1.5) * (0.6 + uRain);
+          vec3 p = position + vec3(0.0, -uTime * speed, 0.0) + wind * uTime * 0.25;
+          p = mod(p - uCam + vec3(25.0, 15.0, 25.0), vec3(50.0, 30.0, 50.0)) + uCam - vec3(25.0, 15.0, 25.0);
+          // the streak's tail trails up against the fall
+          p -= normalize(vec3(wind.x * 0.05, -1.0, wind.z * 0.05)) * aEnd * (0.5 + uRain * 0.5);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          // fewer drops in a drizzle: drop the ones whose seed is above the intensity
+          vA = step(seed, uRain) * (0.18 + 0.2 * seed) * (1.0 - smoothstep(18.0, 25.0, -mv.z));
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying float vA;
+        void main(){ if (vA < 0.005) discard; gl_FragColor = vec4(0.78, 0.84, 0.9, vA); }`,
+    });
+    const obj = new THREE.LineSegments(g, mat);
+    obj.frustumCulled = false;
+    obj.renderOrder = 18;
+    return { obj, mat };
+  }, []);
+  useFrame(() => {
+    mat.uniforms.uCam.value.copy(camera.position);
+    obj.visible = mapRuntime.rain > 0.02;
+  });
+  return <primitive object={obj} />;
+}
+
+/** Storm clouds: a dark veil over the sky dome that thickens with the rain and flashes with lightning */
+function StormSky() {
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+        uniforms: { uRain: shared.uRain, uTime: shared.uTime, uFlash: { value: 0 } },
+        vertexShader: /* glsl */ `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
+        fragmentShader: /* glsl */ `
+          uniform float uRain; uniform float uTime; uniform float uFlash; varying vec3 vDir;
+          ${GLSL_NOISE}
+          void main(){
+            vec3 d = normalize(vDir);
+            vec2 p = d.xz / max(0.15, d.y + 0.2) * 1.5 + vec2(uTime * 0.03, uTime * 0.01);
+            float c = fbm(p);
+            float a = uRain * (0.55 + 0.4 * c);
+            vec3 col = mix(vec3(0.2, 0.23, 0.26), vec3(0.36, 0.39, 0.42), c) + vec3(0.6, 0.65, 0.8) * uFlash * (0.4 + 0.6 * c);
+            gl_FragColor = vec4(col, clamp(a, 0.0, 0.92));
+          }`,
+      }),
+    []
+  );
+  useFrame(() => {
+    mat.uniforms.uFlash.value = mapRuntime.lightning;
+  });
+  return (
+    <mesh renderOrder={-9} frustumCulled={false} visible>
+      <sphereGeometry args={[470, 32, 16]} />
+      <primitive object={mat} attach="material" />
+    </mesh>
+  );
+}
+
+/** The bolt: a jagged, branching line of light from the clouds to the strike point, rebuilt for every strike */
+function Lightning() {
+  const group = useRef<THREE.Group>(null);
+  const light = useRef<THREE.PointLight>(null);
+  const state = useRef({ last: 0, x: 0, z: 0 });
+  const core = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 3.2, 4), transparent: true, toneMapped: false, depthWrite: false }), []);
+  const glow = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(0.9, 1, 1.8), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, toneMapped: false, depthWrite: false }), []);
+  useFrame(() => {
+    const g = group.current;
+    if (!g) return;
+    const t = mapRuntime.boltT;
+    const S = state.current;
+    // a new strike: rebuild the bolt
+    if (t > 0.95 && (S.last < 0.5 || S.x !== mapRuntime.boltX || S.z !== mapRuntime.boltZ)) {
+      S.x = mapRuntime.boltX;
+      S.z = mapRuntime.boltZ;
+      for (const ch of [...g.children]) {
+        g.remove(ch);
+        (ch as THREE.Mesh).geometry.dispose();
+      }
+      const bolt = (from: THREE.Vector3, to: THREE.Vector3, segs: number, jag: number, r: number, depth: number) => {
+        const pts: THREE.Vector3[] = [from.clone()];
+        for (let k = 1; k < segs; k++) {
+          const p = from.clone().lerp(to, k / segs);
+          p.x += (Math.random() - 0.5) * jag;
+          p.z += (Math.random() - 0.5) * jag;
+          pts.push(p);
+          if (depth > 0 && Math.random() < 0.18) {
+            const end = p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 10, -4 - Math.random() * 8, (Math.random() - 0.5) * 10));
+            bolt(p, end, 6, jag * 0.6, r * 0.5, depth - 1);
+          }
+        }
+        pts.push(to.clone());
+        const path = new THREE.CurvePath<THREE.Vector3>();
+        for (let k = 0; k < pts.length - 1; k++) path.add(new THREE.LineCurve3(pts[k], pts[k + 1]));
+        g.add(new THREE.Mesh(new THREE.TubeGeometry(path, pts.length * 2, r, 4, false), core));
+        g.add(new THREE.Mesh(new THREE.TubeGeometry(path, pts.length * 2, r * 5, 5, false), glow));
+      };
+      const ground = new THREE.Vector3(S.x, mapRuntime.boltY, S.z);
+      bolt(ground.clone().add(new THREE.Vector3((Math.random() - 0.5) * 12, 70, (Math.random() - 0.5) * 12)), ground, 16, 3.2, 0.09, 2);
+    }
+    S.last = t;
+    g.visible = t > 0.02;
+    // a bolt flickers: two or three bright pulses as it fades
+    const flick = t * (0.55 + 0.45 * Math.abs(Math.sin(t * 40)));
+    core.opacity = flick;
+    glow.opacity = flick * 0.4;
+    if (light.current) {
+      light.current.position.set(S.x, mapRuntime.boltY + 4, S.z);
+      light.current.intensity = flick * 700;
+    }
+  });
+  return (
+    <group>
+      <group ref={group} />
+      <pointLight ref={light} color="#c7d2fe" intensity={0} distance={60} decay={1.6} />
+    </group>
+  );
+}
+
 function Clock() {
   useFrame((st) => {
     shared.uTime.value = st.clock.elapsedTime;
     shared.uGust.value = mapRuntime.gust;
+    shared.uRain.value = mapRuntime.rain;
   });
   return null;
 }
@@ -1448,6 +1624,9 @@ export function ForestMap() {
       <GodRays />
       <Motes />
       <FallingLeaves />
+      <StormSky />
+      <Rain />
+      <Lightning />
     </group>
   );
 }

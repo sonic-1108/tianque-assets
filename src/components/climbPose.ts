@@ -1,0 +1,87 @@
+import * as THREE from 'three';
+
+/**
+ * Procedural tree-climbing pose, layered over whatever clip is playing.
+ * Works on any Mixamo-style skeleton: each limb bone is aimed at a world-space direction,
+ * so it does not depend on how the bones' local axes happen to be oriented.
+ */
+export interface Limbs {
+  bones: Record<string, THREE.Bone>;
+}
+
+const norm = (n: string) => n.toLowerCase().replace(/^mixamorig[:_]?/, '').replace(/[^a-z0-9]/g, '');
+const CHAINS: [string, string][] = [
+  ['leftarm', 'leftforearm'],
+  ['leftforearm', 'lefthand'],
+  ['rightarm', 'rightforearm'],
+  ['rightforearm', 'righthand'],
+  ['leftupleg', 'leftleg'],
+  ['leftleg', 'leftfoot'],
+  ['rightupleg', 'rightleg'],
+  ['rightleg', 'rightfoot'],
+];
+
+export function collectLimbs(root: THREE.Object3D): Limbs | null {
+  const bones: Record<string, THREE.Bone> = {};
+  root.traverse((o) => {
+    if ((o as THREE.Bone).isBone) bones[norm(o.name)] = o as THREE.Bone;
+  });
+  for (const [a, b] of CHAINS) if (!bones[a] || !bones[b]) return null;
+  return { bones };
+}
+
+const vA = new THREE.Vector3();
+const vB = new THREE.Vector3();
+const qD = new THREE.Quaternion();
+const qW = new THREE.Quaternion();
+const qP = new THREE.Quaternion();
+
+/** rotate `bone` so the segment toward `child` points along `dir` (world space), blended by w */
+function aim(bone: THREE.Bone, child: THREE.Bone, dir: THREE.Vector3, w: number) {
+  bone.updateWorldMatrix(true, true);
+  bone.getWorldPosition(vA);
+  child.getWorldPosition(vB);
+  const cur = vB.sub(vA);
+  if (cur.lengthSq() < 1e-10) return;
+  cur.normalize();
+  qD.setFromUnitVectors(cur, dir);
+  bone.getWorldQuaternion(qW).premultiply(qD);
+  bone.parent!.getWorldQuaternion(qP).invert();
+  const local = qP.multiply(qW);
+  bone.quaternion.slerp(local, w);
+  bone.updateWorldMatrix(false, true);
+}
+
+const d = new THREE.Vector3();
+const up = new THREE.Vector3(0, 1, 0);
+const right = new THREE.Vector3();
+
+/**
+ * fwd: world direction the climber faces (into the trunk). phase advances as they climb.
+ * Arms reach up alternately, the opposite leg steps up with each reach.
+ */
+export function applyClimbPose(l: Limbs, fwd: THREE.Vector3, phase: number, w: number) {
+  if (w <= 0.001) return;
+  right.set(-fwd.z, 0, fwd.x); // facing -z -> right is +x
+  const s = Math.sin(phase);
+  const reachL = 0.5 + 0.5 * s;
+  const reachR = 0.5 - 0.5 * s;
+  const B = l.bones;
+  for (const side of [-1, 1]) {
+    const reach = side < 0 ? reachL : reachR;
+    const lift = side < 0 ? reachR : reachL; // leg opposite to the reaching arm steps up
+    const p = side < 0 ? 'left' : 'right';
+    // upper arm: up and in front, hands converging on the trunk
+    d.copy(up).multiplyScalar(0.55 + 0.45 * reach).addScaledVector(fwd, 0.55).addScaledVector(right, side * (0.32 - 0.12 * reach)).normalize();
+    aim(B[p + 'arm'], B[p + 'forearm'], d, w);
+    // forearm: bent toward the bark, straighter when reaching
+    d.copy(up).multiplyScalar(0.35 + 0.6 * reach).addScaledVector(fwd, 0.75 - 0.3 * reach).addScaledVector(right, -side * 0.12).normalize();
+    aim(B[p + 'forearm'], B[p + 'hand'], d, w);
+    // thigh: knee comes up in front when the leg steps
+    d.copy(up).multiplyScalar(-(0.85 - 0.6 * lift)).addScaledVector(fwd, 0.25 + 0.6 * lift).addScaledVector(right, side * 0.16).normalize();
+    aim(B[p + 'upleg'], B[p + 'leg'], d, w);
+    // shin: hangs down, foot against the trunk
+    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, 0.15 - 0.2 * lift).normalize();
+    aim(B[p + 'leg'], B[p + 'foot'], d, w);
+  }
+}

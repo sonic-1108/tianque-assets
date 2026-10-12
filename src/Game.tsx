@@ -12,7 +12,7 @@ import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_C
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -93,6 +93,12 @@ const colorFor = (slot: number, c: CombatantState) =>
 const ZEN_R = 4.5;
 /** 梯云纵: seconds to run up a lookout tree */
 const TREE_RUN_T = 1.0;
+/** 青冥古林: each fighter's own grip (sole friction), before the weather */
+const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMage: 0.95 };
+/** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
+const SLIP_T = 0.62;
+/** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
+const WEATHER = { clear: 26, cloud: 10, rain: 24, storm: 32, ease: 14 };
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -130,6 +136,8 @@ interface Intent {
   faceYaw: number; // where the body / attacks point
   request: InputKeyAction | null;
   block: boolean;
+  /** F held: climb a ladder */
+  interact?: boolean;
 }
 
 interface AIMemory {
@@ -194,6 +202,11 @@ export function Game({
   const eruptRef = useRef({ timer: 9 });
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   const forestRef = useRef({ timer: 14 });
+  const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
+  /** weather clock and lightning timer (host / offline) */
+  const weatherRef = useRef({ t: 8, phase: '', strike: 6, warn: 0 });
+  const slipPrevRef = useRef([[0, 0], [0, 0]]);
+  const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
@@ -434,6 +447,7 @@ export function Game({
       faceYaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : camYaw,
       request: round.over ? null : input.peekBuffer(),
       block: actions.special && !round.over && p1.classId !== 'Ranger',
+      interact: !!actions.interact,
     };
 
     // Opponent: AI brain
@@ -445,6 +459,7 @@ export function Game({
       if (enemyIntent.move.lengthSq() > 1) enemyIntent.move.normalize();
       enemyIntent.faceYaw = r.yaw;
       enemyIntent.block = r.blk && !round.over && en.classId !== 'Ranger';
+      enemyIntent.interact = !!r.int;
       enemyIntent.request = round.over || en.hp <= 0 ? null : (r.req as InputKeyAction | null);
       r.reqTtl -= dt;
       if (r.reqTtl <= 0) r.req = null;
@@ -532,6 +547,8 @@ export function Game({
             c.stateDuration = c.hp > 0 ? 0.8 : 99;
           }
           if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
+          // a hard landing on a slick floor costs balance
+          if (map.id === 'forest' && impact > 7 && (c.grip ?? 1) < SLIP_T) c.slip = (c.slip ?? 0) + (impact - 7) * 0.05 * (SLIP_T - (c.grip ?? 1)) * 6;
         }
       }
       const pinned = (c.rootTimer ?? 0) > 0 && c.isGrounded && c.actionState !== 'launched' && c.actionState !== 'knockdown';
@@ -553,7 +570,10 @@ export function Game({
         c.vel[2] *= k;
       }
       applyBounds(i, c);
-      if (map.id === 'forest') updateWater(c);
+      if (map.id === 'forest') {
+        updateWater(c);
+        updateGrip(i, c);
+      }
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
@@ -660,6 +680,16 @@ export function Game({
       keyLightRef.current.target.position.set(p1.pos[0], ly, p1.pos[2]);
       keyLightRef.current.target.updateMatrixWorld();
     }
+    if (map.id === 'forest') {
+      // the sun goes in as the rain comes; lightning lights everything up for an instant
+      const rain = mapRuntime.rain;
+      if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.72 * rain) + mapRuntime.lightning * 4;
+      if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 - 0.3 * rain) + mapRuntime.lightning * 1.6;
+      if (scene.fog) {
+        (scene.fog as THREE.Fog).near = map.fog[0] * (1 - 0.45 * rain);
+        (scene.fog as THREE.Fog).far = map.fog[1] * (1 - 0.5 * rain);
+      }
+    }
     if (rimLightRef.current) {
       rimLightRef.current.position.set(p1.pos[0] + basis.forward.x * 8, 5, p1.pos[2] + basis.forward.z * 8);
       rimLightRef.current.target.position.set(p1.pos[0], 1, p1.pos[2]);
@@ -741,7 +771,7 @@ export function Game({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, branches: mapRuntime.branches.map((b) => ({ ...b })) },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, branches: mapRuntime.branches.map((b) => ({ ...b })) },
         ev: net.events.splice(0),
       });
     }
@@ -770,7 +800,7 @@ export function Game({
       if (mv.lengthSq() > 1) mv.normalize();
       for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
       const req = input.consumeBuffer();
-      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, req });
+      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, req });
 
       // ---- host state -> our two fighters (we are the host's slot 1)
       const snaps = n.snaps;
@@ -840,6 +870,7 @@ export function Game({
       // sky tint from lightning / eruption, same as on the host
       bgBase.set(map.background);
       bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
+      if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
       bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
       if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
       if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
@@ -933,7 +964,22 @@ export function Game({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
-      if (c.treeClimb !== undefined) return report('出招', '梯云纵上树中'), false;
+      if (c.treeClimb !== undefined) {
+        if (c.climbMode !== 'ladder' || req !== 'jump') return report('出招', c.climbMode === 'ladder' ? '在梯子上，按空格跳下来' : '梯云纵上树中'), false;
+        // jump off the ladder, away from the trunk
+        const pl = (map.pillars || [])[c.treeClimb];
+        const ox = c.pos[0] - pl.x;
+        const oz = c.pos[2] - pl.z;
+        const od = Math.hypot(ox, oz) || 1;
+        c.treeClimb = undefined;
+        c.climbing = false;
+        c.isGrounded = false;
+        c.vel = [(ox / od) * 5, 5, (oz / od) * 5];
+        c.actionState = 'jump';
+        c.stateDuration = 0;
+        gameAudio.playJump();
+        return true;
+      }
       if (req === 'jump' && startTreeRun(c, intent)) return true;
       if (c.swimming && req !== 'dodge' && req !== 'jump') return report('出招', '游泳中无法出招'), false;
       if (c.swimming && req === 'jump') {
@@ -1264,7 +1310,7 @@ export function Game({
       const rZ = -Math.sin(c.rotY);
       c.localMove = [intent.move.x * rX + intent.move.z * rZ, intent.move.x * f.x + intent.move.z * f.z];
 
-      if (map.id === 'forest' && treeClimb(c, intent)) return;
+      if (map.id === 'forest' && (ladderClimb(c, intent) || treeClimb(c, intent))) return;
       const canMove = !dodging && !charge && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || whirl || rangerThrow);
       if (canMove) {
         if (intent.move.lengthSq() > 0.01) {
@@ -1280,15 +1326,18 @@ export function Game({
           else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= 0.65; // wading
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
-          const accel = c.isGrounded ? 18 : 6;
+          const mu = map.id === 'forest' && c.isGrounded ? c.grip ?? 1 : 1;
+          const accel = c.isGrounded ? 18 * THREE.MathUtils.clamp(mu * mu * 1.4, 0.22, 1) : 6;
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], vA.x * spd, accel, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], vA.z * spd, accel, dt);
           if (c.swimming) c.targetRotY = Math.atan2(-vA.x, -vA.z); // swim the way you're going
           else if (!whirl) c.targetRotY = intent.faceYaw;
           if (c.isGrounded && c.actionState === 'idle') c.actionState = 'run';
         } else {
-          c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 14, dt);
-          c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 14, dt);
+          // on a slick floor you skid to a stop
+          const stopK = map.id === 'forest' && c.isGrounded ? 14 * THREE.MathUtils.clamp((c.grip ?? 1) * (c.grip ?? 1) * 1.4, 0.18, 1) : 14;
+          c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, stopK, dt);
+          c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, stopK, dt);
           if (c.isGrounded && c.actionState === 'run') c.actionState = 'idle';
           if (c.actionState === 'idle' || c.actionState === 'block') c.targetRotY = intent.faceYaw;
         }
@@ -1332,6 +1381,7 @@ export function Game({
       c.stamina = (c.stamina ?? 0) - 25;
       c.staminaDelay = 1.2;
       c.treeClimb = best;
+      c.climbMode = 'run';
       c.climbT = 0;
       c.climbA0 = Math.atan2(c.pos[2] - pl.z, c.pos[0] - pl.x);
       c.climbY0 = c.pos[1];
@@ -1349,8 +1399,82 @@ export function Game({
       return true;
     }
 
+    /**
+     * Rope ladders on the lookout trees: stand at the foot and hold F (or push toward the trunk) to climb,
+     * S climbs down, let go and you hang there, Space jumps off. At the top you step onto the deck.
+     */
+    function ladderClimb(c: CombatantState, intent: Intent) {
+      const pillars = map.pillars || [];
+      if (c.treeClimb === undefined) {
+        c.nearLadder = false;
+        const st = c.actionState;
+        if (!c.isGrounded || c.swimming || c.hp <= 0 || !(st === 'idle' || st === 'run' || st === 'block')) return false;
+        let hit = -1;
+        pillars.forEach((pl, k) => {
+          if (pl.ladder === undefined || c.pos[1] > (pl.h ?? 0) - 0.6) return;
+          const R = pl.r + 0.45;
+          if (Math.hypot(c.pos[0] - (pl.x + Math.cos(pl.ladder) * R), c.pos[2] - (pl.z + Math.sin(pl.ladder) * R)) < 1.4) hit = k;
+        });
+        if (hit < 0) return false;
+        c.nearLadder = true;
+        if (!intent.interact) return false;
+        c.treeClimb = hit;
+        c.climbMode = 'ladder';
+        c.climbing = true;
+        c.isGrounded = true;
+        c.isBlocking = false;
+        c.vel = [0, 0, 0];
+        c.actionState = 'idle';
+        c.stateDuration = 0;
+      }
+      if (c.climbMode !== 'ladder') return false;
+      c.nearLadder = false;
+      const pl = pillars[c.treeClimb];
+      const a = pl.ladder ?? 0;
+      const dx = Math.cos(a);
+      const dz = Math.sin(a);
+      const R = pl.r + 0.45;
+      c.pos[0] = pl.x + dx * R;
+      c.pos[2] = pl.z + dz * R;
+      const mv = intent.move;
+      const ml = mv.length();
+      const toward = ml > 0.1 ? -(mv.x * dx + mv.z * dz) / ml : 0; // +1 = pushing into the trunk
+      const up = !!intent.interact || toward > 0.3;
+      const down = !intent.interact && toward < -0.3;
+      const vy = up ? 3.2 : down ? -3.6 : 0;
+      c.pos[1] += vy * dt;
+      c.climbRate = vy;
+      c.vel = [0, 0, 0];
+      c.rotY = c.targetRotY = yawTo(c.pos, [pl.x, 0, pl.z]);
+      const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
+      const release = () => {
+        c.treeClimb = undefined;
+        c.climbing = false;
+        c.climbRate = 0;
+        c.isGrounded = true;
+      };
+      if (c.pos[1] >= (pl.h ?? 0) - 0.05) {
+        // through the gap in the rail and onto the deck
+        release();
+        c.pos[0] = pl.x + dx * (pl.r + 0.75);
+        c.pos[2] = pl.z + dz * (pl.r + 0.75);
+        c.pos[1] = pl.h ?? c.pos[1];
+        c.rotY = c.targetRotY = yawTo([pl.x, 0, pl.z], c.pos);
+        gameAudio.playLand();
+        return false;
+      }
+      if (c.pos[1] <= floor) {
+        c.pos[1] = floor;
+        if (down) {
+          release();
+          return false;
+        }
+      }
+      return true;
+    }
+
     function treeClimb(c: CombatantState, _intent: Intent) {
-      if (c.treeClimb === undefined) return false;
+      if (c.treeClimb === undefined || c.climbMode === 'ladder') return false;
       const pl = (map.pillars || [])[c.treeClimb];
       const T = TREE_RUN_T;
       const prevT = c.climbT ?? 0;
@@ -1592,7 +1716,7 @@ export function Game({
       }
       const stayBuried = def.actionState === 'buried' && o.state !== 'buried';
       if (!armored && !stayBuried) {
-        const knock = o.knock ?? 4;
+        const knock = (o.knock ?? 4) * (map.id === 'forest' ? 1 + (1 - (def.grip ?? 1)) * 0.7 : 1);
         def.vel[0] = hitDir.x * knock;
         def.vel[2] = hitDir.z * knock;
         if (o.launch) {
@@ -2605,6 +2729,10 @@ export function Game({
       bombZonesRef.current = [];
       mapRuntime.branches.length = 0;
       forestRef.current.timer = 14;
+      weatherRef.current = { t: 8, phase: '', strike: 6, warn: 0 };
+      mapRuntime.rain = 0;
+      mapRuntime.storm = 0;
+      mapRuntime.strikeWarn = 0;
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
@@ -3041,6 +3169,7 @@ export function Game({
       // sky tint: volcano glow / lightning
       bgBase.set(map.background);
       bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
+      if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
       bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
       if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
       if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
@@ -3060,7 +3189,10 @@ export function Game({
       if (map.id === 'glacier') updateGlacier();
       if (map.id === 'rooftop') updateRooftop();
       if (map.id === 'summit') updateSummit(t);
-      if (map.id === 'forest') updateForest();
+      if (map.id === 'forest') {
+        updateForest();
+        updateWeather();
+      }
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
@@ -3160,6 +3292,145 @@ export function Game({
               if (Math.hypot(c.pos[0] - tx, c.pos[2] - tz) < zone.r && c.pos[1] < 2) envHit(i, 110, 9, '火山弹');
             });
           }, 1.3);
+        });
+      }
+    }
+
+    /**
+     * 青冥古林 footing: every fighter has their own grip; rain and mud cut it. Below SLIP_T, every sharp change of
+     * velocity (cutting, stopping, rolling) and every hard landing costs balance; lose it all and you go down.
+     */
+    function updateGrip(i: number, c: CombatantState) {
+      const rain = mapRuntime.rain;
+      let g = GRIP[c.classId] ?? 0.85;
+      g *= 1 - rain * 0.32 - mapRuntime.storm * 0.18;
+      const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
+      const onDeck = c.pos[1] > floor + 2;
+      if (!onDeck && Math.abs(c.pos[2] - riverZ(c.pos[0])) < FOREST.bankHalf + 2.5) g *= 1 - 0.18 * (0.4 + rain * 0.6); // river mud
+      if (onDeck) g *= 1 - 0.12 * rain; // wet planks
+      c.grip = g;
+      const prev = slipPrevRef.current[i];
+      const dvx = c.vel[0] - prev[0];
+      const dvz = c.vel[2] - prev[1];
+      prev[0] = c.vel[0];
+      prev[1] = c.vel[2];
+      const st = c.actionState;
+      const footwork = c.isGrounded && !c.swimming && c.treeClimb === undefined && (st === 'idle' || st === 'run' || st === 'dodge' || st === 'block' || st.startsWith('attack_'));
+      if (footwork && g < SLIP_T) c.slip = (c.slip ?? 0) + Math.hypot(dvx, dvz) * (SLIP_T - g) * 0.24;
+      c.slip = Math.max(0, (c.slip ?? 0) - dt * (g < SLIP_T ? 0.32 : 0.8));
+      if ((c.slip ?? 0) >= 1 && footwork && c.hp > 0) {
+        // down you go
+        c.slip = 0;
+        c.actionState = 'knockdown';
+        c.stateTimer = 0;
+        c.stateDuration = 0.9;
+        c.vel[0] *= 0.6;
+        c.vel[2] *= 0.6;
+        c.isBlocking = false;
+        vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.1, c.pos[2]), '滑倒!', true, '#93c5fd');
+        vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 10, 0.4, 2, 0.6, '#6b5a40');
+        gameAudio.playLand();
+        if (i === 0) controller?.addShake(0.2);
+      }
+    }
+
+    /**
+     * 青冥古林 weather: clear, clouding over, rain, a thunderstorm, easing off, round and round.
+     * In the storm lightning hunts the highest fighter (up a lookout tree is the worst place to be),
+     * and a strike near the river runs through the water to anyone wading or swimming.
+     */
+    function updateWeather() {
+      const W = weatherRef.current;
+      if (!round.over) W.t += dt;
+      const cyc = WEATHER.clear + WEATHER.cloud + WEATHER.rain + WEATHER.storm + WEATHER.ease;
+      const t = W.t % cyc;
+      let rainT = 0;
+      let stormT = 0;
+      let phase = 'clear';
+      const c1 = WEATHER.clear;
+      const c2 = c1 + WEATHER.cloud;
+      const c3 = c2 + WEATHER.rain;
+      const c4 = c3 + WEATHER.storm;
+      if (t < c1) phase = 'clear';
+      else if (t < c2) {
+        phase = 'cloud';
+        rainT = 0.15 * ((t - c1) / WEATHER.cloud);
+      } else if (t < c3) {
+        phase = 'rain';
+        rainT = 0.6;
+      } else if (t < c4) {
+        phase = 'storm';
+        rainT = 1;
+        stormT = 1;
+      } else {
+        phase = 'ease';
+        rainT = 0.5 * (1 - (t - c4) / WEATHER.ease);
+      }
+      mapRuntime.rain = THREE.MathUtils.damp(mapRuntime.rain, rainT, 0.6, dt);
+      mapRuntime.storm = THREE.MathUtils.damp(mapRuntime.storm, stormT, 0.8, dt);
+      if (phase !== W.phase) {
+        const msg: Record<string, string> = { cloud: '天色暗了下来，山雨欲来', rain: '下雨了 · 地面湿滑，急转急停小心滑倒', storm: '暴雨雷暴！雷会劈站得最高的人，泡在水里会导电', ease: '雨小了', clear: '雨过天晴' };
+        if (W.phase && msg[phase]) onRoundEvent?.({ type: 'toast', text: msg[phase] });
+        if (phase === 'storm') W.strike = 3;
+        W.phase = phase;
+      }
+      // lightning
+      if (phase === 'storm' && !round.over) {
+        if (W.warn > 0) {
+          W.warn -= dt;
+          mapRuntime.strikeWarn = 1 - Math.max(0, W.warn) / 1.3;
+          if (Math.random() < 0.5) vfx.sparkBurst(vB.set(mapRuntime.boltX + (Math.random() - 0.5) * 1.6, mapRuntime.boltY + 0.1, mapRuntime.boltZ + (Math.random() - 0.5) * 1.6), 2, '#c7d2fe', 4, 0.05, UP, 1);
+          if (W.warn <= 0) strike();
+        } else {
+          W.strike -= dt;
+          if (W.strike <= 0) {
+            W.strike = 4.5 + Math.random() * 3;
+            // aim at the highest fighter (whoever is up a tree), else either one, leading their run a little
+            const alive = fighters.filter((f) => f.hp > 0);
+            if (alive.length) {
+              const hi = alive.reduce((a, b) => (b.pos[1] - terrainHeight(map.id, b.pos[0], b.pos[2]) > a.pos[1] - terrainHeight(map.id, a.pos[0], a.pos[2]) ? b : a));
+              const up = hi.pos[1] - terrainHeight(map.id, hi.pos[0], hi.pos[2]) > 2.5;
+              const tgt = up ? hi : alive[Math.floor(Math.random() * alive.length)];
+              const x = tgt.pos[0] + tgt.vel[0] * 0.8 + (up ? 0 : (Math.random() - 0.5) * 3);
+              const z = tgt.pos[2] + tgt.vel[2] * 0.8 + (up ? 0 : (Math.random() - 0.5) * 3);
+              mapRuntime.boltX = x;
+              mapRuntime.boltZ = z;
+              mapRuntime.boltY = up ? tgt.pos[1] : Math.max(fy(x, z), FOREST.waterY);
+              W.warn = 1.3;
+              vfx.ring(new THREE.Vector3(x, mapRuntime.boltY + 0.06, z), 2.6, '#a5b4fc', 1.3, 0.25, 0.7);
+            }
+          }
+        }
+      } else {
+        W.warn = 0;
+        mapRuntime.strikeWarn = 0;
+      }
+      mapRuntime.boltT = Math.max(0, mapRuntime.boltT - dt * 2.2);
+      // rain hiss follows the weather (a few times a second is plenty)
+      if (Math.random() < dt * 4) gameAudio.setRain?.(mapRuntime.rain);
+
+      function strike() {
+        const x = mapRuntime.boltX;
+        const z = mapRuntime.boltZ;
+        const y = mapRuntime.boltY;
+        mapRuntime.boltT = 1;
+        mapRuntime.lightning = 1;
+        mapRuntime.strikeWarn = 0;
+        const g = new THREE.Vector3(x, y + 0.05, z);
+        vfx.flash(vB.set(x, y + 1.5, z), '#c7d2fe', 120, 0.25, 30);
+        vfx.sparkBurst(vB.set(x, y + 0.2, z), 40, '#e0e7ff', 12, 0.08, UP, 1.5);
+        vfx.ring(g, 3.2, '#e0e7ff', 0.4, 0.2, 0.3);
+        vfx.dustPuff(g, 14, 0.8, 3, 0.8, '#3b3b3b');
+        gameAudio.playThunder();
+        controller?.addShake(Math.max(0.1, 0.6 - Math.hypot(x - p1.pos[0], z - p1.pos[2]) * 0.03));
+        const wet = waterDepth(x, z) > 0.05 || Math.abs(z - riverZ(x)) < FOREST.bankHalf;
+        fighters.forEach((c, i) => {
+          const d = Math.hypot(c.pos[0] - x, c.pos[2] - z);
+          if (d < 2.6 && Math.abs(c.pos[1] - y) < 3) envHit(i, 130, 6, '雷击');
+          else if (wet && d < 13 && (c.swimming || (waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY))) {
+            envHit(i, 60, 0, '导电');
+            vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1, c.pos[2]), 16, '#a5b4fc', 5, 0.05);
+          }
         });
       }
     }
@@ -3651,7 +3922,7 @@ export function Game({
 
   return (
     <group>
-      <hemisphereLight args={[map.hemi[0], map.hemi[1], map.hemi[2]]} />
+      <hemisphereLight ref={hemiRef} args={[map.hemi[0], map.hemi[1], map.hemi[2]]} />
       <directionalLight
         ref={keyLightRef}
         color={map.keyColor}

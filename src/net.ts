@@ -14,6 +14,7 @@ export interface RemoteInput {
   mz: number;
   yaw: number;
   blk: boolean;
+  int?: boolean;
   req: string | null;
   reqTtl: number;
 }
@@ -21,7 +22,7 @@ export interface RemoteInput {
 export type NetMessage =
   | { t: 'hello'; cls: CharacterClassId; name?: string }
   | { t: 'cfg'; map: MapId; hostCls: CharacterClassId; guestCls: CharacterClassId; seq: number; hostName?: string }
-  | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; req: string | null }
+  | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; req: string | null }
   | { t: 's'; f: any[]; p: any[]; m: any; ev: any[] }
   | { t: 're'; e: any }
   | { t: 'bye' };
@@ -183,6 +184,7 @@ export class NetSession {
       r.mz = m.mz;
       r.yaw = m.yaw;
       r.blk = m.blk;
+      r.int = !!m.int;
       if (m.req) {
         r.req = m.req;
         r.reqTtl = 0.35;

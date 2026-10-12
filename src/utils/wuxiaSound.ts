@@ -80,6 +80,13 @@ export class WuxiaSound {
   }
 
   /** player volume sliders (0..1). The defaults (0.9 / 0.8 / 0.8) give the original mix. */
+  /** 青冥古林: the rain layer (hiss + drumming on leaves), 0 = dry .. 1 = downpour */
+  private rainGain: GainNode | null = null;
+  setRain(x: number) {
+    if (!this.ctx || !this.rainGain) return;
+    this.rainGain.gain.setTargetAtTime(Math.max(0, Math.min(1, x)) * 0.55, this.ctx.currentTime, 0.6);
+  }
+
   setVolumes(sfx: number, music: number, amb: number) {
     this.vol = { sfx, music, amb };
     if (!this.ctx) return;
@@ -445,6 +452,7 @@ export class WuxiaSound {
     if (!this.ctx) return;
     this.ambNodes?.stop();
     this.ambNodes = null;
+    this.rainGain = null;
     if (this.ambTimer) window.clearInterval(this.ambTimer);
     this.ambTimer = null;
     if (id === 'none') return;
@@ -525,6 +533,30 @@ export class WuxiaSound {
         if (Math.random() < 0.25) for (let k = 0; k < 4; k++) this.thump(b, b.now + k * 0.32, 110, 70, 0.35, 0.05, 0.15);
       }, 1600);
     } else if (id === 'forest') {
+      // rain: broadband hiss plus a lower patter, faded in and out by setRain
+      {
+        const rg = ctx.createGain();
+        rg.gain.value = 0;
+        rg.connect(this.ambIn);
+        this.rainGain = rg;
+        for (const [buf, type, f, q, g] of [
+          [this.noise, 'highpass', 2600, 0.5, 0.5],
+          [this.pinkNoise, 'bandpass', 900, 0.8, 0.9],
+        ] as [AudioBuffer, BiquadFilterType, number, number, number][]) {
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.loop = true;
+          const fl = ctx.createBiquadFilter();
+          fl.type = type;
+          fl.frequency.value = f;
+          fl.Q.value = q;
+          const gn = ctx.createGain();
+          gn.gain.value = g;
+          src.connect(fl).connect(gn).connect(rg);
+          src.start(0, Math.random() * 2);
+          nodes.push(src);
+        }
+      }
       // a babbling stream, leaves stirring, birds calling from the canopy, now and then a woodpecker
       loopNoise(this.noise, 'bandpass', 1900, 0.9, 0.05, 0.9, 0.03);
       loopNoise(this.pinkNoise, 'bandpass', 700, 1.1, 0.08, 1.7, 0.05);

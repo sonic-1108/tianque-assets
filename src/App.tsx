@@ -5,7 +5,7 @@ import { usePlayground, usePlaygroundGameLifecycle } from './utils/usePlayground
 import { MenuOverlay, gameAudio, useIsMobile } from './utils/helper';
 import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
-import { MAPS, MAP_ORDER, MapId } from './maps';
+import { MAPS, MAP_ORDER, MapId, mapRuntime } from './maps';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSettings, QUALITY } from './settings';
 import type { CharacterClassId } from './types';
@@ -510,6 +510,11 @@ export default function App() {
     p1Rooted: false,
     p1Climb: false,
     p1Swim: false,
+    p1Ladder: false,
+    p1Grip: 1,
+    p1Slip: 0,
+    rain: 0,
+    storm: 0,
     p1Slide: false,
     dMaxHp: 1600,
     dMp: 100,
@@ -574,6 +579,11 @@ export default function App() {
         p1Rooted: (p1.rootTimer || 0) > 0,
         p1Climb: !!p1.climbing,
         p1Swim: !!p1.swimming,
+        p1Ladder: !!p1.nearLadder,
+        p1Grip: mapId === 'forest' ? p1.grip ?? 1 : 1,
+        p1Slip: mapId === 'forest' ? p1.slip ?? 0 : 0,
+        rain: mapId === 'forest' ? mapRuntime.rain : 0,
+        storm: mapId === 'forest' ? mapRuntime.storm : 0,
         p1Slide: !!p1.sliding,
         dMaxHp: dummy.maxHp,
         dMp: dummy.mp,
@@ -1027,6 +1037,9 @@ export default function App() {
           if (hudMirror.p1Slide) meChips.push({ text: '体力耗尽 滑落', tone: 'red', pulse: true });
           else if (hudMirror.p1Climb) meChips.push({ text: '攀爬中', tone: 'amber' });
           if (hudMirror.p1Swim) meChips.push({ text: '游泳中 不能出招', tone: 'sky' });
+          if (hudMirror.p1Ladder) meChips.push({ text: '按住 F 爬梯子', tone: 'amber', pulse: true });
+          if (hudMirror.p1Grip < 0.85) meChips.push({ text: `地滑 摩擦力 ${Math.round(hudMirror.p1Grip * 100)}%`, tone: hudMirror.p1Grip < 0.62 ? 'red' : 'sky' });
+          if (hudMirror.p1Slip > 0.45) meChips.push({ text: hudMirror.p1Slip > 0.75 ? '快滑倒了！别急转' : '脚下不稳', tone: 'red', pulse: true });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',

@@ -18,7 +18,8 @@ export type InputKeyAction =
   | 'clearTarget'
   | 'toggleHelp'
   | 'toggleDebug'
-  | 'pause';
+  | 'pause'
+  | 'interact';
 
 export interface BufferedAction {
   action: InputKeyAction;
@@ -62,6 +63,7 @@ export const createEmptyActions = (): Record<InputKeyAction, boolean> => ({
   toggleHelp: false,
   toggleDebug: false,
   pause: false,
+  interact: false,
 });
 
 const bufferMs = () => ((globalThis as any).__TQ_BUFFER_MS as number) || 150;
@@ -187,6 +189,9 @@ export function useGameInput(options: {
         inputRef.current.actions.right = true;
       }
 
+      // F: hold to climb a ladder (青冥古林)
+      if (code === 'KeyF') inputRef.current.actions.interact = true;
+
       // Jump (Space)
       if (code === 'Space') {
         e.preventDefault();
@@ -267,6 +272,7 @@ export function useGameInput(options: {
       if (code === 'Space') {
         inputRef.current.actions.jump = false;
       }
+      if (code === 'KeyF') inputRef.current.actions.interact = false;
       if (code === 'ShiftLeft' || code === 'ShiftRight') {
         inputRef.current.actions.dodge = false;
       }

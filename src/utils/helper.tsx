@@ -806,6 +806,7 @@ interface GameAudio {
   stopMusic(): void;
   setAmbience(id: AmbienceId): void;
   setMusicIntensity(x: number): void;
+  setRain(x: number): void;
 }
 const viaWuxia = (fn: (w: WuxiaSound) => void) =>
   function (this: any) {
@@ -879,6 +880,9 @@ Object.assign(GameAudio.prototype, {
   },
   setMusicIntensity: function (x: number) {
     wuxia.setMusicIntensity(x);
+  },
+  setRain: function (x: number) {
+    wuxia.setRain(x);
   },
 });
 

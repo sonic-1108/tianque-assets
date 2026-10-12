@@ -12,6 +12,8 @@ export interface Circle {
   deck?: number;
   /** can be climbed (青冥古林 lookout trees) */
   climb?: boolean;
+  /** angle round the trunk where its rope ladder hangs */
+  ladder?: number;
 }
 
 export interface MapDef {
@@ -203,16 +205,22 @@ export function waterDepth(x: number, z: number) {
   if (bridgeDeck(x, z) !== null) return 0;
   return Math.max(0, FOREST.waterY - forestFloor(x, z));
 }
+/** where the rope ladder hangs on the n-th lookout tree (shared by the mesh and the climbing) */
+export function ladderAngle(n: number) {
+  return (n * 1.7) % (Math.PI * 2);
+}
 function forestPillars(): Circle[] {
   // collision a touch wider than the drawn trunk so the root flare never swallows a foot
-  const out: Circle[] = FOREST.trees.map(([x, z, r, deck]) => (deck > 0 ? { x, z, r: r * 1.08, h: deck, deck: r + FOREST.deckR, climb: true } : { x, z, r: r * 1.08 }));
+  let deckIdx = 0;
+  const out: Circle[] = FOREST.trees.map(([x, z, r, deck]) => (deck > 0 ? { x, z, r: r * 1.08, h: deck, deck: r + FOREST.deckR, climb: true, ladder: ladderAngle(deckIdx++) } : { x, z, r: r * 1.08 }));
   for (const [x0, z0, x1, z1] of FOREST.logs) {
     const L = Math.hypot(x1 - x0, z1 - z0);
     const n = Math.max(2, Math.round(L / 1.0));
     for (let k = 0; k <= n; k++) out.push({ x: x0 + ((x1 - x0) * k) / n, z: z0 + ((z1 - z0) * k) / n, r: FOREST.logR, h: FOREST.logH + forestFloor(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n) });
   }
   for (const [x, z] of FOREST.stones) out.push({ x, z, r: 0.62, h: FOREST.waterY + 0.2 });
-  for (const [x, z, sc] of FOREST.rocks) out.push({ x, z, r: sc * 1.15 + 0.1, h: forestFloor(x, z) + sc * 0.2 + sc * 0.7 * 0.9 });
+  // small stones you step onto; big boulders are solid (a flat standing top over a rounded rock reads as floating)
+  for (const [x, z, sc] of FOREST.rocks) out.push(sc < 0.5 ? { x, z, r: sc * 1.1, h: forestFloor(x, z) + sc * 0.75 } : { x, z, r: sc * 1.15 });
   return out;
 }
 
@@ -425,6 +433,10 @@ MAPS.forest = {
     '大河横穿中间：深水区要游泳（游得慢、不能出招，只能翻滚潜游），西边有浅滩可以蹚过去，东边有一座木桥',
     '七棵古树上搭着猎人瞭望台：朝树跑过去按跳跃，施展「梯云纵」三步蹬上树顶（耗体力，途中被打会掉下来），站在台上居高临下；走到台边再跳就下来',
     '古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕；倒木和河边的石头可以站上去',
+    '天气会变：晴 → 转阴 → 下雨 → 暴雨雷暴 → 放晴，大约两分钟一轮',
+    '摩擦力：每人鞋底抓地力不同（梵音最稳，霍岩次之，沈惊鸿最轻）。下雨、河边泥地会让地面变滑：起步刹车打滑，被打飞得更远；太滑时急转、急停、连续翻滚、高处落地都会失衡，失衡满了就摔倒',
+    '雷暴时天上劈雷，落点先冒电光：雷专劈站得最高的人（瞭望台最危险），劈在河边会沿水导电，泡在水里的人一起挨电',
+    '梯子：走到梯子下按住 F 往上爬，S 往下，空格跳下来',
     '山风一起，枯枝会砸下来，落点先出现红圈',
   ],
   homeClass: 'Ranger',
@@ -469,6 +481,13 @@ export const mapRuntime = {
   /** 青冥古林: branches coming down. t < 0: warning (falls during the last 0.45 s), 0 = impact, then lies there */
   branches: [] as { x: number; z: number; t: number; a: number }[],
   gust: 0, // 0..1 wind gust shaking the canopy
+  /** 青冥古林 weather: 0 clear .. 1 downpour */
+  rain: 0,
+  /** 0..1 thunderstorm (lightning strikes) */
+  storm: 0,
+  /** 0..1 static gathering at (boltX, boltZ) before a strike */
+  strikeWarn: 0,
+  boltY: 0, // ground height of the last strike
 };
 
 // ----------------------------------------------------------------------
