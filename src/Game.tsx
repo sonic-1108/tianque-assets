@@ -953,10 +953,10 @@ export function Game({
         // scramble out onto a bank or a stepping stone if one is within reach, otherwise just bob
         const f = fwdOf(intent.move.lengthSq() > 0.01 ? Math.atan2(-intent.move.x, -intent.move.z) : c.rotY);
         let reach = false;
-        for (let d = 0.6; d <= 2.0 && !reach; d += 0.35) {
+        for (let d = 0.5; d <= 2.6 && !reach; d += 0.35) {
           const x = c.pos[0] + f.x * d;
           const z = c.pos[2] + f.z * d;
-          if (groundAt(x, z, c.pos[1] + 2.5) > FOREST.swimY + 0.55) reach = true;
+          if (groundAt(x, z, c.pos[1] + 2.5) > c.pos[1] + 0.3) reach = true;
         }
         if (!reach) return report('跳跃', '水太深，游到岸边再跳'), false;
         c.isGrounded = false;
@@ -3164,6 +3164,26 @@ export function Game({
         vfx.dustPuff(vB.set(c.pos[0], FOREST.waterY + 0.05, c.pos[2]), hard ? 22 : 10, 0.6, hard ? 4 : 2.5, 0.8, '#e0f2fe');
         vfx.ring(vB, hard ? 2.4 : 1.6, '#e0f2fe', 0.6, 0.1, 0.4);
         if (hard) gameAudio.playWaveCrash();
+      }
+      if (c.swimming && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run')) {
+        // swimming into a bank (or a stepping stone, the bridge foot): haul yourself out
+        const sp = Math.hypot(c.vel[0], c.vel[2]);
+        if (sp > 0.8) {
+          const dx = c.vel[0] / sp;
+          const dz = c.vel[2] / sp;
+          for (const dd of [0.5, 0.9, 1.3]) {
+            const g = groundAt(c.pos[0] + dx * dd, c.pos[2] + dz * dd, c.pos[1] + 2.5);
+            if (g > c.pos[1] + 0.35 && g < c.pos[1] + 2.4) {
+              c.swimming = false;
+              c.isGrounded = false;
+              c.vel = [dx * 3.5, Math.sqrt(2 * 26 * (g - c.pos[1] + 0.45)), dz * 3.5];
+              c.actionState = 'jump';
+              c.stateDuration = 0;
+              vfx.dustPuff(vB.set(c.pos[0], FOREST.waterY + 0.05, c.pos[2]), 8, 0.4, 1.8, 0.45, '#e0f2fe');
+              return;
+            }
+          }
+        }
       }
       if (c.swimming) {
         c.isBlocking = false;

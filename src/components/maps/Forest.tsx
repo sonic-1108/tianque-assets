@@ -529,19 +529,22 @@ function trunkGeometry(radius: number, height: number, seed: number, deck = 0) {
   const ph = rand() * 6;
   const lobes = 5 + Math.floor(rand() * 2);
   // lookout trees grow straight up to the deck (you climb them), then lean like the rest
-  const bend = (y: number) => (deck > 0 ? Math.max(0, y - deck) / Math.max(1, height - deck) : 1);
-  const bx = (y: number) => (Math.sin(y * 0.09 + ph) * 0.5 + Math.sin(y * 0.21 + ph * 2) * 0.15 - (deck > 0 ? Math.sin(ph) * 0.5 + Math.sin(ph * 2) * 0.15 : 0)) * bend(y);
-  const bz = (y: number) => (Math.cos(y * 0.07 + ph) * 0.45 - (deck > 0 ? Math.cos(ph) * 0.45 : 0)) * bend(y);
+  // the trunk stands exactly on its collision circle at the bottom; the lean only starts higher up
+  // (lookout trees grow straight up past the deck you climb to)
+  const y0 = deck > 0 ? deck : 2.5;
+  const bend = (y: number) => THREE.MathUtils.smoothstep(y, y0, y0 + 6);
+  const bx = (y: number) => (Math.sin(y * 0.09 + ph) * 0.5 + Math.sin(y * 0.21 + ph * 2) * 0.15 - Math.sin(ph) * 0.5 - Math.sin(ph * 2) * 0.15) * bend(y);
+  const bz = (y: number) => (Math.cos(y * 0.07 + ph) * 0.45 - Math.cos(ph) * 0.45) * bend(y);
   for (let i = 0; i <= rings; i++) {
     const t = i / rings;
     const y = -0.4 + t * t * 0.0 + t * (height + 0.4);
     const taper = deck > 0 ? (y < deck ? 1 - 0.06 * Math.max(0, y) / deck : 0.94 - 0.44 * Math.pow((y - deck) / (height - deck), 0.8)) : 1 - 0.5 * Math.pow(t, 0.8);
-    const flare = Math.exp(-Math.max(0, y) / 1.1);
+    const flare = Math.exp(-Math.max(0, y) / 0.9);
     for (let j = 0; j <= seg; j++) {
       const a = (j / seg) * Math.PI * 2;
-      const butt = Math.pow(Math.max(0, Math.sin(a * lobes + ph)), 3) * 1.1 * flare;
-      const knot = (Math.sin(a * 3 + y * 0.8 + ph) * 0.04 + Math.sin(a * 7 - y * 1.7) * 0.025) * (1 - flare);
-      const r = radius * (taper + flare * 0.55 + butt + knot);
+      const butt = Math.pow(Math.max(0, Math.sin(a * lobes + ph)), 3) * 0.45 * Math.exp(-Math.max(0, y) / 0.6);
+      const knot = (Math.sin(a * 3 + y * 0.8 + ph) * 0.03 + Math.sin(a * 7 - y * 1.7) * 0.02) * (1 - flare);
+      const r = radius * (taper + flare * 0.3 + butt + knot);
       pos.push(bx(y) + Math.cos(a) * r, y, bz(y) + Math.sin(a) * r);
       uv.push((j / seg) * 3, y / 3);
     }
@@ -656,14 +659,14 @@ function rootGeometries(tx: number, tz: number, radius: number, seed: number, ba
     const pts: THREE.Vector3[] = [];
     for (let s = 0; s <= 4; s++) {
       const t = s / 4;
-      const d = radius * 0.8 + t * len;
+      const d = radius * 0.85 + t * len;
       const wob = Math.sin(t * 5 + k) * 0.5 * t;
       const px = tx + Math.cos(a + wob * 0.15) * d;
       const pz = tz + Math.sin(a + wob * 0.15) * d;
-      pts.push(new THREE.Vector3(px, (floorAt(px, pz) - base) * t + base + 0.35 * (1 - t) - 0.05 * t, pz));
+      pts.push(new THREE.Vector3(px, (floorAt(px, pz) - base) * t + base + 0.16 * (1 - t) - 0.06 * t, pz));
     }
     const curve = new THREE.CatmullRomCurve3(pts);
-    const tube = new THREE.TubeGeometry(curve, 12, radius * 0.16, 7, false);
+    const tube = new THREE.TubeGeometry(curve, 12, radius * 0.12, 7, false);
     const pp = tube.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < pp.count; i++) {
       const seg = Math.floor(i / 8) / 12;
