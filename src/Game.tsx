@@ -3341,6 +3341,12 @@ export function Game({
      */
     function updateWeather() {
       const W = weatherRef.current;
+      // test hook: jump the weather clock
+      const jumpTo = (globalThis as any).__TQ_WEATHER_T;
+      if (typeof jumpTo === 'number') {
+        W.t = jumpTo;
+        (globalThis as any).__TQ_WEATHER_T = undefined;
+      }
       if (!round.over) W.t += dt;
       const cyc = WEATHER.clear + WEATHER.cloud + WEATHER.rain + WEATHER.storm + WEATHER.ease;
       const t = W.t % cyc;

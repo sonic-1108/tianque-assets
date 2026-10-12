@@ -476,7 +476,7 @@ export default function App() {
   const p1RefState = useRef<CombatantState>(createCombatant('p1', true));
   const dummyRefState = useRef<CombatantState>(createCombatant('dummy', false));
   // Debug handle (used by automated visual tests; harmless in production)
-  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef };
+  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime };
   const targetingRefState = useRef<TargetingState>({
     lockedEnemyId: null,
     friendlyTargetId: null,
