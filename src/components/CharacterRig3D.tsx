@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { applyMonkGold } from './monkGold';
+import { applyCharacterShading } from './characterShading';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
@@ -405,17 +405,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         } else if (asset.fallback && classId === 'BuddhistMage') {
           // 了尘 model not uploaded yet: borrow 霍岩's body in saffron
           m.color = new THREE.Color(isPlayer ? '#f0c27a' : '#d8c4ff');
-        } else if (!isPlayer) {
-          // opponent: desaturated stone tint, texture kept
-          m.color = new THREE.Color('#9aa3ad');
         }
         m.emissive = new THREE.Color('#000000');
         if (classId === 'BuddhistMage' && !asset.fallback) {
           // 金身: let the gilded skin catch the light
           m.envMapIntensity = 1.6;
           m.roughness = Math.min(m.roughness ?? 1, 0.85);
-          applyMonkGold(m, isPlayer);
         }
+        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback);
         o.material = m;
         mats.push(m);
       }
