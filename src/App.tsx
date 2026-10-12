@@ -481,7 +481,7 @@ export default function App() {
   const p1RefState = useRef<CombatantState>(createCombatant('p1', true));
   const dummyRefState = useRef<CombatantState>(createCombatant('dummy', false));
   // Debug handle (used by automated visual tests; harmless in production)
-  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime };
+  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef };
   const targetingRefState = useRef<TargetingState>({
     lockedEnemyId: null,
     friendlyTargetId: null,
@@ -786,7 +786,7 @@ export default function App() {
                     <div>
                       正在加入房间 {net.code}…
                       <span className="ml-2 text-[11px] text-zinc-400">
-                        {net.iceState === 'checking' ? '正在打通两台电脑之间的连接' : net.iceState === 'new' || !net.iceState ? '正在联系房主' : net.iceState === 'disconnected' ? '连接不稳定，重试中' : ''}
+                        {net.relayState ? net.relayState : net.iceState === 'checking' ? '正在打通两台电脑之间的连接' : net.iceState === 'new' || !net.iceState ? '正在联系房主' : net.iceState === 'disconnected' ? '连接不稳定，重试中' : ''}
                       </span>
                     </div>
                   )}
@@ -796,6 +796,9 @@ export default function App() {
                     </div>
                   )}
                   {net.status === 'connected' && net.role === 'guest' && <div className="text-emerald-300 font-bold">已加入房间 ✓ 选好你的职业，等房主选地图开打。</div>}
+                  {net.status === 'connected' && (
+                    <div className="text-[11px] text-zinc-400">{net.via === 'relay' ? '线路：中转服务器（直连没打通，延迟会高一些）' : '线路：直连'}</div>
+                  )}
                   {net.status === 'error' && <div className="text-red-400 font-bold">{net.error}</div>}
                 </div>
               )}

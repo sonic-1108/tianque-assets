@@ -27,6 +27,19 @@ export type NetMessage =
   | { t: 're'; e: any }
   | { t: 'bye' };
 
+/** relay-only control messages (never reach the game) */
+type RelayCtl = { t: 'rj'; id: string } | { t: 'ra'; id: string } | { t: 'rp' };
+
+/**
+ * When the two browsers cannot open a WebRTC path at all (strict campus / office NATs, both sides behind firewalls),
+ * the match falls back to a public MQTT broker over secure websockets: slower than peer to peer, but it goes through
+ * anything that can load a web page. The host listens on every broker that answers; the guest uses the first one.
+ */
+const RELAY_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+const RELAY_NS = 'tianque-1v1/v1/';
+/** how long the guest gives peer to peer before switching to the relay */
+const P2P_GRACE_MS = 9000;
+
 const ID_PREFIX = 'tianque-1v1-';
 
 /**
@@ -49,7 +62,7 @@ const ICE_CONFIG: RTCConfiguration = {
   iceCandidatePoolSize: 4,
 };
 /** give up on a join that never opens, with an explanation instead of spinning forever */
-const JOIN_TIMEOUT_MS = 25000;
+const JOIN_TIMEOUT_MS = 22000;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 export function makeRoomCode() {
@@ -76,6 +89,16 @@ export class NetSession {
   remoteClass: CharacterClassId | null = null;
   remoteName = '';
   pingMs = 0;
+  /** how the match is carried: straight between the browsers, or through the relay */
+  via: '' | 'p2p' | 'relay' = '';
+  private relays: any[] = [];
+  private relayOut: any = null;
+  private relayId = Math.random().toString(36).slice(2, 10);
+  private relayPeer = '';
+  private relayHeard = 0;
+  private relayTimers: number[] = [];
+  private relayOpening: Promise<boolean> | null = null;
+  private lastIn = 0;
   private listeners = new Set<() => void>();
   onMessage: ((m: NetMessage) => void) | null = null;
 
@@ -99,6 +122,7 @@ export class NetSession {
     const opts = { debug: 1, config: ICE_CONFIG };
     const peer = this.role === 'host' ? new Peer(ID_PREFIX + this.code, opts) : new Peer(opts);
     this.peer = peer;
+    if (this.role === 'host') this.openRelay().then((ok) => ok && this.status === 'opening' && this.changed('waiting'));
     peer.on('open', () => {
       if (this.role === 'host') {
         this.changed('waiting');
@@ -106,12 +130,10 @@ export class NetSession {
         this.changed('connecting');
         const c = peer.connect(ID_PREFIX + this.code, { reliable: true, serialization: 'json' });
         this.attach(c);
+        this.relayTimers.push(window.setTimeout(() => this.status === 'connecting' && this.joinViaRelay(), P2P_GRACE_MS));
         this.joinTimer = window.setTimeout(() => {
           if (this.status === 'connecting') {
-            this.changed(
-              'error',
-              '连不上房主：找到了房间，但两台电脑之间打不通。常见于校园网、公司网或跨国连接。可以都刷新后重开房间再试，或者换个网络（比如手机热点）试试。'
-            );
+            this.changed('error', '连不上房主：直连和中转都没打通。让房主刷新后重开房间，再用新房间号加入；还不行就换个网络（比如手机热点）。');
             try {
               c.close();
             } catch {
@@ -123,7 +145,7 @@ export class NetSession {
     });
     peer.on('connection', (c) => {
       if (this.role !== 'host') return;
-      if (this.conn && this.conn.open) {
+      if ((this.conn && this.conn.open) || this.via === 'relay') {
         c.on('open', () => c.close()); // room is full
         return;
       }
@@ -141,6 +163,12 @@ export class NetSession {
           : t === 'browser-incompatible'
           ? '浏览器不支持联机，换 Chrome 或 Edge 试试'
           : `连接出错：${t || e?.message || e}`;
+      if (this.via === 'relay' || this.status === 'connected') return;
+      // the PeerJS server itself is unreachable or lost the room: the relay can still find the other side
+      if (t !== 'unavailable-id' && t !== 'browser-incompatible') {
+        if (this.role === 'guest') return void this.joinViaRelay(msg);
+        if (this.relays.length) return void this.changed('waiting', '');
+      }
       this.changed('error', msg);
     });
     peer.on('disconnected', () => {
@@ -155,7 +183,9 @@ export class NetSession {
   private attach(c: DataConnection) {
     this.conn = c;
     c.on('open', () => {
+      if (this.via === 'relay') return void c.close();
       window.clearTimeout(this.joinTimer);
+      this.via = 'p2p';
       this.changed('connected', '');
     });
     // surface the WebRTC handshake so a stuck join says where it is stuck
@@ -165,7 +195,7 @@ export class NetSession {
       const upd = () => {
         this.iceState = pc.iceConnectionState;
         if (pc.iceConnectionState === 'failed' && this.status !== 'connected') {
-          this.changed('error', '连接被网络拦住了（直连和中继都没打通）。换个网络，比如手机热点，再试一次。');
+          if (this.role === 'guest') this.joinViaRelay();
         } else this.changed();
       };
       pc.addEventListener('iceconnectionstatechange', upd);
@@ -173,8 +203,8 @@ export class NetSession {
     };
     watch();
     c.on('data', (d: any) => this.receive(d as NetMessage));
-    c.on('close', () => this.changed('closed', '对方已断开连接'));
-    c.on('error', () => this.changed('error', '连接中断'));
+    c.on('close', () => this.via !== 'relay' && this.changed('closed', '对方已断开连接'));
+    c.on('error', () => this.via !== 'relay' && this.status === 'connected' && this.changed('error', '连接中断'));
   }
 
   private receive(m: NetMessage) {
@@ -206,8 +236,151 @@ export class NetSession {
   }
 
   send(m: NetMessage) {
-    if (this.conn && this.conn.open) this.conn.send(m);
+    if (this.via === 'relay') {
+      // the relay is a shared public broker: controls go out at most ~30 times a second (actions never dropped)
+      if (m.t === 'in' && !m.req) {
+        const now = performance.now();
+        if (now - this.lastIn < 33) return;
+        this.lastIn = now;
+      }
+      this.relaySend(m);
+    }
+    else if (this.conn && this.conn.open) this.conn.send(m);
   }
+
+  // ---------------- relay fallback ----------------
+  private topic(side: 'h' | 'g') {
+    return RELAY_NS + this.code + '/' + side;
+  }
+  private relaySend(m: NetMessage | RelayCtl, client = this.relayOut) {
+    try {
+      client?.publish(this.topic(this.role === 'host' ? 'g' : 'h'), JSON.stringify(m), { qos: 0 });
+    } catch {
+      /* ignore */
+    }
+  }
+  /** host: connect to every broker that answers; guest: the first one that answers */
+  private openRelay(): Promise<boolean> {
+    if (this.relayOpening) return this.relayOpening;
+    this.relayOpening = (async () => {
+      let mqtt: any;
+      try {
+        mqtt = (await import('mqtt')).default;
+      } catch {
+        return false;
+      }
+      const mine = this.role === 'host' ? 'h' : 'g';
+      const brokers: string[] = (globalThis as any).__TQ_RELAY || RELAY_BROKERS; // tests point this at a local broker
+      const tryOne = (url: string) =>
+        new Promise<any>((res) => {
+          const cl = mqtt.connect(url, { clean: true, connectTimeout: 7000, reconnectPeriod: 3000, keepalive: 20, clientId: 'tq_' + this.relayId + '_' + Math.random().toString(36).slice(2, 6) });
+          const to = window.setTimeout(() => {
+            cl.end(true);
+            res(null);
+          }, 8000);
+          cl.once('connect', () => {
+            window.clearTimeout(to);
+            cl.subscribe(this.topic(mine), { qos: 0 });
+            cl.on('message', (_t: string, payload: Uint8Array) => this.relayReceive(cl, payload));
+            res(cl);
+          });
+          cl.on('error', () => {});
+        });
+      if (this.role === 'host') {
+        const all = await Promise.all(brokers.map(tryOne));
+        this.relays = all.filter(Boolean);
+      } else {
+        for (const url of brokers) {
+          const cl = await tryOne(url);
+          if (cl) {
+            this.relays = [cl];
+            break;
+          }
+        }
+      }
+      return this.relays.length > 0;
+    })();
+    return this.relayOpening;
+  }
+  private relayReceive(client: any, payload: Uint8Array) {
+    let m: any;
+    try {
+      m = JSON.parse(new TextDecoder().decode(payload));
+    } catch {
+      return;
+    }
+    if (this.role === 'host' && m.t === 'rj') {
+      // a guest that could not reach us directly
+      if ((this.conn && this.conn.open) || (this.via === 'relay' && this.relayPeer && this.relayPeer !== m.id)) return;
+      this.relayOut = client;
+      this.relayPeer = m.id;
+      this.relayHeard = performance.now();
+      this.relaySend({ t: 'ra', id: m.id });
+      if (this.via !== 'relay') {
+        this.via = 'relay';
+        this.startRelayHeartbeat();
+        this.changed('connected', '');
+      }
+      return;
+    }
+    if (this.role === 'guest' && m.t === 'ra') {
+      if (m.id !== this.relayId || this.via === 'relay') return;
+      this.relayOut = client;
+      this.relayHeard = performance.now();
+      this.via = 'relay';
+      window.clearTimeout(this.joinTimer);
+      try {
+        this.conn?.close();
+      } catch {
+        /* ignore */
+      }
+      this.startRelayHeartbeat();
+      this.changed('connected', '');
+      return;
+    }
+    if (this.via !== 'relay' || client !== this.relayOut) return;
+    this.relayHeard = performance.now();
+    if (m.t === 'rp') return;
+    if (m.t === 'bye') {
+      this.changed('closed', '对方已断开连接');
+      return;
+    }
+    this.receive(m as NetMessage);
+  }
+  private startRelayHeartbeat() {
+    this.relayTimers.push(
+      window.setInterval(() => {
+        if (this.via !== 'relay' || this.status !== 'connected') return;
+        this.relaySend({ t: 'rp' });
+        if (performance.now() - this.relayHeard > 12000) this.changed('closed', '对方已断开连接（中转超时）');
+      }, 2000)
+    );
+  }
+  private joining = false;
+  /** guest: peer to peer did not come up, knock on the host's door through the relay */
+  private async joinViaRelay(reason?: string) {
+    if (this.joining || this.via || this.role !== 'guest') return;
+    this.joining = true;
+    this.relayState = '直连没打通，改走中转服务器';
+    this.changed('connecting');
+    const ok = await this.openRelay();
+    if (!ok) {
+      this.changed('error', reason || '连不上房主，中转服务器也连不上。检查网络后重试，或换个网络（比如手机热点）。');
+      return;
+    }
+    const knock = window.setInterval(() => {
+      if (this.via) return window.clearInterval(knock);
+      for (const cl of this.relays) this.relaySend({ t: 'rj', id: this.relayId }, cl);
+    }, 700);
+    this.relayTimers.push(knock);
+    window.clearTimeout(this.joinTimer);
+    this.joinTimer = window.setTimeout(() => {
+      if (this.status === 'connecting')
+        this.changed('error', '连不上房主：直连和中转都没打通。确认房间号，让房主刷新后重开房间，再用新房间号加入。');
+    }, 14000);
+  }
+  /** shown while joining */
+  relayState = '';
 
   close() {
     try {
@@ -215,6 +388,8 @@ export class NetSession {
       window.clearTimeout(this.joinTimer);
       this.conn?.close();
       this.peer?.destroy();
+      this.relayTimers.forEach((t) => (window.clearTimeout(t), window.clearInterval(t)));
+      this.relays.forEach((c) => c.end(true));
     } catch {
       /* ignore */
     }
