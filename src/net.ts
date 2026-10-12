@@ -23,7 +23,7 @@ export type NetMessage =
   | { t: 'hello'; cls: CharacterClassId; name?: string }
   | { t: 'cfg'; map: MapId; hostCls: CharacterClassId; guestCls: CharacterClassId; seq: number; hostName?: string }
   | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; req: string | null }
-  | { t: 's'; f: any[]; p: any[]; m: any; ev: any[] }
+  | { t: 's'; f: any[]; p: any[]; m: any; ev: any[]; ts?: number }
   | { t: 're'; e: any }
   | { t: 'bye' };
 
@@ -87,8 +87,14 @@ export class NetSession {
   conn: DataConnection | null = null;
   /** host: the guest's latest controls */
   remote: RemoteInput = { mx: 0, mz: 0, yaw: 0, blk: false, req: null, reqTtl: 0 };
-  /** guest: the two latest state snapshots, for interpolation */
-  snaps: { at: number; msg: Extract<NetMessage, { t: 's' }> }[] = [];
+  /** guest: the latest state snapshots (a small jitter buffer), each with its host timestamp */
+  snaps: { at: number; ts: number; msg: Extract<NetMessage, { t: 's' }>; used?: boolean }[] = [];
+  /** guest: local clock minus host clock, plus the smallest network delay seen */
+  clockOff: number | null = null;
+  /** guest: how far behind the host's newest state we draw, sized to the measured jitter */
+  interpDelay = 60;
+  private lastArrive = 0;
+  private jitter = 8;
   /** host: vfx / audio calls recorded this tick, shipped with the next snapshot */
   events: any[] = [];
   /** guest: events waiting to be replayed by the game loop */
@@ -229,9 +235,22 @@ export class NetSession {
       return;
     }
     if (m.t === 's') {
-      this.snaps.push({ at: performance.now(), msg: m });
-      if (this.snaps.length > 3) this.snaps.shift();
-      if (m.ev.length) this.inbox.push(...m.ev);
+      const at = performance.now();
+      const ts = m.ts ?? at;
+      // clock offset: the fastest packet is the best estimate; creep up slowly so a route change is followed
+      const off = at - ts;
+      this.clockOff = this.clockOff === null || off < this.clockOff ? off : this.clockOff + (off - this.clockOff) * 0.01;
+      if (this.lastArrive) {
+        const gap = at - this.lastArrive;
+        this.jitter += (Math.abs(gap - 33) - this.jitter) * 0.05;
+      }
+      this.lastArrive = at;
+      this.interpDelay = Math.min(220, Math.max(this.via === 'relay' ? 70 : 45, 35 + this.jitter * 2.5));
+      this.snaps.push({ at, ts, msg: m });
+      if (this.snaps.length > 12) {
+        const old = this.snaps.shift()!;
+        if (!old.used && old.msg.ev.length) this.inbox.push(...old.msg.ev); // never drop an effect
+      }
       return;
     }
     if (m.t === 'hello') {

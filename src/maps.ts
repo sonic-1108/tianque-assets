@@ -218,7 +218,8 @@ function fordAmount(x: number) {
   return sstepF(f0 - 6, f0, x) * (1 - sstepF(f1, f1 + 6, x));
 }
 /** River bed / forest floor height (without the bridge) */
-export function forestFloor(x: number, z: number) {
+/** steps=false: the bare hillside under the stairs (for the ground mesh, which the stair blocks then sit in) */
+export function forestFloor(x: number, z: number, steps = true) {
   const d = Math.abs(z - riverZ(x));
   // gentle swells on the forest floor, flattened toward the river
   let h = (Math.sin(x * 0.09 + 1.1) * Math.cos(z * 0.08 - 0.7) * 0.5 + Math.sin(x * 0.21 - z * 0.17) * 0.18) * sstepF(FOREST.bankHalf, FOREST.bankHalf + 6, d);
@@ -230,16 +231,38 @@ export function forestFloor(x: number, z: number) {
   const H = FOREST.hill;
   const hd = Math.hypot(x - H.x, z - H.z);
   if (hd < H.r) h = Math.max(h, H.h * sstepF(H.r, H.top, hd));
-  // the temple's stone podium
-  if (hd < H.top) {
+  // the temple's stone podium, its front steps, and the flight of stairs down the hill: real flat treads, so feet
+  // land on the stone instead of sinking into it
+  if (hd < H.r + 1) {
     const [lx, lz] = worldToTemple(x, z);
     const T = FOREST.temple;
     if (Math.abs(lx) < T.w / 2 + 1.4 && Math.abs(lz) < T.d / 2 + 1.4) h = H.h + T.podium;
+    else if (!steps) {
+      /* bare slope */
+    } else if (Math.abs(lx) < PODIUM_STEPS.half && lz > 0 && lz < T.d / 2 + 1.4 + PODIUM_STEPS.n * PODIUM_STEPS.dz)
+      h = H.h + T.podium * (1 - Math.ceil((lz - T.d / 2 - 1.4) / PODIUM_STEPS.dz) / (PODIUM_STEPS.n + 1));
+    else if (Math.abs(lx) < HILL_STAIRS.half) {
+      const t = hillStairTread(lz);
+      if (t !== null) h = Math.max(h, t);
+    }
   }
   // the forest floor rises into the trees beyond the arena
   const r = Math.hypot(x, z);
   h += sstepF(FOREST.radius, FOREST.radius + 14, r) * 4;
   return h;
+}
+/** the podium's front steps (temple-local): n treads of depth dz between the forecourt and the podium top */
+export const PODIUM_STEPS = { half: 2.2, n: 2, dz: 0.45 };
+/** the stone stairs down the hill's front slope (temple-local, along +z) */
+export const HILL_STAIRS = { half: 1.6, z0: 13, rise: 0.3 };
+/** height of the stair tread at temple-local lz, or null off the flight */
+export function hillStairTread(lz: number): number | null {
+  const H = FOREST.hill;
+  const S = HILL_STAIRS;
+  if (lz < S.z0 || lz > H.r - 0.15) return null;
+  // equal risers: the slope is cut into flat treads, never below the hillside
+  const nat = H.h * sstepF(H.r, H.top, lz);
+  return Math.min(H.h, Math.ceil(nat / S.rise - 1e-4) * S.rise);
 }
 /** Is (x, z) on the footbridge deck? Returns the deck height, or null */
 export function bridgeDeck(x: number, z: number) {

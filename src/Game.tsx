@@ -92,6 +92,22 @@ const colorFor = (slot: number, c: CombatantState) =>
 /** 禅定结界 radius */
 const ZEN_R = 4.5;
 /** 梯云纵: seconds to run up a lookout tree */
+/** a fighter as sent to the guest: numbers rounded to millimetres / milliseconds (about half the bytes) */
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+function slimFighter(c: CombatantState) {
+  const o: any = {};
+  for (const k in c) {
+    const v = (c as any)[k];
+    if (typeof v === 'number') o[k] = r3(v);
+    else if (Array.isArray(v) && typeof v[0] === 'number') o[k] = v.map((x: number) => (typeof x === 'number' ? r3(x) : x));
+    else if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const q: any = {};
+      for (const kk in v) q[kk] = typeof v[kk] === 'number' ? r3(v[kk]) : v[kk];
+      o[k] = q;
+    } else o[k] = v;
+  }
+  return o;
+}
 const TREE_RUN_T = 1.0;
 /** 青冥古林: each fighter's own grip (sole friction), before the weather */
 const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMage: 0.95 };
@@ -564,6 +580,7 @@ export function Game({
       c.pos[2] += c.vel[2] * cdt;
       ledgeGuard(c, px0, pz0);
       mountainWall(i, c, px0, pz0);
+      stepWall(c, px0, pz0);
       const free = c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || c.actionState === 'skill_2';
       if (!free || c.actionState === 'dodge') {
         const k = Math.exp(-4.5 * cdt);
@@ -767,7 +784,7 @@ export function Game({
       netSendRef.current = nowMs;
       net.send({
         t: 's',
-        f: [p1, en],
+        f: [slimFighter(p1), slimFighter(en)],
         p: projRef.current.map((pr) => [
           pr.kind,
           +pr.pos.x.toFixed(3),
@@ -785,6 +802,7 @@ export function Game({
         ]),
         m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, branches: mapRuntime.branches.map((b) => ({ ...b })) },
         ev: net.events.splice(0),
+        ts: nowMs,
       });
     }
 
@@ -817,10 +835,25 @@ export function Game({
       // ---- host state -> our two fighters (we are the host's slot 1)
       const snaps = n.snaps;
       if (snaps.length) {
-        const s1 = snaps[snaps.length - 1];
-        const s0 = snaps.length > 1 ? snaps[snaps.length - 2] : s1;
-        const span = Math.max(16, s1.at - s0.at);
-        const k = THREE.MathUtils.clamp((performance.now() - s1.at) / span, 0, 1);
+        // draw the host's state a little in the past, between the two snapshots around that moment
+        const renderT = performance.now() - (n.clockOff ?? 0) - n.interpDelay;
+        let j = snaps.length - 1;
+        while (j > 0 && snaps[j - 1].ts > renderT) j--;
+        const s1 = snaps[j];
+        const s0 = j > 0 ? snaps[j - 1] : s1;
+        const span = Math.max(1, s1.ts - s0.ts);
+        // past the newest packet: extrapolate a touch, then hold
+        const k = s0 === s1 ? 1 : THREE.MathUtils.clamp((renderT - s0.ts) / span, 0, j === snaps.length - 1 ? 1.25 : 1);
+        // effects and sounds play when their snapshot is reached, in step with the motion
+        for (const sn of snaps) {
+          if (sn.used || sn.ts > renderT) continue;
+          sn.used = true;
+          if (sn.msg.ev.length) n.inbox.push(...sn.msg.ev);
+        }
+        if (!s1.used && s1 === snaps[0]) {
+          s1.used = true;
+          if (s1.msg.ev.length) n.inbox.push(...s1.msg.ev);
+        }
         const fresh = s1 !== lastSnapRef.current;
         ([[p1, 1], [en, 0]] as [CombatantState, number][]).forEach(([c, idx], local) => {
           const a = s0.msg.f[idx];
@@ -2838,6 +2871,35 @@ export function Game({
         c.pos[2] = pz0;
         c.vel[2] = 0;
       } else if (!blocked(px0, nz)) {
+        c.pos[0] = px0;
+        c.vel[0] = 0;
+      } else {
+        c.pos[0] = px0;
+        c.pos[2] = pz0;
+        c.vel[0] = c.vel[2] = 0;
+      }
+    }
+
+    /** 青冥古林: a walking fighter climbs stairs; a waist-high ledge (the temple podium's sides) gets a small hop, higher ones block */
+    function stepWall(c: CombatantState, px0: number, pz0: number) {
+      if (map.id !== 'forest' || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
+      if (c.pos[0] === px0 && c.pos[2] === pz0) return;
+      const tooHigh = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.55;
+      if (!tooHigh(c.pos[0], c.pos[2])) return;
+      const rise = terrainHeight(map.id, c.pos[0], c.pos[2]) - c.pos[1];
+      if (rise < 1.3 && (c.actionState === 'idle' || c.actionState === 'run')) {
+        // a light hop up onto it instead of popping through the stone
+        c.pos[0] = px0;
+        c.pos[2] = pz0;
+        c.vel[1] = Math.sqrt(2 * gravity * (rise + 0.35));
+        c.isGrounded = false;
+        c.actionState = 'jump';
+        return;
+      }
+      if (!tooHigh(c.pos[0], pz0)) {
+        c.pos[2] = pz0;
+        c.vel[2] = 0;
+      } else if (!tooHigh(px0, c.pos[2])) {
         c.pos[0] = px0;
         c.vel[0] = 0;
       } else {

@@ -4,7 +4,7 @@ import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS } from '../../maps';
+import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -20,7 +20,7 @@ const R = FOREST.radius; // arena radius
 const RIVER_GLSL = /* glsl */ `
   float riverZ(float x){ return 2.0 + 6.0 * sin(x * 0.045 + 0.4) + 2.0 * sin(x * 0.11 + 1.3); }
 `;
-const floorAt = (x: number, z: number) => forestFloor(x, z);
+const floorAt = (x: number, z: number) => forestFloor(x, z, false);
 
 /** shared uniforms: time and wind gust */
 const shared = { uTime: { value: 0 }, uGust: { value: 0 }, uRain: { value: 0 }, uNight: { value: 0 } };
@@ -892,7 +892,7 @@ const dry = (x: number, z: number, pad = 0.15) => floorAt(x, z) > FOREST.waterY 
 const paved = (x: number, z: number) => {
   if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.top - 0.4) return true;
   const [lx, lz] = worldToTemple(x, z);
-  return Math.abs(lx) < 1.7 && lz > 0 && lz < FOREST.hill.r + 1.5;
+  return Math.abs(lx) < 2.1 && lz > 0 && lz < FOREST.hill.r + 1.5;
 };
 
 function Grass() {
@@ -1988,14 +1988,28 @@ function Temple() {
   const roofLow = useMemo(() => hipRoof(T.w + 4.4, T.d + 4.2, 1.6, T.w + 1.6, 0.75), [T]);
   const roofHigh = useMemo(() => hipRoof(T.w + 2.0, T.d + 1.8, 2.8, T.w * 0.5, 0.65), [T]);
   const bellRoof = useMemo(() => hipRoof(3.8, 3.8, 1.4, 0.3, 0.4), []);
+  // stair blocks built from the same treads the fighters walk on (maps.ts hillStairTread), sunk into the slope
   const steps = useMemo(() => {
-    const out: [number, number, number][] = [];
-    for (let lz = T.d / 2 + 5.5; lz < H.r + 1; lz += 0.55) {
-      const [x, z] = templeToWorld(0, lz);
-      out.push([0, forestFloor(x, z) - H.h, lz]);
+    const out: { y: number; z: number; d: number; h: number }[] = [];
+    let start = HILL_STAIRS.z0;
+    let cur = hillStairTread(start);
+    const push = (end: number) => {
+      if (cur === null || cur <= H.h * 0.001 + 1e-6 || end - start < 0.01) return;
+      const top = cur - H.h;
+      const h = 1.2;
+      out.push({ y: top - h / 2, z: (start + end) / 2, d: end - start, h });
+    };
+    for (let lz = HILL_STAIRS.z0; lz <= H.r; lz += 0.01) {
+      const t = hillStairTread(lz);
+      if (t !== cur) {
+        push(lz);
+        start = lz;
+        cur = t;
+      }
     }
+    push(H.r - 0.15);
     return out;
-  }, [H, T]);
+  }, [H]);
   const altarCandles = useMemo(() => [[-0.7, 0.32], [0.7, 0.32]] as [number, number][], []);
   const flames = useRef<(THREE.Sprite | null)[]>([]);
   const lights = useRef<(THREE.PointLight | null)[]>([]);
@@ -2043,11 +2057,15 @@ function Temple() {
       <mesh position={[0, P + 0.03, 0]} material={mats.plain} receiveShadow>
         <boxGeometry args={[T.w + 3.0, 0.08, T.d + 3.0]} />
       </mesh>
-      {[0, 1, 2].map((k) => (
-        <mesh key={'ps' + k} position={[0, (P * (k + 1)) / 3 / 2, T.d / 2 + 1.4 + 0.4 * (3 - k)]} material={mats.plain} castShadow receiveShadow>
-          <boxGeometry args={[4.4, (P * (k + 1)) / 3, 0.8]} />
-        </mesh>
-      ))}
+      {/* front steps: exactly the treads in maps.ts (PODIUM_STEPS) */}
+      {Array.from({ length: PODIUM_STEPS.n }, (_, k) => {
+        const hgt = P * (1 - (k + 1) / (PODIUM_STEPS.n + 1));
+        return (
+          <mesh key={'ps' + k} position={[0, hgt / 2, T.d / 2 + 1.4 + PODIUM_STEPS.dz * (k + 0.5)]} material={mats.plain} castShadow receiveShadow>
+            <boxGeometry args={[PODIUM_STEPS.half * 2, hgt, PODIUM_STEPS.dz + 0.01]} />
+          </mesh>
+        );
+      })}
       {/* polished floor inside the hall */}
       <mesh position={[0, P + 0.075, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.inner} receiveShadow>
         <planeGeometry args={[T.w, T.d]} />
@@ -2265,10 +2283,20 @@ function Temple() {
           </mesh>
         </group>
       ))}
-      {steps.map((p, i) => (
-        <mesh key={'s' + i} position={p} material={mats.plain} receiveShadow>
-          <boxGeometry args={[3.2, 0.22, 0.6]} />
+      {steps.map((s, i) => (
+        <mesh key={'s' + i} position={[0, s.y, s.z]} material={mats.plain} receiveShadow castShadow>
+          <boxGeometry args={[HILL_STAIRS.half * 2, s.h, s.d + 0.01]} />
         </mesh>
+      ))}
+      {/* low stone kerbs along both sides of the flight */}
+      {[-1, 1].map((sx) => (
+        <group key={'kb' + sx}>
+          {steps.map((s, i) => (
+            <mesh key={i} position={[sx * (HILL_STAIRS.half + 0.15), s.y + 0.12, s.z]} material={mats.stone}>
+              <boxGeometry args={[0.3, s.h, s.d + 0.01]} />
+            </mesh>
+          ))}
+        </group>
       ))}
       {/* the candle-shade: a paper shade in a bronze frame, hidden somewhere in the temple grounds */}
       <group ref={shadeRef}>
