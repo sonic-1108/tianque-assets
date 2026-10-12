@@ -343,7 +343,7 @@ function Ground() {
             col = mix(col, vec3(0.1, 0.08, 0.05), roots * 0.35 * (1.0 - leafy));
             // river: pebbles and silt below the surface, dark wet mud along the waterline
             float below = smoothstep(uWaterY + 0.05, uWaterY - 0.25, vWP.y);
-            gWet = 1.0 - smoothstep(uWaterY + 0.1, uWaterY + 0.9 + n2 * 0.5, vWP.y);
+            gWet = (1.0 - smoothstep(uWaterY + 0.1, uWaterY + 0.9 + n2 * 0.5, vWP.y)) * (1.0 - smoothstep(9.0, 11.0, abs(vWP.z - riverZ(vWP.x))));
             float peb = smoothstep(0.45, 0.62, noise(p * 7.0)) * 0.6 + noise(p * 18.0) * 0.4;
             vec3 bed = mix(vec3(0.17, 0.16, 0.12), vec3(0.42, 0.39, 0.32), peb);
             bed = mix(bed, vec3(0.12, 0.13, 0.08), smoothstep(uWaterY - 0.8, uWaterY - 2.2, vWP.y) * 0.7); // deep: silt and weed
@@ -1059,7 +1059,7 @@ function Stones() {
             float mossy = smoothstep(0.3, 0.7, normalize(vWN).y + (noise(vWP.xz * 2.5) - 0.5) * 0.8);
             // wet and dark where the river laps at it
             rock *= mix(1.0, 0.55, 1.0 - smoothstep(${FOREST.waterY.toFixed(2)}, ${(FOREST.waterY + 0.35).toFixed(2)}, vWP.y));
-            diffuseColor.rgb = mix(rock, vec3(0.16, 0.26, 0.07), mossy * 0.85 * smoothstep(${(FOREST.waterY + 0.1).toFixed(2)}, ${(FOREST.waterY + 0.4).toFixed(2)}, vWP.y));
+            diffuseColor.rgb = mix(rock * 0.75, vec3(0.08, 0.13, 0.04), mossy * 0.6 * smoothstep(${(FOREST.waterY + 0.1).toFixed(2)}, ${(FOREST.waterY + 0.4).toFixed(2)}, vWP.y));
           }`
         );
     };
