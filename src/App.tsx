@@ -756,13 +756,11 @@ export default function App() {
             if (aiEnabledRef.current !== on) toggleAI();
           }}
           mapId={mapId}
-          onSelectMap={(id) => {
+          onSelectMap={() => gameAudio.playCrispClick()}
+          onStart={(id) => {
+            if (!MAPS[id].available) return;
             gameAudio.playCrispClick();
             setMapId(id);
-          }}
-          onStart={() => {
-            if (!MAPS[mapId].available) return;
-            gameAudio.playCrispClick();
             setRoundBanner(null);
             setIsMapSelectOpen(false);
             requestGameFocus();

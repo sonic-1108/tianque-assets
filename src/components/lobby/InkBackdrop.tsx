@@ -63,7 +63,7 @@ function ridgeY(r: Range, n: (x: number) => number, n2: (x: number) => number) {
 }
 
 function paintRange(cv: HTMLCanvasElement, r: Range) {
-  const scale = Math.min(1.5, window.devicePixelRatio || 1);
+  const scale = Math.min(1.25, window.devicePixelRatio || 1);
   cv.width = W * scale;
   cv.height = H * scale;
   const g = cv.getContext('2d')!;
@@ -76,7 +76,6 @@ function paintRange(cv: HTMLCanvasElement, r: Range) {
   const [R, G, B] = r.ink;
   const ink = (a: number) => `rgba(${R},${G},${B},${Math.max(0, Math.min(1, a))})`;
   // 1. the wash: ink bleeding down from the ridge, each column a little different (streaks like a loaded brush)
-  g.filter = 'blur(0.7px)';
   for (let x = -20; x < W + 20; x += 1) {
     const y0 = y(x);
     const len = r.depth * (0.5 + 0.7 * n3(x * 0.012));
@@ -89,7 +88,19 @@ function paintRange(cv: HTMLCanvasElement, r: Range) {
     g.fillStyle = grd;
     g.fillRect(x, y0 - 1, 1.6, len);
   }
-  g.filter = 'none';
+  // soften the wash once (wet ink bleeding into the paper), instead of blurring every stroke
+  {
+    const tmp = document.createElement('canvas');
+    tmp.width = cv.width;
+    tmp.height = cv.height;
+    const t = tmp.getContext('2d')!;
+    t.filter = 'blur(0.8px)';
+    t.drawImage(cv, 0, 0);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(tmp, 0, 0);
+    g.setTransform(scale, 0, 0, scale, 0, 0);
+  }
   // 2. 皴: short dry strokes running down the slopes, following the fall line
   for (let k = 0; k < r.texture; k++) {
     const x = rand() * (W + 40) - 20;
@@ -153,7 +164,7 @@ function paintRange(cv: HTMLCanvasElement, r: Range) {
 
 /** a gnarled pine reaching in from the lower left, needles in fan-shaped clusters */
 function paintPine(cv: HTMLCanvasElement) {
-  const scale = Math.min(1.5, window.devicePixelRatio || 1);
+  const scale = Math.min(1.25, window.devicePixelRatio || 1);
   cv.width = W * scale;
   cv.height = H * scale;
   const g = cv.getContext('2d')!;
@@ -207,12 +218,43 @@ function paintPine(cv: HTMLCanvasElement) {
     fan(x, y, s);
 }
 
-function Canvas({ paint, z, className }: { paint: (c: HTMLCanvasElement) => void; z: number; className?: string }) {
+/** painted layers are kept for the whole visit: the name screen and the lobby share them */
+const painted = new Map<(c: HTMLCanvasElement) => void, HTMLCanvasElement>();
+const idle = (fn: () => void, order: number) => {
+  const ric = (window as any).requestIdleCallback as ((cb: () => void, o?: { timeout: number }) => number) | undefined;
+  if (ric) ric(fn, { timeout: 400 + order * 250 });
+  else window.setTimeout(fn, 60 + order * 120);
+};
+
+function Canvas({ paint, z, className, order }: { paint: (c: HTMLCanvasElement) => void; z: number; className?: string; order: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const [ready, setReady] = React.useState(() => painted.has(paint));
   useEffect(() => {
-    if (ref.current) paint(ref.current);
-  }, [paint]);
-  return <canvas ref={ref} className={`tq-layer ${className ?? ''}`} style={{ zIndex: z }} />;
+    let alive = true;
+    const show = (src: HTMLCanvasElement) => {
+      const cv = ref.current;
+      if (!cv || !alive) return;
+      cv.width = src.width;
+      cv.height = src.height;
+      cv.getContext('2d')!.drawImage(src, 0, 0);
+      setReady(true);
+    };
+    const have = painted.get(paint);
+    if (have) show(have);
+    else
+      // one layer per idle slot, so the page (and the game loading behind it) never stalls on the painting
+      idle(() => {
+        if (!alive) return;
+        const off = document.createElement('canvas');
+        paint(off);
+        painted.set(paint, off);
+        show(off);
+      }, order);
+    return () => {
+      alive = false;
+    };
+  }, [paint, order]);
+  return <canvas ref={ref} className={`tq-layer ${className ?? ''}`} style={{ zIndex: z, opacity: ready ? undefined : 0, transition: 'opacity .9s ease' }} />;
 }
 
 /** an immortal on a red-crowned crane, wings beating slowly, ribbons streaming behind */
@@ -278,22 +320,22 @@ export function InkBackdrop({ poem = true }: { poem?: boolean }) {
         <path d="M30 4 Q33 1 36 4 Q39 1 42 4" stroke="#3a3833" strokeWidth="0.8" fill="none" />
         <path d="M44 14 Q46.5 11.5 49 14 Q51.5 11.5 54 14" stroke="#3a3833" strokeWidth="0.7" fill="none" />
       </svg>
-      <Canvas paint={paintFar} z={2} />
+      <Canvas paint={paintFar} z={2} order={0} />
       <div className="tq-cloud" style={{ zIndex: 3, top: '44%', animationDuration: '130s', animationDelay: '-20s' }} />
       <div className="tq-crane">
         <div className="tq-crane-bob">
           <CraneRider />
         </div>
       </div>
-      <Canvas paint={paintMid} z={5} />
+      <Canvas paint={paintMid} z={5} order={1} />
       <div className="tq-cloud tq-cloud-b" style={{ zIndex: 6, top: '58%', animationDuration: '105s', animationDelay: '-70s' }} />
       <div className="tq-cloud" style={{ zIndex: 6, top: '64%', animationDuration: '160s', animationDelay: '-110s', opacity: 0.8 }} />
-      <Canvas paint={paintNear} z={7} />
+      <Canvas paint={paintNear} z={7} order={2} />
       <div className="tq-ground-mist" />
       <div className="tq-lake">
         <LoneBoat />
       </div>
-      <Canvas paint={paintPine} z={10} className="tq-pine" />
+      <Canvas paint={paintPine} z={10} className="tq-pine" order={3} />
       {poem && (
         <div className="tq-poem">
           <span>只在此山中</span>

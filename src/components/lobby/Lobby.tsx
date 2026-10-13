@@ -39,7 +39,8 @@ export interface LobbyProps {
   onAI: (on: boolean) => void;
   mapId: MapId;
   onSelectMap: (id: MapId) => void;
-  onStart: () => void;
+  /** start a match on this battlefield (the game only switches maps here, never while you browse) */
+  onStart: (id: MapId) => void;
   /** online guest: the host picks the battlefield */
   hostPicks: boolean;
   onlinePanel: React.ReactNode;
@@ -50,7 +51,9 @@ export interface LobbyProps {
 export function Lobby(p: LobbyProps) {
   const [showOnline, setShowOnline] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const map = MAPS[p.mapId];
+  // the battlefield you're looking at; the live game keeps its map until you press 出征
+  const [pick, setPick] = useState<MapId>(p.mapId);
+  const map = MAPS[pick];
   return (
     <div className="tq-lobby fixed inset-0 z-50 select-none">
       <style>{LOBBY_CSS}</style>
@@ -171,17 +174,17 @@ export function Lobby(p: LobbyProps) {
           <div className="tq-maps">
             {MAP_ORDER.map((id) => {
               const m = MAPS[id];
-              const on = id === p.mapId;
+              const on = id === pick;
               return (
                 <button
                   key={id}
                   disabled={!m.available || p.hostPicks}
                   className={`tq-map ${on ? 'on' : ''}`}
-                  onClick={() => p.onSelectMap(id)}
-                  onDoubleClick={() => {
+                  onClick={() => {
+                    setPick(id);
                     p.onSelectMap(id);
-                    p.onStart();
                   }}
+                  onDoubleClick={() => p.onStart(id)}
                   title={m.subtitle}
                 >
                   <img
@@ -195,7 +198,7 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          <button className="tq-go" disabled={p.hostPicks} onClick={p.onStart}>
+          <button className="tq-go" disabled={p.hostPicks || !map.available} onClick={() => p.onStart(pick)}>
             {p.hostPicks ? (
               <small>等房主
                 <br />
