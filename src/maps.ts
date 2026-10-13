@@ -8,6 +8,8 @@ export interface Circle {
   r: number;
   /** top height a fighter can stand on (undefined = too tall, solid) */
   h?: number;
+  /** bottom: what it stands on (怒海战船 crates sit on a deck; below that deck they aren't there). Default: all the way down */
+  y0?: number;
   /** a platform round a trunk: you stand on the ring between r and deck at height h, the trunk stays solid */
   deck?: number;
   /** can be climbed (青冥古林 lookout trees) */
@@ -161,7 +163,7 @@ export const MEDITATE = { secs: 4, share: 0.1 };
 /** most things that can lie about at once */
 export const MAX_ITEMS = 8;
 /** how far a candle lights up around itself (metres): carried, set down, hung high in a tree */
-export const CANDLE_LIGHT = { hand: 10, ground: 9, hook: 18 };
+export const CANDLE_LIGHT = { hand: 10, ground: 9, hook: 28 };
 /** the altar's world position (candles are taken here) */
 export function altarPos(): [number, number] {
   return templeToWorld(0, -2.4);
@@ -1052,7 +1054,8 @@ function buildShipBoxes() {
         const zb = f.foot + ((f.head - f.foot) * (k + 1)) / f.n;
         const x0 = sd > 0 ? L.stairX : sd < 0 ? -W : -hold.hole.x;
         const x1 = sd > 0 ? W : sd < 0 ? -L.stairX : hold.hole.x;
-        box(x0, x1, f.y0, f.y0 + (f.rise * (k + 1)) / f.n, Math.min(za, zb), Math.max(za, zb), 'tread');
+        // (a hair of overlap so there's never a crack between two steps)
+        box(x0, x1, f.y0, f.y0 + (f.rise * (k + 1)) / f.n, Math.min(za, zb) - 0.01, Math.max(za, zb) + 0.01, 'tread');
       }
   return out;
 }
@@ -1073,7 +1076,7 @@ export function shipCeilAt(x: number, z: number, y: number) {
 /** would a fighter (radius r) with feet at y overlap something solid here? Low steps don't count */
 export function shipBlocked(x: number, z: number, y: number, r = 0.38) {
   // stair treads are shallow: a smaller reach there, so the next step up never counts as a wall
-  for (const b of SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inXZ(b, x, z, b.kind === 'tread' ? Math.min(r, 0.26) : r)) return true;
+  for (const b of SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inXZ(b, x, z, b.kind === 'tread' ? Math.min(r, 0.05) : r)) return true;
   return false;
 }
 /** is the point inside a solid (camera, projectiles) */
@@ -1081,6 +1084,8 @@ export function shipSolidAt(x: number, y: number, z: number, r = 0) {
   for (const b of SHIP_BOXES) if (y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
   return false;
 }
+// the crates and crossbow posts stand on whatever deck is under them, and only there
+for (const p of MAPS.sea.pillars || []) if (p.h !== undefined) p.y0 = shipFloorAt(p.x, p.z, p.h - 0.9);
 /** which room or deck a point is on (for the AI's routing) */
 export type ShipRegion = 'hold' | 'deck' | 'foreCabin' | 'fore' | 'greatCabin' | 'quarter' | 'captain' | 'poop' | 'hall' | 'castle' | 'lookout' | 'roof';
 export function shipLevel(y: number) {

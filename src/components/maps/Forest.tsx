@@ -2495,7 +2495,7 @@ function PlacedItems() {
       }
       if (P.halo) {
         P.halo.visible = candle && it.lit;
-        const h = (hung ? 2.2 : 1.4) * (0.9 + 0.1 * fl);
+        const h = (hung ? 4.2 : 1.4) * (0.9 + 0.1 * fl);
         P.halo.scale.set(h, h, 1);
         P.halo.position.y = (hung ? -0.32 : 0) + 0.38;
       }
@@ -2515,8 +2515,8 @@ function PlacedItems() {
       const hung = e.it.hook >= 0;
       l.position.set(e.it.x, e.it.y + (hung ? 0.1 : 0.45), e.it.z);
       l.distance = hung ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground;
-      l.intensity = (hung ? 34 : 11) * (0.9 + 0.1 * Math.sin(t * 13 + n * 3));
-      l.decay = 1.2;
+      l.intensity = (hung ? 90 : 11) * (0.9 + 0.1 * Math.sin(t * 13 + n * 3));
+      l.decay = hung ? 0.9 : 1.2;
     });
   });
   return (

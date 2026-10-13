@@ -1,3 +1,4 @@
+import { shipSteer, newNavState, shipGraph } from './shipNav';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -292,6 +293,7 @@ function GameImpl({
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
+  const shipNavRef = useRef(newNavState());
   const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
@@ -3034,7 +3036,7 @@ function GameImpl({
             }
             let wall = map.id === 'sea' && shipSolidAt(p.pos.x, p.pos.y, p.pos.z);
             for (const pl of pillars) {
-              if (p.pos.y < (pl.deck ? 99 : pl.h ?? 99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
+              if (p.pos.y < (pl.deck ? 99 : pl.h ?? 99) && p.pos.y > (pl.y0 ?? -99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
                 wall = true;
                 break;
               }
@@ -3297,6 +3299,8 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
+      shipNavRef.current = newNavState();
+      if (map.id === 'sea') shipGraph();
       shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
@@ -3407,6 +3411,8 @@ function GameImpl({
         return shipFloorAt(x, z, y + 2) > base + 0.65;
       };
       if (!blocked(c.pos[0], c.pos[2])) return;
+      // already brushing a wall where we stood (landed right against it): let them walk out rather than freezing them there
+      if (shipBlocked(px0, pz0, y) && !(!c.isGrounded && shipFloorAt(c.pos[0], c.pos[2], y + 2) > base + 0.65) && !shipBlocked(c.pos[0], c.pos[2], y, 0.2)) return;
       if (!blocked(c.pos[0], pz0)) {
         c.pos[2] = pz0;
         c.vel[2] = 0;
@@ -3639,6 +3645,7 @@ function GameImpl({
       }
       for (const pl of map.pillars || []) {
         if (!pl.deck && c.pos[1] >= (pl.h ?? 99) - 0.45) continue; // standing on (or above) it
+        if (c.pos[1] + 1.75 < (pl.y0 ?? -99)) continue; // under the deck it stands on
         const dx = c.pos[0] - pl.x;
         const dz = c.pos[2] - pl.z;
         const dd = Math.hypot(dx, dz);
@@ -4074,7 +4081,7 @@ function GameImpl({
               c.candle = 0;
               c.shade = false;
               spark(h.x, h.y + 0.2, h.z);
-              say(items[items.length - 1].lit ? '蜡烛挂上了 · 整个瞭望台都亮了' : '挂上了，但它没点着');
+              say(items[items.length - 1].lit ? '灯笼挂上了 · 照亮一大片林子，天亮得更快' : '挂上了，但它没点着');
             });
           } else
             offer(90, '', () => {
@@ -4177,7 +4184,9 @@ function GameImpl({
         W.t = jumpTo;
         (globalThis as any).__TQ_WEATHER_T = undefined;
       }
-      if (!round.over) W.t += dt;
+      // a candle hung on a lookout tree hurries the night along: dawn comes 1.5x as fast
+      const lanternUp = mapRuntime.night > 0.5 && mapRuntime.items.some((it) => it.kind === 'candle' && it.hook >= 0 && it.lit);
+      if (!round.over) W.t += dt * (lanternUp ? 1.5 : 1);
       const cyc = WEATHER.clear + WEATHER.cloud + WEATHER.rain + WEATHER.storm + WEATHER.ease + WEATHER.dusk + WEATHER.night + WEATHER.dawn;
       const t = W.t % cyc;
       let rainT = 0;
@@ -4635,7 +4644,7 @@ function GameImpl({
           }
           let wall = shipSolidAt(bo.x, bo.y, bo.z) || bo.y < shipFloorAt(bo.x, bo.z, bo.y) + 0.02;
           if (!wall)
-            for (const pl of map.pillars || []) if (bo.y < (pl.h ?? 99) && Math.hypot(bo.x - pl.x, bo.z - pl.z) < pl.r) wall = true;
+            for (const pl of map.pillars || []) if (bo.y < (pl.h ?? 99) && bo.y > (pl.y0 ?? -99) && Math.hypot(bo.x - pl.x, bo.z - pl.z) < pl.r) wall = true;
           if (wall) {
             bo.stuck = true;
             bo.t = 3;
@@ -4799,86 +4808,17 @@ function GameImpl({
           }
         }
       }
-      const from = shipRegion(me.pos[0], me.pos[1], me.pos[2]);
-      const to = shipRegion(tx, ty, tz);
-      if (from === to) {
+      // walk the ship's floor graph: stairs, doors, the hatch, round the crates and the hatch rail
+      const st = shipSteer(shipNavRef.current, { x: me.pos[0], y: me.pos[1], z: me.pos[2], grounded: me.isGrounded }, tx, ty, tz, dt, S.goal >= 0);
+      if (!st) {
         if (S.goal >= 0) {
           out.move.set(tx - me.pos[0], 0, tz - me.pos[2]);
           if (out.move.lengthSq() > 0.01) out.move.normalize();
           out.request = null;
         }
-        S.edge = '';
         return;
       }
-      // breadth-first over the rooms and decks: doors between a deck and the cabin under the next deck up,
-      // stairs (both ways) between decks
-      const L = SHIP_LAYOUT;
-      const sx = (me.pos[0] >= 0 ? 1 : -1) * 10.3; // the middle of the side flight on its own side
-      const ways: Record<string, [number, number][]> = {};
-      const door = (a: ShipRegion, b: ShipRegion, edge: number, inward: 1 | -1) => {
-        ways[`${a}>${b}`] = [[0, edge - inward * 1.1], [0, edge + inward * 1.5]];
-        ways[`${b}>${a}`] = [[0, edge + inward * 1.1], [0, edge - inward * 1.5]];
-      };
-      const stairs = (lo: ShipRegion, hi: ShipRegion, f: (typeof L.flights)[number], x: number) => {
-        const dir = Math.sign(f.head - f.foot);
-        const foot: [number, number] = [x, f.foot - dir * 0.9];
-        const head: [number, number] = [x, f.head + dir * 0.9];
-        ways[`${lo}>${hi}`] = [foot, head];
-        ways[`${hi}>${lo}`] = [head, foot];
-      };
-      const F = L.flights;
-      door('deck', 'foreCabin', L.fore.edge, -1);
-      door('deck', 'greatCabin', L.tiers[0].edge, 1);
-      door('quarter', 'captain', L.tiers[1].edge, 1);
-      door('poop', 'hall', L.tiers[2].edge, 1);
-      door('castle', 'lookout', L.tiers[3].edge, 1);
-      stairs('deck', 'fore', F[0], sx);
-      stairs('deck', 'quarter', F[1], sx);
-      stairs('quarter', 'poop', F[2], sx);
-      stairs('poop', 'castle', F[3], sx);
-      stairs('castle', 'roof', F[4], sx);
-      stairs('hold', 'deck', F[5], 0);
-      const adj: Partial<Record<ShipRegion, ShipRegion[]>> = {};
-      for (const k of Object.keys(ways)) {
-        const [a, b] = k.split('>') as [ShipRegion, ShipRegion];
-        (adj[a] ||= []).push(b);
-      }
-      const prev: Partial<Record<ShipRegion, ShipRegion>> = { [from]: from };
-      const q: ShipRegion[] = [from];
-      while (q.length) {
-        const r = q.shift()!;
-        if (r === to) break;
-        for (const n of adj[r] || []) if (!(n in prev)) { prev[n] = r; q.push(n); }
-      }
-      if (!(to in prev)) return;
-      let next: ShipRegion = to;
-      while (prev[next] !== from && prev[next] !== undefined && prev[next] !== next) next = prev[next]!;
-      const key = `${from}>${next}`;
-      const w = ways[key];
-      if (!w) return;
-      if (S.edge !== key) {
-        S.edge = key;
-        S.stage = 0;
-        S.y0 = me.pos[1];
-      }
-      if (S.stage === 0 && Math.hypot(w[0][0] - me.pos[0], w[0][1] - me.pos[2]) < 0.7) S.stage = 1;
-      // knocked off the flight partway up: back to its foot and start again
-      if (S.stage === 1 && me.isGrounded && Math.abs(me.pos[0] - w[0][0]) > 1.6 && Math.abs(w[1][1] - w[0][1]) > 3 && shipRegion(me.pos[0], me.pos[1], me.pos[2]) === from && Math.abs(me.pos[1] - S.y0) < 0.3) S.stage = 0;
-      // not getting anywhere (wedged against a flight or a wall): start this leg again; still stuck, give up the errand
-      if (Math.hypot(me.pos[0] - S.lx, me.pos[2] - S.lz) > 0.4) {
-        S.lx = me.pos[0];
-        S.lz = me.pos[2];
-        S.stuckT = 0;
-      } else if (me.isGrounded && isFree(me) && (S.stuckT += dt) > 1.5) {
-        S.stuckT = 0;
-        if (S.stage === 1) S.stage = 0;
-        else if (S.goal >= 0) {
-          S.goal = -1;
-          S.cool = 8;
-        }
-      }
-      const pt = w[S.stage];
-      out.move.set(pt[0] - me.pos[0], 0, pt[1] - me.pos[2]);
+      out.move.set(st.x - me.pos[0], 0, st.z - me.pos[2]);
       if (out.move.lengthSq() > 0.01) out.move.normalize();
       // on the way (up the stairs especially) nothing that throws it sideways or stops it: no charges, dodges, jumps, no blocking
       out.request = null;

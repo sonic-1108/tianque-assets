@@ -11,11 +11,11 @@ import { mapRuntime } from '../../maps';
 const G = 9.8;
 /** [direction (rad), wavelength m, amplitude m, sharpness (0..~0.15, sums below 1)] */
 const WAVES: [number, number, number, number][] = [
-  [0.2, 92, 1.7, 0.1],
-  [1.05, 61, 1.05, 0.1],
-  [-0.35, 33, 0.6, 0.14],
-  [0.62, 21, 0.34, 0.14],
-  [-0.95, 13, 0.19, 0.12],
+  [0.2, 120, 2.6, 0.1],
+  [1.05, 78, 1.6, 0.11],
+  [-0.35, 41, 0.9, 0.14],
+  [0.62, 25, 0.5, 0.15],
+  [-0.95, 15, 0.27, 0.13],
   [0.35, 8.4, 0.1, 0.1],
   [1.55, 5.3, 0.055, 0.08],
   [-0.2, 3.3, 0.03, 0.06],
@@ -184,7 +184,11 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
         float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
         // storm sky in the reflection: brighter toward the horizon, lit up by lightning
         vec3 R = reflect(-V, n);
-        vec3 sky = mix(vec3(0.11, 0.14, 0.18), vec3(0.03, 0.045, 0.06), clamp(R.y * 1.8, 0.0, 1.0));
+        // the same storm sky as the dome overhead: pale near the horizon, the dark cloud deck above, broken up
+        vec2 cuv = R.xz / (R.y + 0.16) * 0.9 + vec2(uTime * 0.035, uTime * 0.02);
+        float cl = smoothstep(0.35, 0.8, fbm(cuv));
+        vec3 sky = mix(uFog * 1.2, vec3(0.028, 0.038, 0.05), clamp(R.y * 1.8, 0.0, 1.0));
+        sky = mix(sky, vec3(0.1, 0.12, 0.14), (1.0 - cl) * 0.35 * (1.0 - clamp(R.y * 2.0, 0.0, 1.0)));
         sky += uLightning * vec3(0.75, 0.8, 0.95) * (0.4 + 0.6 * clamp(R.y, 0.0, 1.0));
         // the water body: near-black deep, teal where light comes through the thin crests
         vec3 deep = vec3(0.004, 0.018, 0.026);
@@ -438,4 +442,75 @@ export function CrestSpray({ rogue }: { rogue: THREE.Vector4 }) {
     mat.uniforms.uScale.value = s.size.height * 0.5;
   });
   return <points geometry={geo} material={mat} frustumCulled={false} />;
+}
+
+/**
+ * The storm sky over 怒海战船: a dome of heavy, layered cloud racing overhead, a cold pale band where the
+ * cloud thins at the horizon, grey curtains of rain hanging from it, and lightning lighting the cloud
+ * from inside wherever it strikes. Fades into the fog colour at the horizon so the sea meets it cleanly.
+ */
+export function StormSky({ fog }: { fog: string }) {
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: { uTime: { value: 0 }, uLightning: { value: 0 }, uFlash: { value: new THREE.Vector3(0.4, 0.5, -0.7).normalize() }, uFog: { value: new THREE.Color(fog) } },
+        vertexShader: /* glsl */ `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
+        fragmentShader: /* glsl */ `
+          uniform float uTime; uniform float uLightning; uniform vec3 uFlash; uniform vec3 uFog; varying vec3 vDir;
+          ${NOISE}
+          float fbm5(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p=p*2.07+vec2(1.7,9.2); a*=0.5; } return v; }
+          void main(){
+            vec3 d = normalize(vDir);
+            float up = max(d.y, 0.0);
+            // the cloud deck: project onto a plane overhead, two layers drifting at different speeds
+            vec2 uv = d.xz / (d.y + 0.16);
+            float lo = fbm5(uv * 0.9 + vec2(uTime * 0.035, uTime * 0.02));
+            float hi = fbm5(uv * 0.45 - vec2(uTime * 0.012, -uTime * 0.008) + 3.1);
+            float dens = smoothstep(0.32, 0.78, lo * 0.65 + hi * 0.55);
+            vec3 zen = vec3(0.028, 0.038, 0.05);
+            vec3 hor = uFog * 1.15;
+            vec3 col = mix(hor, zen, smoothstep(0.0, 0.55, up));
+            // cloud: dark bellies, paler edges where the thin cloud lets the last light through
+            vec3 belly = vec3(0.018, 0.024, 0.032);
+            vec3 edge = vec3(0.11, 0.13, 0.15);
+            float rim = smoothstep(0.25, 0.55, dens) * (1.0 - smoothstep(0.55, 0.95, dens));
+            vec3 cloud = mix(edge, belly, smoothstep(0.4, 1.0, dens));
+            col = mix(col, cloud, smoothstep(0.1, 0.6, dens) * smoothstep(-0.02, 0.12, d.y));
+            col += vec3(0.05, 0.06, 0.07) * rim * smoothstep(0.0, 0.3, up);
+            // a cold, pale band low on the horizon where the overcast breaks
+            float band = exp(-pow((d.y - 0.035) / 0.05, 2.0)) * (0.55 + 0.45 * fbm5(vec2(atan(d.z, d.x) * 3.0, uTime * 0.02)));
+            col += vec3(0.09, 0.11, 0.12) * band;
+            // rain curtains hanging from the cloud near the horizon
+            float az = atan(d.z, d.x);
+            float curtain = smoothstep(0.55, 0.8, fbm5(vec2(az * 5.0, uTime * 0.05))) * smoothstep(0.22, 0.02, d.y) * smoothstep(-0.03, 0.02, d.y);
+            float streaks = 0.6 + 0.4 * noise(vec2(az * 220.0, d.y * 8.0 + uTime * 3.0));
+            col = mix(col, vec3(0.045, 0.055, 0.065), curtain * 0.7 * streaks);
+            // lightning: the cloud glows from inside around the strike, and the whole deck flickers faintly
+            float near = exp(-pow(acos(clamp(dot(d, uFlash), -1.0, 1.0)) / 0.45, 2.0));
+            col += uLightning * (vec3(0.55, 0.6, 0.75) * near * (0.4 + dens * 1.4) + vec3(0.08, 0.09, 0.12) * dens);
+            // below the horizon: the far sea's haze
+            col = mix(col, uFog, smoothstep(0.02, -0.06, d.y));
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+      }),
+    [fog],
+  );
+  const last = useRef(0);
+  useFrame((st) => {
+    const u = mat.uniforms;
+    u.uTime.value = st.clock.elapsedTime;
+    u.uLightning.value = mapRuntime.lightning;
+    // each new strike lands somewhere else in the sky
+    if (mapRuntime.lightning > 0.9 && last.current <= 0.9) u.uFlash.value.set(Math.random() * 2 - 1, 0.15 + Math.random() * 0.5, Math.random() * 2 - 1).normalize();
+    last.current = mapRuntime.lightning;
+  });
+  if ((globalThis as any).__TQ_NOSKY) return null;
+  return (
+    <mesh material={mat} frustumCulled={false} renderOrder={-10} scale={400}>
+      <sphereGeometry args={[1, 48, 24]} />
+    </mesh>
+  );
 }

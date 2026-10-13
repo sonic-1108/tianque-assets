@@ -6,7 +6,7 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
-import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray } from './maps/Ocean';
+import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray, StormSky } from './maps/Ocean';
 import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
 import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, shipFloorAt, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
@@ -975,7 +975,7 @@ function Rain({ hideUnder }: { hideUnder?: (x: number, y: number, z: number) => 
   return <lineSegments ref={lines} geometry={geo} material={mat} frustumCulled={false} />;
 }
 
-const SEA_Y = -3.4; // the sea surface sits well below the deck: a tall-sided war junk
+const SEA_Y = -3.9; // the sea surface sits well below the deck: a tall-sided war junk
 const MAST_TOP = 31;
 const SAILS = [
   { w: 17, h: 15, y: 19.5 },
@@ -1071,25 +1071,11 @@ function SeaMap() {
   return (
     <group>
       <group ref={worldRef}>
-      <Sky zenith="#05080d" horizon="#22303c" below="#0d151c" sunDir={[0.2, 0.3, -1]} sunColor="#2a3a4a" sunSize={0} streaks={1} streakColor="#3a4a58" />
-      <CloudPuffs count={26} inner={30} outer={140} y={[22, 40]} color="#1a222b" seed={19} />
-      <KarstPeaks
-        seed={91}
-        haze="#1c2731"
-        rock="#05080b"
-        light="#6a7f95"
-        lightDir={[0.2, 0.5, 1]}
-        rimStrength={0.15}
-        baseY={-3}
-        pines={false}
-        layers={[
-          { dist: 110, count: 5, height: [8, 20], radius: [4, 8], haze: 0.25 },
-          { dist: 190, count: 8, height: [15, 40], radius: [8, 16], haze: 0.6 },
-        ]}
-      />
-      <DistantJunk position={[-46, -0.6, -78]} rot={0.5} scale={0.75} />
-      <DistantJunk position={[62, -0.6, -105]} rot={-0.4} scale={0.9} burning />
-      <DistantJunk position={[78, -0.6, 44]} rot={2.4} scale={0.7} />
+      <StormSky fog={def.background} />
+      <DistantJunk position={[-70, -1.2, -120]} rot={0.5} scale={0.9} />
+      <DistantJunk position={[95, -1.2, -150]} rot={-0.4} scale={1.1} burning />
+      <DistantJunk position={[120, -1.2, 60]} rot={2.4} scale={0.9} />
+      <DistantJunk position={[-110, -1.2, 95]} rot={-2.0} scale={1.0} burning />
 
       <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
       <mesh geometry={ocean.geometry} material={ocean.material} position={[0, SEA_Y, 0]} frustumCulled={false} />
