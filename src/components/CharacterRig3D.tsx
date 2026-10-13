@@ -375,6 +375,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
   const climbKickRef = useRef(-1);
   const sitBlendRef = useRef(0);
+  const castRef = useRef(true);
   const limbsRef = useRef<Limbs | null>(null);
   const ladderBlendRef = useRef(0);
   const ladderPhaseRef = useRef(0);
@@ -654,6 +655,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // 青冥寺: sitting in meditation on a prayer cushion
     sitBlendRef.current = THREE.MathUtils.damp(sitBlendRef.current, (c.meditateT ?? 0) > 0 ? 1 : 0, 6, delta);
     if (limbsRef.current && sitBlendRef.current > 0.01) applySitPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), sitBlendRef.current);
+    // in the water the body's shadow lands on the river bed and shows through as a dark double: no shadow while swimming
+    const shadowOn = !c.swimming;
+    if (shadowOn !== castRef.current) {
+      castRef.current = shadowOn;
+      model.traverse((o: any) => {
+        if (o.isMesh) o.castShadow = shadowOn;
+      });
+    }
     // no weapons in hand while swimming, climbing or sitting
     const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5;
     if (classId !== 'BuddhistMage') {
