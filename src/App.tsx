@@ -1109,8 +1109,6 @@ export default function App() {
           if (hudMirror.p1Candle) meChips.push({ text: (hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭') + ' · F 放下', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
           else if (hudMirror.p1Shade) meChips.push({ text: '灯罩 · F 放下', tone: 'gold' });
           if (hudMirror.night > 0.55 && hudMirror.foeHidden) meChips.push({ text: '天黑 看不见对手', tone: 'slate' });
-          if (hudMirror.p1Grip < 0.85) meChips.push({ text: `地滑 摩擦力 ${Math.round(hudMirror.p1Grip * 100)}%`, tone: hudMirror.p1Grip < 0.62 ? 'red' : 'sky' });
-          if (hudMirror.p1Slip > 0.45) meChips.push({ text: hudMirror.p1Slip > 0.75 ? '快滑倒了！别急转' : '脚下不稳', tone: 'red', pulse: true });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',

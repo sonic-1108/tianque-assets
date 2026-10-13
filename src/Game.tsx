@@ -139,10 +139,6 @@ function slimFighter(c: CombatantState) {
   return o;
 }
 const TREE_RUN_T = 1.0;
-/** 青冥古林: each fighter's own grip (sole friction), before the weather */
-const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMage: 0.95, Shadowblade: 0.82 };
-/** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
-const SLIP_T = 0.74;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
 const WEATHER = { clear: 18, cloud: 8, rain: 28, storm: 32, ease: 8, dusk: 10, night: 160, dawn: 12 };
 const WEATHER_CYCLE = Object.values(WEATHER).reduce((a, b) => a + b, 0);
@@ -234,6 +230,8 @@ function GameImpl({
   onLoadProgress,
 }: GameSceneProps) {
   const { camera, gl, scene, size } = useThree();
+  (globalThis as any).__TQ_GL = gl; // tests read draw-call counts
+  (globalThis as any).__TQ_SCENE = scene;
   // nothing reaches the HUD from the silent "what if" passes of a team fight
   const onRoundEvent = (e: RoundEvent) => {
     if (FX.mute > 0) return;
@@ -322,7 +320,6 @@ function GameImpl({
   const bgNight = useMemo(() => new THREE.Color('#05070c'), []);
   /** weather clock and lightning timer (host / offline) */
   const weatherRef = useRef({ t: 12, phase: '', strike: 6, warn: 0 });
-  const slipPrevRef = useRef([[0, 0], [0, 0], [0, 0], [0, 0]]);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
@@ -447,6 +444,7 @@ function GameImpl({
   // ==========================================================
   useFrame((_, delta) => {
     if (gameState.status !== 'PLAYING') return;
+    const tqT0 = performance.now();
 
     let timeScale = 1;
     if (slowMoTimerRef.current > 0) {
@@ -768,7 +766,6 @@ function GameImpl({
           }
           if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
           // a hard landing on a slick floor costs balance
-          if (map.id === 'forest' && impact > 7 && (c.grip ?? 1) < SLIP_T) c.slip = (c.slip ?? 0) + (impact - 7) * 0.05 * (SLIP_T - (c.grip ?? 1)) * 6;
         }
       }
       const pinned = (c.rootTimer ?? 0) > 0 && c.isGrounded && c.actionState !== 'launched' && c.actionState !== 'knockdown';
@@ -795,7 +792,6 @@ function GameImpl({
       if (map.id === 'sea') shipUnstick(c);
       if (map.id === 'forest') {
         updateWater(c);
-        updateGrip(i, c);
         updateItems(i, c, intents[i]);
       }
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
@@ -1053,6 +1049,12 @@ function GameImpl({
       });
     }
 
+    {
+      // how long the game logic took this frame (smoothed), for the profiler and the debug panel
+      const g = globalThis as any;
+      g.__TQ_FT = (g.__TQ_FT ?? 0) * 0.95 + (performance.now() - tqT0) * 0.05;
+    }
+
     // ======================================================
     // guest: mirror the host's simulation, send our controls
     // ======================================================
@@ -1145,7 +1147,7 @@ function GameImpl({
           if (loco) {
             const mult = nb.actionState === 'block' ? 0.25 : 1;
             const spd = speedOf(p1) * mult;
-            const acc = nb.isGrounded ? 18 * THREE.MathUtils.clamp((nb.grip ?? 1) * (nb.grip ?? 1) * 1.4, 0.22, 1) : 6;
+            const acc = nb.isGrounded ? 18 : 6;
             P.vx = THREE.MathUtils.damp(P.vx, mv.x * spd, acc, realDt);
             P.vz = THREE.MathUtils.damp(P.vz, mv.z * spd, acc, realDt);
             P.x += P.vx * realDt;
@@ -1700,16 +1702,14 @@ function GameImpl({
           else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= 0.65; // wading
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
-          const mu = map.id === 'forest' && c.isGrounded ? c.grip ?? 1 : 1;
-          const accel = c.isGrounded ? 18 * THREE.MathUtils.clamp(mu * mu * 1.4, 0.22, 1) : 6;
+          const accel = c.isGrounded ? 18 : 6;
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], vA.x * spd, accel, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], vA.z * spd, accel, dt);
           if (c.swimming) c.targetRotY = Math.atan2(-vA.x, -vA.z); // swim the way you're going
           else if (!whirl) c.targetRotY = intent.faceYaw;
           if (c.isGrounded && c.actionState === 'idle') c.actionState = 'run';
         } else {
-          // on a slick floor you skid to a stop
-          const stopK = map.id === 'forest' && c.isGrounded ? 14 * THREE.MathUtils.clamp((c.grip ?? 1) * (c.grip ?? 1) * 1.4, 0.18, 1) : 14;
+          const stopK = 14;
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, stopK, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, stopK, dt);
           if (c.isGrounded && c.actionState === 'run') c.actionState = 'idle';
@@ -2116,7 +2116,7 @@ function GameImpl({
       }
       const stayBuried = def.actionState === 'buried' && o.state !== 'buried';
       if (!armored && !stayBuried) {
-        const knock = (o.knock ?? 4) * (map.id === 'forest' ? 1 + (1 - (def.grip ?? 1)) * 0.7 : 1);
+        const knock = o.knock ?? 4;
         def.vel[0] = hitDir.x * knock;
         def.vel[2] = hitDir.z * knock;
         if (o.launch) {
@@ -4149,10 +4149,6 @@ function GameImpl({
     }
 
     /**
-     * 青冥古林 footing: every fighter has their own grip; rain and mud cut it. Below SLIP_T, every sharp change of
-     * velocity (cutting, stopping, rolling) and every hard landing costs balance; lose it all and you go down.
-     */
-    /**
      * 青冥古林 items: F at the temple altar takes a lit candle (or relights yours), F at the hiding place takes the
      * candle-shade. Out in the rain an unshaded candle can be put out.
      */
@@ -4322,54 +4318,6 @@ function GameImpl({
       if (c.candle === 2 && c.swimming && !c.shade) c.candle = 1;
     }
 
-    function updateGrip(i: number, c: CombatantState) {
-      // under a roof the stone floor is dry, whatever the weather: full footing, and any wobble from outside settles
-      const dry = sheltered(c.pos[0], c.pos[2], c.pos[1]);
-      if (dry) {
-        c.grip = GRIP[c.classId] ?? 0.85;
-        c.slip = Math.max(0, (c.slip ?? 0) - dt * 3);
-        slipPrevRef.current[i][0] = c.vel[0];
-        slipPrevRef.current[i][1] = c.vel[2];
-        return;
-      }
-      const rain = mapRuntime.rain;
-      let g = GRIP[c.classId] ?? 0.85;
-      g *= 1 - rain * 0.36 - (rain > 0 ? mapRuntime.storm * 0.2 : 0);
-      const floor = terrainHeight(map.id, c.pos[0], c.pos[2]);
-      const onDeck = c.pos[1] > floor + 2;
-      if (!onDeck && Math.abs(c.pos[2] - riverZ(c.pos[0])) < FOREST.bankHalf + 2.5) g *= 1 - 0.18 * (0.4 + rain * 0.6); // river mud
-      if (onDeck) g *= 1 - 0.12 * rain; // wet planks
-      c.grip = g;
-      const prev = slipPrevRef.current[i];
-      const dvx = c.vel[0] - prev[0];
-      const dvz = c.vel[2] - prev[1];
-      prev[0] = c.vel[0];
-      prev[1] = c.vel[2];
-      const st = c.actionState;
-      const footwork = c.isGrounded && !c.swimming && c.treeClimb === undefined && (st === 'idle' || st === 'run' || st === 'dodge' || st === 'block' || st.startsWith('attack_'));
-      const dv = Math.hypot(dvx, dvz);
-      if (footwork && g < SLIP_T) {
-        c.slip = (c.slip ?? 0) + dv * (SLIP_T - g) * 0.34;
-        // skidding: a spray of mud and water at the feet
-        if (dv > 0.6 && Math.random() < 0.6) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 2, 0.2, 1.2, 0.35, mapRuntime.rain > 0.3 ? '#cbd5e1' : '#6b5a40');
-      }
-      c.slip = Math.max(0, (c.slip ?? 0) - dt * (g < SLIP_T ? 0.25 : 0.8));
-      if ((c.slip ?? 0) >= 1 && footwork && c.hp > 0) {
-        // down you go
-        c.slip = 0;
-        c.actionState = 'knockdown';
-        c.stateTimer = 0;
-        c.stateDuration = 0.9;
-        c.vel[0] *= 0.6;
-        c.vel[2] *= 0.6;
-        c.isBlocking = false;
-        vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.1, c.pos[2]), '滑倒!', true, '#93c5fd');
-        vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 10, 0.4, 2, 0.6, '#6b5a40');
-        gameAudio.playLand();
-        if (i === ME) controller?.addShake(0.2);
-      }
-    }
-
     /**
      * 青冥古林 weather: clear, clouding over, rain, a thunderstorm, easing off, round and round.
      * In the storm lightning hunts the highest fighter (up a lookout tree is the worst place to be),
@@ -4436,7 +4384,7 @@ function GameImpl({
         if (Math.random() < 0.5) vfx.later(0.4 + Math.random() * 1.2, () => gameAudio.playThunder());
       }
       if (phase !== W.phase) {
-        const msg: Record<string, string> = { cloud: '天色暗了下来，山雨欲来', rain: '下雨了 · 地面湿滑，急转急停小心滑倒', storm: '暴雨雷暴！雷会劈站得最高的人，泡在水里会导电', ease: '雨小了', dusk: '天快黑了 · 去山上古寺取蜡烛', night: '入夜 · 黑暗中看不见对手，只有烛光能照亮；雨会浇灭没有灯罩的蜡烛', dawn: '天亮了', clear: '雨过天晴' };
+        const msg: Record<string, string> = { cloud: '天色暗了下来，山雨欲来', rain: '下雨了 · 林间起雾，看不远', storm: '暴雨雷暴！雷会劈站得最高的人，泡在水里会导电', ease: '雨小了', dusk: '天快黑了 · 去山上古寺取蜡烛', night: '入夜 · 黑暗中看不见对手，只有烛光能照亮；雨会浇灭没有灯罩的蜡烛', dawn: '天亮了', clear: '雨过天晴' };
         if (W.phase && msg[phase]) onRoundEvent?.({ type: 'toast', text: msg[phase] });
         if (phase === 'storm') W.strike = 2;
         W.phase = phase;
