@@ -410,7 +410,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const p1 = p1RefState.current;
@@ -465,11 +465,26 @@ function GameImpl({
         c.stealthT = (c.stealthT ?? 0) - dt;
         if (c.hp <= 0) c.stealthT = 0;
       }
-      // 回溯: remember where (and how hale) 影刃 was over the last few seconds
-      if (c.classId === 'Shadowblade') {
-        const h = (c.rewind ??= []);
-        if (!h.length || gt - h[h.length - 1][0] > 0.1) h.push([gt, c.pos[0], c.pos[1], c.pos[2], c.hp]);
-        while (h.length > 1 && gt - h[0][0] > 3.6) h.shift();
+      // 遁地: a furrow of turned earth follows 影刃 under the ground; time's up and out they burst
+      if ((c.burrowT ?? 0) > 0) {
+        c.burrowT = (c.burrowT ?? 0) - dt;
+        c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.1);
+        if (Math.random() < dt * 14) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 3, 0.35, 1.2, 0.55, '#6b5a40');
+        if ((c.burrowT ?? 0) <= 0 || c.hp <= 0) burstOut(fighters.indexOf(c), c, fighters[1 - fighters.indexOf(c)]);
+      }
+      // 锁链钩: being dragged in
+      if (c.pull) {
+        c.pull.t -= dt;
+        const dx = c.pull.x - c.pos[0];
+        const dz = c.pull.z - c.pos[2];
+        const d = Math.hypot(dx, dz);
+        const step = Math.min(d, dt * 34);
+        if (d > 0.05) {
+          c.pos[0] += (dx / d) * step;
+          c.pos[2] += (dz / d) * step;
+        }
+        c.vel[0] = c.vel[2] = 0;
+        if (d < 0.1 || c.pull.t <= 0) c.pull = undefined;
       }
       if ((c.bellTimer ?? 0) > 0) {
         c.bellTimer = (c.bellTimer ?? 0) - dt;
@@ -842,7 +857,7 @@ function GameImpl({
     // night: they show only if they carry a flame, stand in your candle's light, or near a candle that's been set down
     const litNear = (x: number, z: number) =>
       mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground));
-    const hiddenInDark = ((en.stealthT ?? 0) > 0) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
+    const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
       // itself is moved every frame without a re-render
@@ -1338,7 +1353,7 @@ function GameImpl({
         return false;
       }
 
-      if (c.classId === 'Shadowblade' && (req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
+      if (c.classId === 'Shadowblade' && ((c.burrowT ?? 0) > 0 || req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
         return executeShadow(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
       }
       if (c.classId === 'BuddhistMage' && (req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
@@ -1350,7 +1365,8 @@ function GameImpl({
           return true; // berserker / monk: right click is block (held), nothing to cast
         case 'dodge': {
           if (c.dodgeCooldownTimer > 0 || !canDodge) return report('闪避', '无法闪避'), false;
-          const dodgeCost = inZen(c) ? 40 : 25;
+          const shadowC = c.classId === 'Shadowblade';
+          const dodgeCost = inZen(c) ? 40 : shadowC ? 15 : 25;
           if ((c.stamina ?? 100) < dodgeCost) {
             if (isPlayer) vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '体力不足', false, '#a3a3a3');
             return report('闪避', '体力不足'), false;
@@ -1366,10 +1382,11 @@ function GameImpl({
           c.stateTimer = 0;
           c.stateDuration = phasesFor(c).dodge!.totalDuration;
           c.rotY = c.targetRotY = rollYaw;
-          c.vel[0] = dir.x * (ranger ? 18 : 15);
-          c.vel[2] = dir.z * (ranger ? 18 : 15);
-          c.dodgeIframeTimer = ranger ? 0.42 : 0.35;
-          c.dodgeCooldownTimer = ranger ? 0.3 : 0.45; // stamina is the real limit now
+          // 影刃 has the quickest, longest, cheapest roll of all
+          c.vel[0] = dir.x * (shadowC ? 21 : ranger ? 18 : 15);
+          c.vel[2] = dir.z * (shadowC ? 21 : ranger ? 18 : 15);
+          c.dodgeIframeTimer = shadowC ? 0.5 : ranger ? 0.42 : 0.35;
+          c.dodgeCooldownTimer = shadowC ? 0.15 : ranger ? 0.3 : 0.45; // stamina is the real limit now
           c.perfectDodgeUsed = false;
           vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 0.4, 2, 0.55);
           gameAudio.playDodge();
@@ -1820,7 +1837,7 @@ function GameImpl({
 
       // dodge i-frames / wake-up invulnerability
       if (def.dodgeIframeTimer > 0) {
-        if (def.actionState === 'dodge' && !def.perfectDodgeUsed && def.stateTimer < 0.24) {
+        if (def.actionState === 'dodge' && !def.perfectDodgeUsed && def.stateTimer < (def.classId === 'Shadowblade' ? 0.34 : 0.24)) {
           // Perfect dodge: slow motion + counter bonus
           def.perfectDodgeUsed = true;
           def.counterTimer = 1.6;
@@ -2286,6 +2303,25 @@ function GameImpl({
       vfx.sparkBurst(vB.set(x, y + 1.0, z), 10, color, 3, 0.05, UP, 1);
       vfx.ring(vB.set(x, y + 0.06, z), 1.3, color, 0.4, 0.08, 0.2);
     }
+    /** 遁地 ends: burst out of the ground, flinging anyone close into the air */
+    function burstOut(slot: number, c: CombatantState, foe: CombatantState) {
+      c.burrowT = 0;
+      const gy = fy(c.pos[0], c.pos[2]);
+      c.pos[1] = Math.max(c.pos[1], gy);
+      c.isGrounded = false;
+      c.vel = [0, 9, 0];
+      c.actionState = 'jump';
+      c.stateTimer = 0;
+      c.stateDuration = 0;
+      c.critNext = 2;
+      vfx.rocks(vB.set(c.pos[0], gy, c.pos[2]), 14, 9, 0.14);
+      vfx.groundSlam(vB.set(c.pos[0], gy, c.pos[2]), 0.7, colorFor(slot, c));
+      vfx.dustPuff(vB.set(c.pos[0], gy + 0.2, c.pos[2]), 22, 1, 3.5, 0.9, '#6b5a40');
+      gameAudio.playSlam();
+      if (slot === 0) controller?.addShake(0.35);
+      if (foe.hp > 0 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) < 2.6 && Math.abs(foe.pos[1] - gy) < 1.5)
+        applyHit(slot, c, foe, 130, { heavy: true, launch: 7, state: 'launched', dur: 0.9, knock: 2, shake: 0.4 });
+    }
     /** move 影刃 to (x, z) if it's safe ground, landing on it */
     function shadowTo(c: CombatantState, x: number, z: number) {
       if (map.radius && Math.hypot(x, z) > map.radius - 0.8 && !map.terrain) return false;
@@ -2320,7 +2356,15 @@ function GameImpl({
       const { cur, phase, free, start, paySkill, report } = h;
       const color = colorFor(slot, c);
       const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-      const foeOk = foe.hp > 0 && Math.abs(foe.pos[1] - c.pos[1]) < 4 && (foe.stealthT ?? 0) <= 0;
+      const foeOk = foe.hp > 0 && Math.abs(foe.pos[1] - c.pos[1]) < 4 && (foe.stealthT ?? 0) <= 0 && (foe.burrowT ?? 0) <= 0;
+      if ((c.burrowT ?? 0) > 0) {
+        // under the ground: 3 or left click bursts out, nothing else works down there
+        if (req === 'skill3' || req === 'attack') {
+          burstOut(slot, c, foe);
+          return true;
+        }
+        return report('出招', '遁地中：按 3 或左键破土'), false;
+      }
       switch (req) {
         case 'attack': {
           let next: CharacterActionState | null = null;
@@ -2344,7 +2388,11 @@ function GameImpl({
           if (foeOk && fd < 10) {
             const ff = fwdOf(foe.rotY);
             moved = shadowTo(c, foe.pos[0] - ff.x * 1.3, foe.pos[2] - ff.z * 1.3) || shadowTo(c, foe.pos[0] + ff.z * 1.3, foe.pos[2] - ff.x * 1.3);
-            if (moved) c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
+            if (moved) {
+              c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
+              intent.faceYaw = c.rotY; // and stays facing them
+              if (slot === 0 && controller) controller.yaw = c.rotY; // the camera swings round behind you
+            }
           }
           if (!moved) {
             const f = fwdOf(intent.faceYaw);
@@ -2363,37 +2411,41 @@ function GameImpl({
           return true;
         }
         case 'skill3': {
-          // 影遁
+          // 遁地: crouch and sink into the earth
+          if (!c.isGrounded || c.swimming) return report('3: 遁地', '要站在地上才能遁地'), false;
           if (!paySkill(2, 'skill3', '3')) return false;
           start('skill_3');
-          c.stealthT = 2.5;
-          if (slot === 1 && targeting.lockedEnemyId) targeting.lockedEnemyId = null; // the player loses the lock
-          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
-          gameAudio.playDodge();
+          c.burrowT = 2.2;
+          c.dodgeIframeTimer = 0.3;
+          if (slot === 1 && targeting.lockedEnemyId) targeting.lockedEnemyId = null;
+          const gy = fy(c.pos[0], c.pos[2]);
+          vfx.dustPuff(vB.set(c.pos[0], gy + 0.1, c.pos[2]), 18, 0.7, 2.5, 0.8, '#6b5a40');
+          vfx.rocks(vB.set(c.pos[0], gy, c.pos[2]), 6, 4, 0.1);
+          vfx.ring(vB.set(c.pos[0], gy + 0.05, c.pos[2]), 1.4, color, 0.4, 0.1, 0.2);
+          gameAudio.playSlam();
           return true;
         }
         case 'skill4': {
-          // 回溯: back to where you stood three seconds ago (and to the HP you had then, if it was more)
-          const hist = c.rewind ?? [];
-          if (hist.length < 2) return report('4: 回溯', '还没有可回溯的轨迹'), false;
+          // 锁链钩: the chain at the hip, flung out to drag the opponent in
           if (!paySkill(3, 'skill4', '4')) return false;
-          let pick = hist[0];
-          for (const e of hist) if (gt - e[0] >= 3) pick = e;
           start('skill_4');
-          // the way back, traced in shadow
-          for (let k = hist.length - 1; k >= 0; k -= 3) if (hist[k][0] >= pick[0]) vfx.dustPuff(vB.set(hist[k][1], hist[k][2] + 0.9, hist[k][3]), 3, 0.3, 0.6, 0.6, '#312e81');
-          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
-          c.pos[0] = pick[1];
-          c.pos[1] = pick[2];
-          c.pos[2] = pick[3];
-          c.vel = [0, 0, 0];
-          const healed = Math.max(0, pick[4] - c.hp);
-          c.hp = Math.max(c.hp, pick[4]);
-          c.rewind = [];
-          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
-          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.06, c.pos[2]), 2.2, '#a5b4fc', 0.7, 0.1, 0.3);
-          if (healed > 1) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), `回溯 +${Math.round(healed)}`, true, '#a5b4fc');
-          gameAudio.playPowerupChime();
+          const f = fwdOf(intent.faceYaw);
+          const along = f.x * (foe.pos[0] - c.pos[0]) + f.z * (foe.pos[2] - c.pos[2]);
+          const across = Math.abs(f.x * (foe.pos[2] - c.pos[2]) - f.z * (foe.pos[0] - c.pos[0]));
+          const caught = foeOk && along > 0.5 && along < 13 && across < 1.6 + along * 0.08;
+          const reach = caught ? along : 13;
+          // the chain: a line of links out to the target (or full length on a miss)
+          for (let k = 1; k <= 14; k++) {
+            const u = (k / 14) * reach;
+            vfx.sparkBurst(vB.set(c.pos[0] + f.x * u, c.pos[1] + 1.2, c.pos[2] + f.z * u), 1, '#9ca3af', 0.4, 0.06, UP, 0.3);
+          }
+          if (caught) {
+            foe.pull = { x: c.pos[0] + f.x * 1.4, z: c.pos[2] + f.z * 1.4, t: 0.5 };
+            applyHit(slot, c, foe, 40, { knock: 0, state: 'hitstun', dur: 0.8, noStop: true });
+            vfx.ring(vB.set(foe.pos[0], foe.pos[1] + 1.0, foe.pos[2]), 0.9, '#d1d5db', 0.3, 0.08, 0.2);
+            vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.3, foe.pos[2]), '钩!', true, '#e5e7eb');
+            gameAudio.playHitHeavy();
+          } else gameAudio.playSwingLight();
           return true;
         }
         case 'ultimate': {
@@ -2431,7 +2483,7 @@ function GameImpl({
       if (st === 'skill_2' && cfg && t >= cfg.startup && !c.hasHitCurrentMove) {
         c.hasHitCurrentMove = true;
         const from = vA.set(c.pos[0] + fwd.x * 0.5, c.pos[1] + 1.3, c.pos[2] + fwd.z * 0.5).clone();
-        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.2), 34, { dmg: 55, knock: 2.5, dur: 0.28, stagger: true, noPassive: true });
+        for (const k of [-2, -1, 0, 1, 2]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.13), 38, { dmg: 62, knock: 2.5, dur: 0.28, stagger: true, noPassive: true });
       }
       // 千影杀: six strikes from every side, then the cut that drops them
       if (st === 'ultimate' && cfg) {
@@ -2953,6 +3005,10 @@ function GameImpl({
             const dodged = def.dodgeIframeTimer > 0;
             const guarding = def.isBlocking;
             applyHit(p.slot, owner, def, p.dmg, { knock: p.knock, dur: p.dur, noMark: true, noStop: p.noStop, unblockable: p.pierce, crit: p.pierce, heavy: p.kind !== 'dart', ranged: true, flinch: p.kind === 'dart' && !p.stagger && !p.pierce });
+            if (def.hp < before && owner.classId === 'Shadowblade' && p.kind === 'dart' && (owner.cooldowns.skill1 ?? 0) > 0) {
+              owner.cooldowns.skill1 = 0; // 飞刀 hit: 瞬影 is ready again
+              vfx.damageNumber(vA.set(owner.pos[0], owner.pos[1] + 2.4, owner.pos[2]), '瞬影刷新', false, '#67e8f9');
+            }
             if (def.hp < before) {
               if (p.kind === 'dart' && !p.noStop) {
                 owner.dartHits = (owner.dartHits ?? 0) + 1;
@@ -4478,7 +4534,7 @@ function GameImpl({
         return;
       }
       // a stealthed 影刃 can't be seen: lose track of them unless they're right on top of you
-      if ((foe.stealthT ?? 0) > 0 && dist > 2.2) {
+      if (((foe.stealthT ?? 0) > 0 || (foe.burrowT ?? 0) > 0) && dist > 2.2) {
         ai.request = null;
         ai.think = Math.max(ai.think, 0.3);
         if (ai.plan === 'approach') ai.plan = 'circle';
@@ -4499,20 +4555,27 @@ function GameImpl({
       }
 
       if (ai.think <= 0 && free && !ai.request && shadowAI) {
-        // 影刃: blink in behind, cut, vanish when hurt, rewind out of a bad trade
+        // 影刃: hook or blink in, cut, go to ground when it gets hot
         ai.think = 0.2 + Math.random() * 0.22;
         const r = Math.random();
-        if (me.hp < me.maxHp * 0.45 && ready('skill4') && me.mp >= 25 && r < 0.35) ask('skill4');
-        else if (foeAttacking && dist < 3.4 && r < 0.5) {
-          if (ready('skill3') && me.mp >= 20 && r < 0.2) ask('skill3');
-          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
+        if ((me.burrowT ?? 0) > 0) {
+          // tunnelling: come up right under them
+          if (dist < 1.8 || (me.burrowT ?? 0) < 0.3) ask('skill3');
+          else {
+            ai.plan = 'approach';
+            ai.planTimer = 0.3;
+          }
+        } else if (foeAttacking && dist < 3.4 && r < 0.55) {
+          if (ready('skill3') && me.mp >= 20 && r < 0.25) ask('skill3');
+          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 15) {
             ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
             ask('dodge');
           } else {
             ai.plan = 'guard';
             ai.planTimer = 0.4;
           }
-        } else if (ready('ultimate') && me.mp >= 55 && dist < 9 && r < 0.18) ask('ultimate');
+        } else if (dist > 4 && dist < 12 && ready('skill4') && me.mp >= 20 && r < 0.3) ask('skill4');
+        else if (ready('ultimate') && me.mp >= 55 && dist < 9 && r < 0.18) ask('ultimate');
         else if (dist > 3 && dist < 10 && ready('skill1') && me.mp >= 15 && r < 0.4) ask('skill1');
         else if (dist > 4 && dist < 16 && ready('skill2') && me.mp >= 15 && r < 0.45) ask('skill2');
         else if (dist > 2.3) {

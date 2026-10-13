@@ -722,7 +722,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     sitBlendRef.current = THREE.MathUtils.damp(sitBlendRef.current, (c.meditateT ?? 0) > 0 ? 1 : 0, 6, delta);
     if (limbsRef.current && sitBlendRef.current > 0.01) applySitPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), sitBlendRef.current);
     // 影遁: fade almost out of sight (a faint shimmer for the opponent, a ghost of yourself for the player)
-    const veil = (c.stealthT ?? 0) > 0 ? (isPlayer ? 0.32 : 0.07) : 1;
+    const veil = (c.burrowT ?? 0) > 0 ? 0 : (c.stealthT ?? 0) > 0 ? (isPlayer ? 0.32 : 0.07) : 1; // 遁地: gone under the ground
     stealthRef.current = THREE.MathUtils.damp(stealthRef.current, veil, 12, delta);
     const op = stealthRef.current;
     if (Math.abs(op - lastOpRef.current) > 0.01 || (op === 1 && lastOpRef.current !== 1)) {

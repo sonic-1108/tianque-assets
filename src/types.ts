@@ -186,6 +186,8 @@ export interface CombatantState {
   rewind?: number[][]; // 回溯: [time, x, y, z, hp] samples of the last few seconds
   shadowHits?: number; // 千影杀: strikes landed so far
   ultTarget?: boolean; // 千影杀: a target was in reach when it began
+  burrowT?: number; // 遁地: seconds left under the ground
+  pull?: { x: number; z: number; t: number }; // 锁链钩: being dragged toward (x, z)
   mantraShots?: number; // 六字真言 syllables released so far
   zenField?: { x: number; z: number; t: number }; // 禅定结界 centre and seconds left
   palmsThrown?: number; // 万佛朝宗 palms already called down
