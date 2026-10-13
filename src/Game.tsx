@@ -3292,7 +3292,7 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipAiRef.current = { goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0 };
+      shipAiRef.current = { goal: -1, cool: 1.2, mountedT: 0, outT: 0, edge: '', stage: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -3394,9 +3394,15 @@ function GameImpl({
       const y = c.pos[1];
       if (!shipBlocked(c.pos[0], c.pos[2], y)) return;
       if (c.isGrounded && (c.actionState === 'idle' || c.actionState === 'run')) {
-        const top = shipFloorAt(c.pos[0], c.pos[2], y + 3.1);
+        // look a little ahead, at the face we ran into
+        const mx = c.pos[0] - px0;
+        const mz = c.pos[2] - pz0;
+        const ml = Math.hypot(mx, mz) || 1;
+        const ax = c.pos[0] + (mx / ml) * 0.4;
+        const az = c.pos[2] + (mz / ml) * 0.4;
+        const top = shipFloorAt(ax, az, y + 3.1);
         const rise = top - y;
-        if (rise > 0.55 && rise < 3.7 && shipCeilAt(px0, pz0, y) > top + 1.8 && shipCeilAt(c.pos[0], c.pos[2], top) > top + 1.8) {
+        if (rise > 0.55 && rise < 3.7 && shipCeilAt(px0, pz0, y) > top + 1.8 && shipCeilAt(ax, az, top) > top + 1.8) {
           c.pos[0] = px0;
           c.pos[2] = pz0;
           c.vel[1] = Math.sqrt(2 * gravity * (rise + 0.4));
@@ -4669,38 +4675,46 @@ function GameImpl({
             break;
           }
         }
-        S.outT = !inArc || !clear || dist < 3.6 || S.mountedT > 10 ? S.outT + dt : 0;
+        S.outT = !inArc || !clear || dist < 3.0 || S.mountedT > 14 ? S.outT + dt : 0;
         out.move.set(0, 0, 0);
         out.request = null;
-        if (S.outT > 1.0 || dist < 2.6) {
+        if (S.outT > 1.4 || dist < 2.4) {
           out.interact = !me.intPrev;
-          S.cool = 7;
+          S.cool = 5;
           S.goal = -1;
         } else if (B[k].load >= 1 && Math.abs(wrapA(B[k].yaw - aim)) < 0.07 && Math.random() < dt * 4) out.request = 'attack';
         return;
       }
       S.mountedT = 0;
       S.outT = 0;
-      // go for a free crossbow on this level when the player is far off
+      // go and grab a free crossbow: often, unless the player is right on top of it; more eagerly the further away they are
       if (S.goal < 0 && S.cool <= 0 && isFree(me) && me.isGrounded) {
-        S.cool = 2.5;
-        const mine = shipRegion(me.pos[0], me.pos[1], me.pos[2]);
-        if (dist > 7)
+        S.cool = 2.2;
+        if (dist > 3.5 && foe.ballista === undefined) {
+          let best = -1;
+          let bestD = 1e9;
           for (let k = 0; k < B.length; k++) {
             const d = SHIP_LAYOUT.ballistae[k];
-            const reach = Math.hypot(d.x - me.pos[0], d.z - me.pos[2]);
-            const rd = shipRegion(d.x, d.y, d.z);
-            if (B[k].user < 0 && reach < 14 && (rd === mine || (mine === 'deck' && Math.random() < 0.5)) && Math.random() < 0.6) S.goal = k;
+            if (B[k].user >= 0) continue;
+            // rough path length: straight line plus the climb
+            const reach = Math.hypot(d.x - me.pos[0], d.z - me.pos[2]) + Math.abs(d.y - me.pos[1]) * 1.5;
+            if (reach < bestD) {
+              bestD = reach;
+              best = k;
+            }
           }
+          const chance = dist > 8 ? 0.85 : 0.55;
+          if (best >= 0 && bestD < 26 && Math.random() < chance) S.goal = best;
+        }
       }
       let tx = foe.pos[0];
       let ty = foe.pos[1];
       let tz = foe.pos[2];
       if (S.goal >= 0) {
         const d = SHIP_LAYOUT.ballistae[S.goal];
-        if (B[S.goal].user >= 0 || dist < 3.2) {
+        if (B[S.goal].user >= 0 || dist < 2.4) {
           S.goal = -1;
-          S.cool = 5;
+          S.cool = 4;
         } else {
           const seat = ballistaSeat(S.goal, d.yaw);
           tx = seat[0];
