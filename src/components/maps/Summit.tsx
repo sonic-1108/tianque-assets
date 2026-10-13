@@ -10,7 +10,7 @@ import { Sky, CloudSea, CloudPuffs, KarstPeaks, seeded, GLSL_NOISE } from '../Sc
 // crack and fall away during the round.
 // ==================================================================
 
-const FLOOR_SIZE = 46; // metres covered by the carved floor texture
+const FLOOR_SIZE = Math.ceil(SUMMIT.rings[0] * 2 + 2); // metres covered by the carved floor texture
 
 /** Carved white-jade floor, gold inlay, and a separate crack layer that glows before a ring breaks */
 let floorCache: { map: THREE.Texture; bump: THREE.Texture; cracks: THREE.Texture } | null = null;
@@ -50,7 +50,7 @@ function floorTextures() {
     // paving: concentric courses split into radial slabs
     g.strokeStyle = ink;
     g.lineWidth = forBump ? 5 : 2.8;
-    const rings = [2.1, 4.2, 6.4, 8.5, 10.6, 12.8, 15, 17.4, 19.7, 22];
+    const rings = [2.1, 4.2, 6.4, 8.5, 10.6, 12.8, 15, 17.4, 19.7, 22].map((r) => (r * SUMMIT.rings[0]) / 22);
     for (const r of rings) {
       g.beginPath();
       g.arc(0, 0, px(r), 0, Math.PI * 2);
@@ -236,8 +236,8 @@ function useFloor() {
     const R = SUMMIT.rings;
     // ring 0 = outer (breaks first), ring 1 = middle, ring 2 = the inner disc that stays
     const layout: [number, number, number][] = [
-      [R[1], R[0], 22],
-      [R[2], R[1], 14],
+      [R[1], R[0], Math.round(22 * (R[0] / 22))],
+      [R[2], R[1], Math.round(14 * (R[0] / 22))],
     ];
     layout.forEach(([r0, r1, n], ring) => {
       const off = rand() * 0.5;

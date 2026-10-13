@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { ROOF, Hall, hallHeight, roofHeight, mapRuntime } from '../../maps';
+import { ROOF, Hall, hallHeight, roofHeight, mapRuntime, GROW } from '../../maps';
 import { GLSL_NOISE, seeded } from '../Scenery';
 
 // ==================================================================
@@ -734,10 +734,10 @@ function PlumTree({ seed }: { seed: number }) {
 function Courtyards() {
   const items = useMemo(() => {
     const out: { x: number; z: number }[] = [
-      { x: 11, z: 11.5 },
-      { x: -11, z: 11.5 },
-      { x: 11, z: -11.5 },
-      { x: -11, z: -11.5 },
+      { x: 11 * GROW, z: 11.5 * GROW },
+      { x: -11 * GROW, z: 11.5 * GROW },
+      { x: 11 * GROW, z: -11.5 * GROW },
+      { x: -11 * GROW, z: -11.5 * GROW },
     ];
     return out;
   }, []);
@@ -759,7 +759,7 @@ function Courtyards() {
   return (
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, ROOF.street, 0]} receiveShadow>
-        <planeGeometry args={[54, 54]} />
+        <planeGeometry args={[54 * GROW, 54 * GROW]} />
         <meshStandardMaterial map={paving} roughness={0.6} metalness={0.05} />
       </mesh>
       {items.map(({ x, z }, i) => (
@@ -813,7 +813,7 @@ function City() {
           const x = wx + (rand() - 0.5) * (ward - 12);
           const z = wz + (rand() - 0.5) * (ward - 12);
           const r = Math.hypot(x, z);
-          if (r < 36 || r > 300) continue;
+          if (r < 36 * GROW || r > 300) continue;
           // the 朱雀大街 avenue running north-south stays open
           if (Math.abs(x) < 9) continue;
           const big = rand() < 0.12;

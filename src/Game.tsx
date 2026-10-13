@@ -15,7 +15,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -1969,6 +1969,7 @@ function GameImpl({
     }
     function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
       if (def.hp <= 0) return;
+      if (att !== def && (att.side ?? 0) === (def.side ?? 0)) return; // no friendly fire
       const o = { ...oIn };
       const attackerIsPlayer = slot === ME;
       const hitDir = vC.set(def.pos[0] - att.pos[0], 0, def.pos[2] - att.pos[2]).normalize();
@@ -2181,7 +2182,8 @@ function GameImpl({
         if (c.actionState !== H.state || c.stateTimer < H.t) H.mask = 0;
         const prim = foes[i];
         const pi = slotOf(prim);
-        const others = fighters.filter((f, j) => j !== i && j !== pi && f.hp > 0 && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < 14);
+        // teammates can't hurt each other: only the other side is in the way
+        const others = fighters.filter((f, j) => j !== i && j !== pi && f.hp > 0 && (f.side ?? 0) !== (c.side ?? 0) && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < 14);
         const before = others.length ? structuredClone(c) : null;
         c.hasHitCurrentMove = !!(H.mask & (1 << pi));
         resolveAttacks(i, c, prim);
@@ -2397,10 +2399,10 @@ function GameImpl({
     // ======================================================
     /** standing inside the opponent's 禅定结界 */
     function inZen(c: CombatantState) {
-      // anyone else's field (friendly fire: a teammate's slows you too)
+      // only the other side's fields slow you
       for (const o of fighters) {
         const z = o.zenField;
-        if (o === c || !z || z.t <= 0 || o.hp <= 0) continue;
+        if (o === c || (o.side ?? 0) === (c.side ?? 0) || !z || z.t <= 0 || o.hp <= 0) continue;
         if (Math.hypot(c.pos[0] - z.x, c.pos[2] - z.z) < ZEN_R && c.pos[1] - fy(z.x, z.z) < 2.5) return true;
       }
       return false;
@@ -3209,7 +3211,7 @@ function GameImpl({
           const rad = p.kind === 'boomerang' ? 0.9 : 0.55;
           let def: CombatantState | null = null;
           for (const f of fighters)
-            if (f !== owner && f.hp > 0 && Math.hypot(p.pos.x - f.pos[0], p.pos.z - f.pos[2]) < rad && p.pos.y > f.pos[1] - 0.1 && p.pos.y < f.pos[1] + 1.95) {
+            if (f !== owner && f.hp > 0 && (f.side ?? 0) !== (owner.side ?? 0) && Math.hypot(p.pos.x - f.pos[0], p.pos.z - f.pos[2]) < rad && p.pos.y > f.pos[1] - 0.1 && p.pos.y < f.pos[1] + 1.95) {
               def = f;
               break;
             }
@@ -3956,7 +3958,7 @@ function GameImpl({
         if (R.timer <= 0) {
           R.timer = 10 + Math.random() * 6;
           R.warn = 1.8;
-          mapRuntime.boltX = -3.5 + Math.random() * 7;
+          mapRuntime.boltX = (-3.5 + Math.random() * 7) * GROW;
           mapRuntime.boltZ = 0;
           onRoundEvent?.({ type: 'toast', text: '烟花要落在正殿屋脊上了！' });
         }
@@ -4784,7 +4786,7 @@ function GameImpl({
           bo.x += bo.vx * h;
           bo.y += bo.vy * h;
           bo.z += bo.vz * h;
-          const def = fighters.find((f) => f !== owner && f.hp > 0 && Math.hypot(bo.x - f.pos[0], bo.z - f.pos[2]) < 0.62 && bo.y > f.pos[1] - 0.1 && bo.y < f.pos[1] + 1.95);
+          const def = fighters.find((f) => f !== owner && f.hp > 0 && (f.side ?? 0) !== (owner.side ?? 0) && Math.hypot(bo.x - f.pos[0], bo.z - f.pos[2]) < 0.62 && bo.y > f.pos[1] - 0.1 && bo.y < f.pos[1] + 1.95);
           if (def) {
             boltHit(bo, owner, def);
             break;

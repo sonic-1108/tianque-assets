@@ -52,6 +52,10 @@ export interface MapDef {
   sizeClass?: '10Q' | '50Q';
 }
 
+/** the arenas were made 1.3x roomier (layout spread out; pillars, rails and props keep their size) */
+export const GROW = 1.3;
+const g1 = (v: number) => Math.round(v * GROW * 100) / 100;
+
 /** Distant volcano for 熔岩断崖 (crater position) */
 export const VOLCANO_CRATER: [number, number, number] = [-55, 34, -80];
 
@@ -78,17 +82,18 @@ function frand(seed: number) {
 }
 /** the river's centre line: z as a function of x */
 export function riverZ(x: number) {
-  return 2 + 6 * Math.sin(x * 0.045 + 0.4) + 2 * Math.sin(x * 0.11 + 1.3);
+  const u = x / GROW; // the whole forest was spread out 1.3x: the river's meanders with it
+  return GROW * (2 + 6 * Math.sin(u * 0.045 + 0.4) + 2 * Math.sin(u * 0.11 + 1.3));
 }
 export const FOREST = {
-  radius: 58,
+  radius: g1(58),
   waterY: -0.55, // river surface
   swimY: -1.5, // a swimmer's feet: body level with the surface
   deepHalf: 4.2, // half width of the deep channel
   bankHalf: 8.0, // where the banks meet the forest floor
   bedY: -3.0,
-  ford: [-34, -24] as [number, number], // x range where the river runs shallow (waist-deep wading)
-  bridge: { x: 21, half: 1.6, deck: 0.7 }, // footbridge across the river at x = 21 (+-half), deck height at the middle
+  ford: [g1(-34), g1(-24)] as [number, number], // x range where the river runs shallow (waist-deep wading)
+  bridge: { x: g1(21), half: 1.6, deck: 0.7 }, // footbridge across the river at x = 21 (+-half), deck height at the middle
   /** giant trees: x, z, trunk radius, lookout deck height (0 = no deck) */
   trees: [] as [number, number, number, number][],
   logs: [] as [number, number, number, number][],
@@ -100,7 +105,7 @@ export const FOREST = {
   /** boulders: x, z, size, yaw */
   rocks: [] as [number, number, number, number][],
   /** the hill with the old temple on top */
-  hill: { x: -26, z: -33, r: 20, top: 13, h: 5.5 },
+  hill: { x: g1(-26), z: g1(-33), r: 20, top: 13, h: 5.5 },
   /** temple hall on the hilltop (local frame: +z faces the map centre) */
   temple: { w: 14, d: 10, podium: 0.9, col: 6.2 },
   /** where the candle-shade can be hidden (temple-local x, z) */
@@ -179,7 +184,7 @@ export const CANDLE_POINTS: [number, number][] = [
   const ok = (x: number, z: number, pad: number) => {
     if (Math.hypot(x, z) > FOREST.radius - 4) return false;
     if (Math.abs(z - riverZ(x)) < FOREST.bankHalf + pad) return false;
-    if (Math.hypot(x, z - 30) < 7 || Math.hypot(x, z + 28) < 7) return false; // spawns
+    if (Math.hypot(x, z - g1(30)) < 7 || Math.hypot(x, z + g1(28)) < 7) return false; // spawns
     if (Math.abs(x - FOREST.bridge.x) < 6 && Math.abs(z - riverZ(x)) < 14) return false; // bridge approaches
     // the temple hill, with room so no limb or crown reaches over the temple
     if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 6 + pad) return false;
@@ -195,19 +200,19 @@ export const CANDLE_POINTS: [number, number][] = [
     [36, 12],
     [-40, 22],
   ];
-  for (const [x, z] of lookouts) FOREST.trees.push([x, z, 1.9 + rand() * 0.4, 7.5 + rand() * 2]);
-  for (let k = 0; k < 600 && FOREST.trees.length < 22; k++) {
+  for (const [x, z] of lookouts) FOREST.trees.push([g1(x), g1(z), 1.9 + rand() * 0.4, 7.5 + rand() * 2]);
+  for (let k = 0; k < 900 && FOREST.trees.length < 30; k++) {
     const a = rand() * Math.PI * 2;
-    const d = 10 + Math.sqrt(rand()) * 44;
+    const d = (10 + Math.sqrt(rand()) * 44) * GROW;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
     if (!ok(x, z, 1)) continue;
     if (FOREST.trees.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 10)) continue;
     FOREST.trees.push([x, z, 1.5 + rand() * 0.6, 0]);
   }
-  for (let k = 0; k < 600 && FOREST.logs.length < 6; k++) {
+  for (let k = 0; k < 900 && FOREST.logs.length < 8; k++) {
     const a = rand() * Math.PI * 2;
-    const d = 8 + Math.sqrt(rand()) * 42;
+    const d = (8 + Math.sqrt(rand()) * 42) * GROW;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
     const ang = rand() * Math.PI;
@@ -380,9 +385,9 @@ export const MAPS = {
     homeClassName: '狂刃',
     homeBonus: '伤害 +10%',
     available: true,
-    radius: 24,
-    spawnPlayer: [0, 7],
-    spawnEnemy: [0, -7],
+    radius: g1(24),
+    spawnPlayer: [0, g1(7)],
+    spawnEnemy: [0, -g1(7)],
     background: '#eaa978',
     fog: [55, 320],
     hemi: ['#ffd8b4', '#4a3a44', 0.95],
@@ -393,8 +398,8 @@ export const MAPS = {
     // two rings of pillars: full columns (top 5.25 m) alternate with broken stumps (2.6 m),
     // stepping stones for double jumps
     pillars: [
-      ...ring(6, 9.5, 0.8, 0).map((p, i) => ({ ...p, h: i % 2 ? 2.6 : 5.25 })),
-      ...ring(8, 17.5, 0.8, Math.PI / 8).map((p, i) => ({ ...p, h: i % 2 ? 5.25 : 2.6 })),
+      ...ring(6, g1(9.5), 0.8, 0).map((p, i) => ({ ...p, h: i % 2 ? 2.6 : 5.25 })),
+      ...ring(8, g1(17.5), 0.8, Math.PI / 8).map((p, i) => ({ ...p, h: i % 2 ? 5.25 : 2.6 })),
     ],
   },
   lavacliff: {
@@ -407,9 +412,9 @@ export const MAPS = {
     homeClassName: '狂刃',
     homeBonus: '伤害 +10%',
     available: true,
-    radius: 21,
-    spawnPlayer: [0, 6],
-    spawnEnemy: [0, -6],
+    radius: g1(21),
+    spawnPlayer: [0, g1(6)],
+    spawnEnemy: [0, -g1(6)],
     background: '#3a1309',
     fog: [30, 230],
     hemi: ['#ffb37a', '#3a0d02', 0.75],
@@ -417,7 +422,7 @@ export const MAPS = {
     keyIntensity: 2.2,
     exposure: 1.1,
     cardGradient: 'from-red-900/80 via-orange-900/70 to-zinc-950/90',
-    vents: [{ x: 0, z: 0, r: 1.7 }, ...ring(6, 12, 1.7, Math.PI / 6)],
+    vents: [{ x: 0, z: 0, r: 1.7 }, ...ring(6, g1(12), 1.7, Math.PI / 6)],
   },
   sea: {
     id: 'sea',
@@ -488,9 +493,9 @@ export const MAPS = {
     homeBonus: '伤害 +10%',
     available: true,
     terrain: true,
-    radius: 40,
-    spawnPlayer: [3, 28],
-    spawnEnemy: [-3, 21],
+    radius: g1(40),
+    spawnPlayer: [g1(3), g1(28)],
+    spawnEnemy: [g1(-3), g1(21)],
     background: '#b9c8d8',
     fog: [45, 260],
     hemi: ['#d6e3f2', '#3e4c60', 0.8],
@@ -499,10 +504,10 @@ export const MAPS = {
     exposure: 0.72,
     cardGradient: 'from-sky-200/40 via-slate-500/50 to-slate-900/90',
     pillars: [
-      { x: -12, z: 29, r: 0.9, h: 1.6 },
-      { x: 11, z: 31, r: 0.75, h: 1.2 },
-      { x: -22, z: 20, r: 1.0, h: 1.9 },
-      { x: 21, z: 22, r: 0.85, h: 1.4 },
+      { x: g1(-12), z: g1(29), r: 0.9, h: 1.6 },
+      { x: g1(11), z: g1(31), r: 0.75, h: 1.2 },
+      { x: g1(-22), z: g1(20), r: 1.0, h: 1.9 },
+      { x: g1(21), z: g1(22), r: 0.85, h: 1.4 },
     ],
   },
   bamboo: {
@@ -542,9 +547,9 @@ export const MAPS = {
     homeBonus: '伤害 +10%',
     available: true,
     terrain: true,
-    radius: 26,
-    spawnPlayer: [0, 14],
-    spawnEnemy: [0, -14],
+    radius: g1(26),
+    spawnPlayer: [0, g1(14)],
+    spawnEnemy: [0, -g1(14)],
     background: '#1a1426',
     fog: [40, 420],
     hemi: ['#56619a', '#6a3418', 0.7],
@@ -569,9 +574,9 @@ export const MAPS = {
     homeClassName: '梵音',
     homeBonus: '伤害 +10%',
     available: true,
-    radius: 22,
-    spawnPlayer: [0, 11],
-    spawnEnemy: [0, -11],
+    radius: g1(22),
+    spawnPlayer: [0, g1(11)],
+    spawnEnemy: [0, -g1(11)],
     background: '#b7c7df',
     fog: [110, 560],
     hemi: ['#bcd2ff', '#6a5a4c', 0.38],
@@ -580,7 +585,7 @@ export const MAPS = {
     exposure: 0.8,
     cardGradient: 'from-sky-300/40 via-indigo-300/30 to-zinc-900/90',
     // floating jade posts just outside the inner disc: they survive the collapse
-    pillars: [...ring(4, 10.6, 0.7, Math.PI / 4).map((p) => ({ ...p, h: 2.2 })), ...ring(6, 18.3, 0.8, 0).map((p) => ({ ...p, h: 2.6 }))],
+    pillars: [...ring(4, g1(10.6), 0.7, Math.PI / 4).map((p) => ({ ...p, h: 2.2 })), ...ring(6, g1(18.3), 0.8, 0).map((p) => ({ ...p, h: 2.6 }))],
   },
 } as Record<MapId, MapDef>;
 
@@ -606,8 +611,8 @@ MAPS.forest = {
   available: true,
   terrain: true,
   radius: FOREST.radius,
-  spawnPlayer: [0, 30],
-  spawnEnemy: [0, -28],
+  spawnPlayer: [0, g1(30)],
+  spawnEnemy: [0, g1(-28)],
   background: '#9fae8c',
   fog: [30, 170],
   hemi: ['#d9e8c0', '#2c3a22', 0.75],
@@ -674,14 +679,14 @@ export const mapRuntime = {
 // Shared by the physics (Game) and the mesh (Maps3D).
 // ----------------------------------------------------------------------
 export const GLACIER = {
-  summit: [0, -16] as [number, number], // x, z of the peak
+  summit: [0, g1(-16)] as [number, number], // x, z of the peak
   summitH: 25, // height of the peak
-  footR: 30, // radius (from the summit) where the mountain meets the valley floor
+  footR: g1(30), // radius (from the summit) where the mountain meets the valley floor
   stepH: 4, // terrace height: flat ledges to rest on, steep risers to climb
   pathHalf: 2.0, // half-width of the switchback road
-  avalancheX: [-8, 8] as [number, number], // avalanches pour down this band of the south face
-  avalancheTop: -12, // z where they break loose
-  avalancheEnd: 27, // z where they run out on the valley floor
+  avalancheX: [g1(-8), g1(8)] as [number, number], // avalanches pour down this band of the south face
+  avalancheTop: g1(-12), // z where they break loose
+  avalancheEnd: g1(27), // z where they run out on the valley floor
   pathPts: [] as [number, number, number][], // x, z, height along the road (bottom to top)
 };
 const sstep = (a: number, b: number, x: number) => {
@@ -786,7 +791,8 @@ export function glacierHeight(x: number, z: number) {
   h += Math.sin(x * 0.45 + 1.3) * Math.cos(z * 0.38) * 0.3 * (1 - sstep(0, 2, h0));
   // mountains walling the whole valley in (outside the play area)
   // a forested snow shelf ringing the valley (outside the play area), with the far ranges beyond
-  if (ro > 40) h += sstep(40, 50, ro) * 9 + sstep(58, 92, ro) * 18 + Math.sin(Math.atan2(z, x) * 7 + ro * 0.15) * sstep(40, 54, ro) * 1.5;
+  const G = GROW;
+  if (ro > 40 * G) h += sstep(40 * G, 50 * G, ro) * 9 + sstep(58 * G, 92 * G, ro) * 18 + Math.sin(Math.atan2(z, x) * 7 + ro * 0.15) * sstep(40 * G, 54 * G, ro) * 1.5;
   return h;
 }
 /** Uphill gradient (dh/dx, dh/dz) */
@@ -806,22 +812,22 @@ export const GLACIER_ROCKS: { x: number; y: number; z: number; sx: number; sy: n
   let rand = frand(88);
   for (let k = 0; k < 420; k++) {
     const a = rand() * Math.PI * 2;
-    const r = 41.5 + Math.pow(rand(), 0.8) * 55;
+    const r = (41.5 + Math.pow(rand(), 0.8) * 55) * GROW;
     GLACIER_PINES.push([Math.cos(a) * r, Math.sin(a) * r, 1.0 + rand() * 1.2]);
   }
   for (let k = 0; k < 400 && GLACIER_PINES.length < 500; k++) {
     const a = rand() * Math.PI * 2;
-    const r = 9 + rand() * 20;
+    const r = (9 + rand() * 20) * GROW;
     const x = sx + Math.cos(a) * r;
     const z = sz + Math.sin(a) * r;
-    if (Math.hypot(x, z) > 38.5) continue;
+    if (Math.hypot(x, z) > 38.5 * GROW) continue;
     if (glacierPath(x, z).d < GLACIER.pathHalf + 2.4) continue;
     if (x > GLACIER.avalancheX[0] - 2 && x < GLACIER.avalancheX[1] + 2 && z > GLACIER.avalancheTop) continue;
     GLACIER_PINES.push([x, z, 0.7 + rand() * 0.5]);
   }
   for (let k = 0; k < 60; k++) {
     const a = rand() * Math.PI * 2;
-    const r = 38 + rand() * 3;
+    const r = (38 + rand() * 3) * GROW;
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
     if (Math.hypot(x - sx, z - sz) < GLACIER.footR + 2) continue;
@@ -830,10 +836,10 @@ export const GLACIER_ROCKS: { x: number; y: number; z: number; sx: number; sy: n
   rand = frand(44);
   for (let k = 0; k < 120 && GLACIER_ROCKS.length < 45; k++) {
     const a = rand() * Math.PI * 2;
-    const r = 5 + rand() * 22;
+    const r = (5 + rand() * 22) * GROW;
     const x = sx + Math.cos(a) * r;
     const z = sz + Math.sin(a) * r;
-    if (Math.hypot(x, z) > 38) continue;
+    if (Math.hypot(x, z) > 38 * GROW) continue;
     if (glacierPath(x, z).d < GLACIER.pathHalf + 2.2) continue;
     if (x > GLACIER.avalancheX[0] - 1 && x < GLACIER.avalancheX[1] + 1 && z > GLACIER.avalancheTop) continue;
     const s = 0.6 + rand() * 1.1;
@@ -841,7 +847,7 @@ export const GLACIER_ROCKS: { x: number; y: number; z: number; sx: number; sy: n
   }
   // solid (no standing on them: on the slopes they would be steps up the mountain)
   const P = MAPS.glacier.pillars!;
-  for (const [x, z, sc] of GLACIER_PINES) if (Math.hypot(x, z) < 41.5) P.push({ x, z, r: 1.05 * sc });
+  for (const [x, z, sc] of GLACIER_PINES) if (Math.hypot(x, z) < 41.5 * GROW) P.push({ x, z, r: 1.05 * sc });
   for (const rk of GLACIER_ROCKS) P.push({ x: rk.x, z: rk.z, r: Math.max(0.5, ((rk.sx + rk.sz) / 2) * 0.82) });
 })();
 
@@ -858,7 +864,7 @@ export interface Hall {
   ridge: number;
   eave: number;
 }
-export const ROOF = {
+export const ROOF_RAW = {
   street: -9,
   corridor: 3.0,
   halls: [
@@ -891,6 +897,12 @@ export const ROOF = {
   strikeY: 6.5,
   /** top of the main ridge beam */
   ridgeTop: 7.7,
+};
+/** the palace 1.3x bigger: every hall and corridor footprint spread out from the centre */
+export const ROOF = {
+  ...ROOF_RAW,
+  halls: ROOF_RAW.halls.map((h) => ({ ...h, x0: g1(h.x0), x1: g1(h.x1), z0: g1(h.z0), z1: g1(h.z1) })),
+  corridors: ROOF_RAW.corridors.map(([a, b, c, d]) => [g1(a), g1(b), g1(c), g1(d)] as [number, number, number, number]),
 };
 /** Height of a hall roof at (x, z), or null outside it */
 export function hallHeight(hl: Hall, x: number, z: number): number | null {
@@ -1133,7 +1145,7 @@ export function shipRegion(x: number, y: number, z: number): ShipRegion {
 // 天阙之巅: three concentric jade rings that break away during the round.
 // ----------------------------------------------------------------------
 export const SUMMIT = {
-  rings: [22, 15, 8.5] as const, // outer radius of the floor at stage 0, 1, 2
+  rings: [g1(22), g1(15), g1(8.5)] as const, // outer radius of the floor at stage 0, 1, 2
   breakAt: [45, 95] as const, // seconds into the round
   warn: 3,
 };

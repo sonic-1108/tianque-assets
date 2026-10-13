@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { MAPS, GLACIER, GLACIER_PINES, GLACIER_ROCKS, glacierHeight, glacierPath, mapRuntime } from '../../maps';
+import { MAPS, GLACIER, GLACIER_PINES, GLACIER_ROCKS, glacierHeight, glacierPath, mapRuntime, GROW } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -182,8 +182,8 @@ function makeTerrainMaterial() {
 // terrain mesh
 // ---------------------------------------------------------------
 function terrainGeometry() {
-  const size = 216;
-  const seg = 432; // 0.5 m
+  const size = Math.round(216 * GROW);
+  const seg = 432; // ~0.65 m
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position as THREE.BufferAttribute;
@@ -224,7 +224,7 @@ function AlpineRange() {
   const { geo, mat } = useMemo(() => {
     const nA = 540;
     const nR = 90;
-    const r0 = 104;
+    const r0 = 104 * GROW;
     const r1 = 520;
     const pos: number[] = [];
     const col: number[] = [];
