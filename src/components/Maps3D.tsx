@@ -6,6 +6,7 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
+import { ShipHull, Forecastle, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
 import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
@@ -1011,7 +1012,7 @@ function makeOceanMaterial(hx: number, hz: number) {
         // whitecaps on the crests, churn around the hull, foam on the rogue wave
         // whitecaps where the chop peaks, more of them on top of a swell crest
         float cap = smoothstep(0.75, 1.15, vChop + max(vH - vChop, 0.0) * 0.12 + (fbm(vWorld.xz * 0.4 + uTime * 0.2) - 0.5) * 0.6);
-        float churn = smoothstep(0.75, 1.0, vCalm) * smoothstep(0.5, 0.8, fbm(vWorld.xz * 1.3 + vec2(0.0, uTime * 1.2))) * 0.6;
+        float churn = smoothstep(0.75, 1.0, vCalm) * smoothstep(0.55, 0.85, fbm(vWorld.xz * 1.3 + vec2(0.0, uTime * 1.2))) * 0.35;
         float rogue = smoothstep(5.6, 6.6, vH); // only the curling lip of the rogue wave breaks white
         // light glows green through the thin, tall water of the rearing wave
         col = mix(col, vec3(0.02, 0.13, 0.15) + uLightning * 0.2, smoothstep(2.6, 5.8, vH) * 0.55);
@@ -1076,7 +1077,7 @@ function Rain() {
           p.x -= (30.0 - p.y) * 0.08;
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
-      fragmentShader: /* glsl */ `uniform float uLightning; void main(){ gl_FragColor = vec4(vec3(0.55, 0.62, 0.72) + uLightning, 0.16 + uLightning * 0.4); }`,
+      fragmentShader: /* glsl */ `uniform float uLightning; void main(){ gl_FragColor = vec4(vec3(0.55, 0.62, 0.72) + uLightning, 0.08 + uLightning * 0.3); }`,
     });
     return { geo: g, mat: m };
   }, []);
@@ -1087,114 +1088,6 @@ function Rain() {
   return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
 }
 
-/** Battened junk sail: trapezoid cloth with a gentle belly and dark bamboo ribs */
-function JunkSail({ width, height, y, color = '#6b2c1c' }: { width: number; height: number; y: number; color?: string }) {
-  const { cloth, ribs } = useMemo(() => {
-    const g = new THREE.PlaneGeometry(1, 1, 10, 12);
-    const pos = g.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const u = pos.getX(i) + 0.5;
-      const v = pos.getY(i) + 0.5;
-      const w = width * (0.82 + 0.18 * v); // wider at the top yard
-      pos.setX(i, (u - 0.5) * w + (1 - v) * width * 0.08);
-      pos.setY(i, (v - 0.5) * height);
-      // belly between ribs + overall curve
-      pos.setZ(i, Math.sin(u * Math.PI) * 0.55 + Math.abs(Math.sin(v * Math.PI * 6)) * 0.08);
-    }
-    g.computeVertexNormals();
-    const rib: number[] = [];
-    for (let k = 0; k <= 6; k++) rib.push(-height / 2 + (k / 6) * height);
-    return { cloth: g, ribs: rib };
-  }, [width, height]);
-  return (
-    <group position={[0, y, 0.35]}>
-      <mesh geometry={cloth} castShadow>
-        <meshStandardMaterial color={color} roughness={1} side={THREE.DoubleSide} />
-      </mesh>
-      {ribs.map((ry, k) => {
-        const v = (ry + height / 2) / height;
-        const w = width * (0.82 + 0.18 * v);
-        return (
-          <mesh key={k} position={[(1 - v) * width * 0.08, ry, 0.12]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.05, 0.05, w + 0.2, 6]} />
-            <meshStandardMaterial color="#2b1d12" roughness={0.8} />
-          </mesh>
-        );
-      })}
-    </group>
-  );
-}
-
-/** A far-off warship silhouette with lit stern lanterns */
-function DistantShip({ position, rot, scale = 1 }: { position: [number, number, number]; rot: number; scale?: number }) {
-  const ref = useRef<THREE.Group>(null);
-  useFrame((st) => {
-    if (ref.current) {
-      const t = st.clock.elapsedTime + position[0];
-      ref.current.position.y = position[1] + Math.sin(t * 0.8) * 0.4;
-      ref.current.rotation.z = Math.sin(t * 0.6) * 0.04;
-    }
-  });
-  const dark = '#0b1016';
-  return (
-    <group ref={ref} position={position} rotation={[0, rot, 0]} scale={scale}>
-      <mesh position={[0, 0.6, 0]}>
-        <boxGeometry args={[4, 2.2, 16]} />
-        <meshBasicMaterial color={dark} />
-      </mesh>
-      <mesh position={[0, 2.4, 6]}>
-        <boxGeometry args={[4, 2.2, 3.5]} />
-        <meshBasicMaterial color={dark} />
-      </mesh>
-      {[-3, 3].map((z) => (
-        <group key={z} position={[0, 0, z]}>
-          <mesh position={[0, 7, 0]}>
-            <cylinderGeometry args={[0.15, 0.2, 12, 6]} />
-            <meshBasicMaterial color={dark} />
-          </mesh>
-          <mesh position={[0, 8, 0.2]}>
-            <planeGeometry args={[5, 6]} />
-            <meshBasicMaterial color="#121a22" side={THREE.DoubleSide} />
-          </mesh>
-        </group>
-      ))}
-      {[-1.2, 1.2].map((x) => (
-        <mesh key={x} position={[x, 2.6, 7.8]}>
-          <sphereGeometry args={[0.35, 8, 6]} />
-          <meshBasicMaterial color={new THREE.Color(3, 1.6, 0.5)} toneMapped={false} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-/** Hanging red paper lantern that sways with the ship */
-function Lantern({ position }: { position: [number, number, number] }) {
-  const ref = useRef<THREE.Group>(null);
-  useFrame((st) => {
-    if (ref.current) ref.current.rotation.z = Math.sin(st.clock.elapsedTime * 1.4 + position[2]) * 0.18;
-  });
-  return (
-    <group ref={ref} position={position}>
-      <mesh position={[0, -0.25, 0]}>
-        <cylinderGeometry args={[0.012, 0.012, 0.5, 4]} />
-        <meshStandardMaterial color="#222" />
-      </mesh>
-      <mesh position={[0, -0.72, 0]} scale={[1, 1.25, 1]}>
-        <sphereGeometry args={[0.24, 14, 10]} />
-        <meshBasicMaterial color={new THREE.Color(1.5, 0.22, 0.07)} toneMapped={false} />
-      </mesh>
-      {[-0.98, -0.44].map((y) => (
-        <mesh key={y} position={[0, y, 0]}>
-          <cylinderGeometry args={[0.1, 0.1, 0.06, 10]} />
-          <meshStandardMaterial color="#3a2a12" metalness={0.6} roughness={0.4} />
-        </mesh>
-      ))}
-      <pointLight position={[0, -0.72, 0]} color="#ff7a40" intensity={4} distance={7} />
-    </group>
-  );
-}
-
 function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
@@ -1203,30 +1096,6 @@ function SeaMap() {
   const sheetRef = useRef<THREE.Mesh>(null);
   const sheetMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#b9d6e6', roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, emissive: new THREE.Color('#1c3442') }), []);
   const deckMat = useRef<THREE.MeshStandardMaterial>(null);
-  // stern castle roof: a trapezoid section swept across the ship's beam, eaves overhanging the walls
-  const roofGeo = useMemo(() => {
-    const sh = new THREE.Shape();
-    sh.moveTo(-2.0, 0);
-    sh.lineTo(2.0, 0);
-    sh.lineTo(1.0, 0.95);
-    sh.lineTo(-1.0, 0.95);
-    sh.closePath();
-    const g = new THREE.ExtrudeGeometry(sh, { depth: hx * 2 + 1.8, bevelEnabled: false });
-    g.rotateY(Math.PI / 2); // profile in the z-y plane, extruded along +x
-    return g;
-  }, [hx]);
-  const bowGeo = useMemo(() => {
-    const W = hx + 0.6;
-    const L = 7;
-    const sh = new THREE.Shape();
-    sh.moveTo(-W, 0);
-    sh.lineTo(W, 0);
-    sh.quadraticCurveTo(W * 0.95, -L * 0.6, 0, -L);
-    sh.quadraticCurveTo(-W * 0.95, -L * 0.6, -W, 0);
-    const g = new THREE.ExtrudeGeometry(sh, { depth: 2.9, bevelEnabled: false, curveSegments: 16 });
-    g.rotateX(Math.PI / 2); // shape -Y (the point) -> -Z, extrusion goes down from the deck
-    return g;
-  }, [hx]);
   // a curled half-pipe of water lying along the ship's length
   const sheetGeo = useMemo(() => {
     const g = new THREE.CylinderGeometry(2.2, 2.2, hz * 2 + 2, 24, 1, true, 0, Math.PI * 0.9);
@@ -1235,16 +1104,11 @@ function SeaMap() {
   }, [hz]);
   const crash = useRef({ t: -1, side: 1, last: 0, wet: 0 });
   const planks = useMemo(() => {
-    const t = plankTexture();
-    t.repeat.set(1, 2);
+    const t = deckTexture();
+    t.repeat.set(2.4, 3.2);
     return t;
   }, []);
-  const hullTex = useMemo(() => {
-    const t = plankTexture();
-    t.rotation = Math.PI / 2;
-    t.repeat.set(3, 1);
-    return t;
-  }, []);
+  const crateMap = useMemo(() => crateTexture(), []);
   const shipRef = useRef<THREE.Group>(null);
   const boltRef = useRef<THREE.DirectionalLight>(null);
   useFrame((st, dtf) => {
@@ -1293,28 +1157,37 @@ function SeaMap() {
     }
     c.wet = Math.max(0, c.wet - dtf / 5);
     if (deckMat.current) {
-      deckMat.current.roughness = 0.55 - c.wet * 0.45;
-      deckMat.current.color.setRGB(0.6 - c.wet * 0.18, 0.54 - c.wet * 0.16, 0.48 - c.wet * 0.14);
+      // storm-soaked planks: darker and glossier for a while after a wave washes over
+      deckMat.current.roughness = 0.8 - c.wet * 0.38;
+      deckMat.current.color.setRGB(0.3 - c.wet * 0.09, 0.25 - c.wet * 0.08, 0.2 - c.wet * 0.06);
     }
     if (boltRef.current) boltRef.current.intensity = mapRuntime.lightning * 7;
   });
-  const wood = '#3e2718';
-  const dark = '#22150d';
-  const trim = '#9a7330';
-  const railPosts: [number, number][] = [];
-  for (let z = -hz - 0.6; z <= hz + 0.6; z += 1.3) railPosts.push([-(hx + 0.35), z], [hx + 0.35, z]);
-  // rigging: stays from each masthead down to the rails
+  // rigging: shrouds from each masthead down to the cap rail, sheets fanning from the batten ends, fore and aft stays
   const rigging = useMemo(() => {
     const pts: number[] = [];
-    for (const p of def.pillars!.slice(0, 2)) {
-      for (const sx of [-1, 1]) {
-        for (const dz of [-2.2, 0, 2.2]) pts.push(p.x, 13.6, p.z, sx * (hx + 0.35), 1.05, p.z + dz);
+    const masts = def.pillars!.slice(0, 2);
+    masts.forEach((p, i) => {
+      for (const sx of [-1, 1])
+        for (const dz of [-2.4, -0.8, 0.8, 2.4]) {
+          const z = p.z + dz;
+          pts.push(p.x, 13.6, p.z, sx * (hullW(z) - 0.05), sheer(z) + 0.08, z);
+        }
+      // junk sheets: a line from every batten's outer end converging on one block on the rail
+      const W = i ? 9 : 10.5;
+      const H = i ? 7.4 : 8.6;
+      const y0 = i ? 9.6 : 9.0;
+      const zb = p.z + 3.2;
+      for (let k = 0; k <= 6; k++) {
+        const v = k / 6;
+        const w = W * (0.82 + 0.18 * v);
+        const bx = w / 2 + 0.15 + (1 - v) * W * 0.08;
+        pts.push(bx, y0 - H / 2 + v * H, p.z + 0.47, hullW(zb) - 0.1, sheer(zb) + 1.2, zb);
       }
-    }
-    // fore and aft stays
-    pts.push(0, 13.6, def.pillars![0].z, 0, 1.2, -(hz + 4.5));
-    pts.push(0, 13.6, def.pillars![1].z, 0, 3.0, hz + 3.6);
-    pts.push(0, 13.6, def.pillars![0].z, 0, 13.6, def.pillars![1].z);
+    });
+    pts.push(0, 13.6, masts[0].z, 0, 4.6, -30.5);
+    pts.push(0, 13.6, masts[1].z, 0, 5.2, 21.0);
+    pts.push(0, 13.6, masts[0].z, 0, 13.6, masts[1].z);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     return g;
@@ -1338,9 +1211,9 @@ function SeaMap() {
           { dist: 190, count: 8, height: [15, 40], radius: [8, 16], haze: 0.6 },
         ]}
       />
-      <DistantShip position={[-42, -1, -70]} rot={0.5} scale={1.2} />
-      <DistantShip position={[55, -1, -95]} rot={-0.4} scale={1.5} />
-      <DistantShip position={[70, -1, 40]} rot={2.4} />
+      <DistantJunk position={[-46, -0.6, -78]} rot={0.5} scale={0.75} />
+      <DistantJunk position={[62, -0.6, -105]} rot={-0.4} scale={0.9} burning />
+      <DistantJunk position={[78, -0.6, 44]} rot={2.4} scale={0.7} />
 
       <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.9, 0]}>
@@ -1353,74 +1226,27 @@ function SeaMap() {
       <group ref={shipRef}>
         {/* deck */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-          <planeGeometry args={[hx * 2 + 1.1, hz * 2 + 1.6]} />
-          <meshStandardMaterial ref={deckMat} map={planks} roughness={0.55} metalness={0.05} color="#9a8a7a" />
+          <planeGeometry args={[hx * 2 + 1.0, hz * 2 + 1.3]} />
+          <meshStandardMaterial ref={deckMat} map={planks} roughness={0.78} metalness={0.02} color="#8c7c6c" envMapIntensity={0.2} />
         </mesh>
-        {/* hull with planking and a gilded wale */}
-        {/* hull top sits just under the deck so the two never z-fight */}
-        <mesh position={[0, -1.5, 0]} castShadow receiveShadow>
-          <boxGeometry args={[hx * 2 + 1.2, 2.9, hz * 2 + 1.6]} />
-          <meshStandardMaterial map={hullTex} color="#6a5040" roughness={0.85} />
-        </mesh>
-        {[-1, 1].map((sd) => (
-          <mesh key={sd} position={[sd * (hx + 0.62), -0.35, 0]}>
-            <boxGeometry args={[0.1, 0.22, hz * 2 + 1.6]} />
-            <meshStandardMaterial color={trim} metalness={0.7} roughness={0.35} />
-          </mesh>
-        ))}
-        {/* upswept bow */}
-        {/* pointed bow: one solid piece whose top is flush with the deck and sits entirely past its end */}
-        <mesh position={[0, 0, -(hz + 0.8)]} geometry={bowGeo} castShadow receiveShadow>
-          <meshStandardMaterial attach="material-0" map={planks} roughness={0.55} color="#8a7a6a" />
-          <meshStandardMaterial attach="material-1" map={hullTex} color="#6a5040" roughness={0.85} />
-        </mesh>
-        <mesh position={[0, 0.25, -(hz + 0.8) - 7.5]} rotation={[-0.5, 0, 0]}>
-          <cylinderGeometry args={[0.12, 0.2, 6, 8]} />
-          <meshStandardMaterial color={wood} roughness={0.8} />
-        </mesh>
-        {/* stern castle with lit windows and a pagoda roof */}
-        <mesh position={[0, 1.3, hz + 2.2]} castShadow receiveShadow>
-          <boxGeometry args={[hx * 2 + 1.2, 2.6, 3.2]} />
-          <meshStandardMaterial map={hullTex} color="#5a4232" roughness={0.85} />
-        </mesh>
-        <mesh position={[-(hx + 0.9), 2.6, hz + 2.2]} geometry={roofGeo} castShadow>
-          <meshStandardMaterial color="#141c1e" roughness={0.6} />
-        </mesh>
-        {[-2.2, 0, 2.2].map((x) => (
-          <mesh key={x} position={[x, 1.6, hz + 0.57]} rotation={[0, Math.PI, 0]}>
-            <planeGeometry args={[0.8, 0.6]} />
-            <meshBasicMaterial color={new THREE.Color(2.0, 1.0, 0.35)} toneMapped={false} />
-          </mesh>
-        ))}
-        <pointLight position={[0, 2, hz + 0.2]} color="#ffb060" intensity={10} distance={10} />
-        {/* railings with gilded caps */}
-        {railPosts.map(([x, z], i) => (
-          <mesh key={i} position={[x, 0.5, z]} castShadow>
-            <boxGeometry args={[0.16, 1.0, 0.16]} />
-            <meshStandardMaterial color={wood} roughness={0.8} />
-          </mesh>
-        ))}
-        {[-1, 1].map((sd) => (
-          <mesh key={sd} position={[sd * (hx + 0.35), 1.02, 0]} castShadow>
-            <boxGeometry args={[0.22, 0.12, hz * 2 + 1.6]} />
-            <meshStandardMaterial color="#5a3a26" roughness={0.7} />
-          </mesh>
-        ))}
-        <mesh position={[0, 1.02, -(hz + 0.75)]}>
-          <boxGeometry args={[hx * 2 + 0.9, 0.12, 0.22]} />
-          <meshStandardMaterial color="#5a3a26" roughness={0.7} />
-        </mesh>
-        {/* lanterns hung along the rails, out of the camera's way */}
-        {[-hz + 1.5, -hz * 0.5, -1, hz * 0.5, hz - 2].flatMap((z) => [-1, 1].map((sd) => <Lantern key={`${z}${sd}`} position={[sd * (hx + 0.35), 1.1, z]} />))}
-        {/* masts with battened junk sails high above the deck, and pennants */}
+        <ShipHull />
+        <Forecastle deckMap={planks} />
+        <SternCastle />
+        <pointLight position={[0, 2.2, hz + 0.1]} color="#ffb060" intensity={9} distance={11} decay={1.6} />
+        <RailLanterns />
+        <HatchGrate position={[0, 0, -2.6]} w={2.4} d={2.8} />
+        <HatchGrate position={[0, 0, 12.4]} w={2.0} d={2.2} />
+        <RopeCoil position={[1.3, 0, -9.1]} />
+        <RopeCoil position={[-1.25, 0, 7.1]} r={0.36} />
+        <RopeCoil position={[-2.4, 0, 17.6]} r={0.5} />
+        {/* masts with battened junk sails high above the deck, a lantern hung on each, and pennants */}
         {def.pillars!.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
-            <mesh position={[0, 7, 0]} castShadow>
-              <cylinderGeometry args={[p.r * 0.55, p.r, 14, 14]} />
-              <meshStandardMaterial color={wood} roughness={0.8} />
-            </mesh>
-            <JunkSail width={i ? 9 : 10.5} height={i ? 7.4 : 8.6} y={i ? 9.6 : 9.0} />
+            <Mast r={p.r} h={14} />
+            <JunkSail width={i ? 9 : 10.5} height={i ? 7.4 : 8.6} y={i ? 9.6 : 9.0} seed={3 + i * 7} />
             <Banner position={[0, 13.2, 0]} color="#7a1a14" trim="#c9a24a" height={2.2} width={0.6} pole={1.6} />
+            <ShipLantern position={[0, 3.6, -p.r - 0.18]} seed={i * 3} glow={1.3} />
+            <pointLight position={[0, 2.9, -p.r - 0.5]} color="#ff9a50" intensity={7} distance={9} decay={1.5} />
           </group>
         ))}
         <lineSegments geometry={rigging}>
@@ -1433,12 +1259,12 @@ function SeaMap() {
               <group key={k} position={[0, k * 1.1, 0]} rotation={[0, k * 0.35, 0]}>
                 <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
                   <boxGeometry args={[p.r * 1.7 - k * 0.08, 1.1, p.r * 1.7 - k * 0.08]} />
-                  <meshStandardMaterial map={planks} color="#a07850" roughness={0.85} />
+                  <meshStandardMaterial map={crateMap} color="#d8c0a0" roughness={0.85} />
                 </mesh>
                 {[-0.3, 0.3].map((o) => (
                   <mesh key={o} position={[o * p.r * 1.7, 0.55, 0]}>
-                    <boxGeometry args={[0.06, 1.14, p.r * 1.74]} />
-                    <meshStandardMaterial color="#3a2a18" roughness={1} />
+                    <boxGeometry args={[0.05, 1.13, p.r * 1.72 - k * 0.08]} />
+                    <meshStandardMaterial color="#8a7350" roughness={1} />
                   </mesh>
                 ))}
               </group>
