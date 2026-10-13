@@ -4780,7 +4780,7 @@ function GameImpl({
       while (prev[next] !== from && prev[next] !== undefined && prev[next] !== next) next = prev[next]!;
       const L = SHIP_LAYOUT;
       // which flight of stairs: the side it's already on
-      const sx = (me.pos[0] >= 0 ? 1 : -1) * 7.0;
+      const sx = (me.pos[0] >= 0 ? 1 : -1) * 7.7; // the middle of the flight, well clear of its open edge
       const cx = THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5);
       const ways: Record<string, [number, number][]> = {
         'deck>foreCabin': [[0, L.fore.edge + 1.0], [0, L.fore.edge - 1.4]],
@@ -4805,11 +4805,14 @@ function GameImpl({
         S.stage = 0;
       }
       if (S.stage === 0 && Math.hypot(w[0][0] - me.pos[0], w[0][1] - me.pos[2]) < 0.7) S.stage = 1;
+      // knocked off the flight partway up: back to its foot and start again
+      if (S.stage === 1 && me.pos[1] < 0.15 && Math.abs(me.pos[0] - w[0][0]) > 1.2 && Math.abs(w[1][1] - w[0][1]) > 3) S.stage = 0;
       const pt = w[S.stage];
       out.move.set(pt[0] - me.pos[0], 0, pt[1] - me.pos[2]);
       if (out.move.lengthSq() > 0.01) out.move.normalize();
-      // no skills while finding the way, but still swing if they're right there
-      if (dist > 2.5) out.request = null;
+      // on the way (up the stairs especially) nothing that throws it sideways or stops it: no charges, dodges, jumps, no blocking
+      out.request = null;
+      out.block = false;
     }
 
     function updateSea() {

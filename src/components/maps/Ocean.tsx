@@ -90,7 +90,7 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
     },
     vertexShader: /* glsl */ `
       uniform float uTime; uniform vec4 uRogue; uniform vec4 uHull;
-      varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP;
+      varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP; varying float vRogue; varying float vFace;
       ${GLSL_WAVES}
       float hullDist(vec2 p){
         // rounded box around the hull's waterline
@@ -124,26 +124,34 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
         // the rogue wave: a steep-faced wall of water running in toward the hull, its lip curling forward
         float side = uRogue.x;
         float lip = 0.0;
+        float rh = 0.0;
+        float rface = 0.0;
         if (abs(side) > 0.5 && uRogue.z > 0.01) {
           // a crescent: the middle runs ahead, the ends trail; the crest height breaks up along its length
           float lag = p.y * p.y / 140.0;
           float u = (p.x - (uRogue.y + side * lag)) * side;   // < 0: in front of the face (toward the ship)
-          float prof = u < 0.0 ? exp(-u * u / 6.0) : exp(-u * u / 80.0);
-          float along = exp(-pow(p.y / 32.0, 2.0)) * (0.72 + 0.18 * sin(p.y * 0.23 + 1.3) + 0.1 * sin(p.y * 0.61 + uTime * 0.7));
+          const float WF = 11.0; // front: steep but wide enough for the mesh to draw it smoothly
+          const float WB = 140.0; // back: a long slope
+          float prof = u < 0.0 ? exp(-u * u / WF) : exp(-u * u / WB);
+          float along = exp(-pow(p.y / 34.0, 2.0)) * (0.74 + 0.16 * sin(p.y * 0.21 + 1.3) + 0.1 * sin(p.y * 0.57 + uTime * 0.7));
           float h = uRogue.z * prof * along;
           float hn = h / max(uRogue.z, 0.01);
           // the crest leans over its face
-          disp.x -= side * pow(hn, 3.0) * uRogue.z * 0.32;
+          disp.x -= side * pow(hn, 3.0) * uRogue.z * 0.28;
           disp.y += h;
-          float slope = (u < 0.0 ? -2.0 * u / 7.0 : -2.0 * u / 90.0) * h;
-          dX.y += slope * side;
-          lip = smoothstep(0.8, 0.98, hn / max(along, 0.3)) * smoothstep(0.55, 0.8, along) + uRogue.w * prof * along;
+          float dhdu = (u < 0.0 ? -2.0 * u / WF : -2.0 * u / WB) * h;
+          dX.y += dhdu * side;
+          rh = hn;
+          rface = (u < 0.0 ? 1.0 : 0.35) * smoothstep(0.08, 0.3, hn);
+          lip = smoothstep(0.82, 0.97, hn / max(along, 0.3)) * smoothstep(0.55, 0.8, along) + uRogue.w * prof * along;
         }
         vec3 pos = vec3(p.x, 0.0, p.y) + disp;
         vec3 nLocal = normalize(cross(dZ, dX));
         vN = normalize(mat3(modelMatrix) * nLocal);
         vFold = jxx * jzz - jxz * jxz;
-        vCrest = disp.y;
+        vCrest = disp.y - rh * uRogue.z;
+        vRogue = rh;
+        vFace = rface;
         vHull = dH;
         vLip = lip;
         vP = p;
@@ -153,13 +161,16 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
       }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uFog; uniform float uLightning; uniform float uTime;
-      varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP;
+      varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP; varying float vRogue; varying float vFace;
       ${NOISE}
       void main(){
         vec3 V = normalize(cameraPosition - vWorld);
         float dist = length(cameraPosition - vWorld);
         // fine wind ripples on top of the waves, fading with distance
-        vec2 rp = vP * 0.55;
+        // on the steep face of the big wave, sample texture up the face (height) instead of across the sea, or it smears into stripes
+        float steep = smoothstep(0.35, 0.85, 1.0 - abs(normalize(vN).y));
+        vec2 sp = mix(vP, vec2(vP.y, vWorld.y * 1.6 + vP.x * 0.3), steep);
+        vec2 rp = sp * 0.55;
         float e = 0.08;
         float r0 = fbm(rp + vec2(uTime * 0.35, uTime * 0.22));
         float rx = fbm(rp + vec2(e, 0.0) + vec2(uTime * 0.35, uTime * 0.22));
@@ -175,15 +186,19 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
         // the water body: near-black deep, teal where light comes through the thin crests
         vec3 deep = vec3(0.004, 0.018, 0.026);
         float thin = smoothstep(0.2, 2.4, vCrest) * pow(1.0 - ndv, 1.5);
+        // the big wave: dark at its foot, light glowing green through the thin water just under the crest
+        float glow = smoothstep(0.45, 0.82, vRogue) * (1.0 - smoothstep(0.9, 1.0, vRogue)) * vFace;
         vec3 body = deep + vec3(0.015, 0.11, 0.115) * thin * 1.6 + vec3(0.03, 0.2, 0.2) * thin * uLightning;
+        body = mix(body, deep * 0.6, smoothstep(0.05, 0.4, vRogue) * (1.0 - smoothstep(0.4, 0.75, vRogue)) * vFace * 0.6);
+        body += vec3(0.02, 0.16, 0.15) * glow * (0.6 + 0.4 * pow(1.0 - ndv, 1.2)) + vec3(0.05, 0.3, 0.28) * glow * uLightning;
         vec3 col = mix(body, sky, fres);
         // lightning glints
         vec3 L = normalize(vec3(0.3, 0.8, -0.5));
         col += pow(max(dot(R, L), 0.0), 120.0) * (0.06 + uLightning * 3.0);
         // foam: where the surface folds over (breaking crests), streaked along the wind, plus the churn round the hull
         float fold = smoothstep(0.62, 0.18, vFold);
-        float streak = fbm(vec2(vP.x * 0.12 + vP.y * 0.05, vP.y * 0.5 - vP.x * 0.2) + uTime * 0.05);
-        float cells = fbm(vP * 0.9 + uTime * 0.15);
+        float streak = fbm(vec2(sp.x * 0.12 + sp.y * 0.05, sp.y * 0.5 - sp.x * 0.2) + uTime * 0.05);
+        float cells = fbm(sp * 0.9 + uTime * 0.15);
         float foam = fold * smoothstep(0.25, 0.65, cells + fold * 0.4);
         foam += smoothstep(0.55, 0.8, streak) * smoothstep(0.0, 1.5, vCrest) * 0.25;
         // churn along the hull: thin streaks of foam that peel away from the planking
@@ -191,8 +206,11 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
         float churnN = fbm(vP * 0.75 + vec2(uTime * 0.3, -uTime * 0.5)) + fbm(vP * 2.3 - uTime * 0.4) * 0.35;
         foam += hz * smoothstep(0.62, 0.9, churnN) * 0.55;
         // the rogue wave's lip and face: spume torn off the crest, streaking down its front
-        float face = fbm(vec2(vP.y * 0.35, vCrest * 0.8 - uTime * 0.9));
-        foam += vLip * smoothstep(0.35, 0.65, face);
+        // the big wave: a churning white lip, and thin streaks of foam running down its face
+        float churnLip = fbm(vec2(vP.y * 0.5, vWorld.y * 0.9) + vec2(uTime * 0.4, -uTime * 1.3));
+        foam += vLip * smoothstep(0.3, 0.6, churnLip);
+        float runs = fbm(vec2(vP.y * 0.9, vWorld.y * 0.35 - uTime * 0.8));
+        foam += vFace * smoothstep(0.3, 0.75, vRogue) * smoothstep(0.62, 0.8, runs) * 0.55;
         foam = clamp(foam, 0.0, 1.0);
         vec3 foamCol = vec3(0.56, 0.63, 0.67) * (0.7 + 0.3 * max(n.y, 0.0)) + uLightning * 0.45;
         col = mix(col, foamCol, foam * 0.85);
@@ -351,4 +369,66 @@ export function rogueState(out: THREE.Vector4, crashT: number, beam: number) {
   } else if (rise > 0.01 && Math.abs(side) > 0.5) {
     out.set(side, side * (beam + 2.5 + (1 - rise) * 60), 1.5 + 6.0 * rise * rise, 0);
   } else out.set(0, 999, 0, 0);
+}
+
+/**
+ * Spindrift torn off the rogue wave's crest while it rears up: a curtain of spray blown back over the top of it.
+ * Lives in the sea's own frame (inside the rolling world group) and reads the same uRogue vector the ocean uses.
+ */
+export function CrestSpray({ rogue }: { rogue: THREE.Vector4 }) {
+  const N = 1500;
+  const { geo, mat } = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * 3);
+    const seed = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3] = 0;
+      pos[i * 3 + 1] = 0;
+      pos[i * 3 + 2] = (Math.random() * 2 - 1) * 36; // along the crest
+      seed[i * 3] = Math.random(); // phase
+      seed[i * 3 + 1] = 0.5 + Math.random(); // size
+      seed[i * 3 + 2] = 0.6 + Math.random() * 0.8; // gust strength
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 3));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 200);
+    const m = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      uniforms: { uRogue: { value: rogue }, uTime: { value: 0 }, uLightning: { value: 0 }, uMap: { value: softDot() }, uScale: { value: 300 } },
+      vertexShader: /* glsl */ `
+        uniform vec4 uRogue; uniform float uTime; uniform float uScale;
+        attribute vec3 aSeed; varying float vA;
+        void main(){
+          float side = uRogue.x;
+          float H = uRogue.z;
+          float z = position.z;
+          float L = 1.3;
+          float t = fract(uTime / L + aSeed.x) * L;
+          float along = exp(-pow(z / 34.0, 2.0)) * (0.74 + 0.16 * sin(z * 0.21 + 1.3));
+          // where the crest is (the same crescent and lean as the wave in the ocean shader)
+          float xc = uRogue.y + side * z * z / 140.0 - side * 0.28 * H;
+          float yc = H * along;
+          vec3 p = vec3(xc + side * (0.6 + 4.5 * t) * aSeed.z, yc + (3.0 * t - 2.4 * t * t) * aSeed.z, z + (aSeed.x - 0.5) * 2.0 * t);
+          vA = abs(side) > 0.5 ? smoothstep(2.5, 5.0, H) * smoothstep(0.35, 0.7, along) * (1.0 - t / L) * smoothstep(0.0, 0.12, t) : 0.0;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = aSeed.y * (1.0 + t * 3.0) * uScale / max(-mv.z, 0.5);
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D uMap; uniform float uLightning; varying float vA;
+        void main(){
+          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.5;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(vec3(0.7, 0.78, 0.82) + uLightning * 0.45, a);
+        }`,
+    });
+    return { geo: g, mat: m };
+  }, [rogue]);
+  useFrame((s) => {
+    mat.uniforms.uTime.value = s.clock.elapsedTime;
+    mat.uniforms.uLightning.value = mapRuntime.lightning;
+    mat.uniforms.uScale.value = s.size.height * 0.5;
+  });
+  return <points geometry={geo} material={mat} frustumCulled={false} />;
 }

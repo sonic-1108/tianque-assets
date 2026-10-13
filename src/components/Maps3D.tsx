@@ -6,7 +6,7 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
-import { makeOcean, seaSwell, rogueState, WaveCrash } from './maps/Ocean';
+import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray } from './maps/Ocean';
 import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
 import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, shipFloorAt, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
@@ -1091,6 +1091,9 @@ function SeaMap() {
 
       <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
       <mesh geometry={ocean.geometry} material={ocean.material} position={[0, SEA_Y, 0]} frustumCulled={false} />
+      <group position={[0, SEA_Y, 0]}>
+        <CrestSpray rogue={ocean.material.uniforms.uRogue.value} />
+      </group>
       </group>
       {/* the rogue wave breaking over the side: spray over the rail and foaming water across the main deck */}
       <WaveCrash beam={9.3} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.quarter.edge]} />
