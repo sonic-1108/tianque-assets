@@ -2499,7 +2499,8 @@ function PlacedItems() {
       const hung = e.it.hook >= 0;
       l.position.set(e.it.x, e.it.y + (hung ? 0.1 : 0.45), e.it.z);
       l.distance = hung ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground;
-      l.intensity = (hung ? 9 : 6) * (0.9 + 0.1 * Math.sin(t * 13 + n * 3));
+      l.intensity = (hung ? 34 : 11) * (0.9 + 0.1 * Math.sin(t * 13 + n * 3));
+      l.decay = 1.2;
     });
   });
   return (

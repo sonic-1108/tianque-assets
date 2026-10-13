@@ -161,7 +161,7 @@ export const MEDITATE = { secs: 4, share: 0.1 };
 /** most things that can lie about at once */
 export const MAX_ITEMS = 8;
 /** how far a candle lights up around itself (metres): carried, set down, hung high in a tree */
-export const CANDLE_LIGHT = { hand: 9, ground: 8, hook: 12 };
+export const CANDLE_LIGHT = { hand: 10, ground: 9, hook: 18 };
 /** the altar's world position (candles are taken here) */
 export function altarPos(): [number, number] {
   return templeToWorld(0, -2.4);

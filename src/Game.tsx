@@ -778,8 +778,8 @@ function GameImpl({
       (scene as any).environmentIntensity = envBaseRef.current * (1 - 0.985 * dark) + mapRuntime.lightning * 0.6;
       TQ_DARK.value = dark * 0.97;
       if (scene.fog) {
-        (scene.fog as THREE.Fog).near = THREE.MathUtils.lerp(map.fog[0] * (1 - 0.45 * rain), 4, dark);
-        (scene.fog as THREE.Fog).far = THREE.MathUtils.lerp(map.fog[1] * (1 - 0.5 * rain), 22, dark);
+        (scene.fog as THREE.Fog).near = THREE.MathUtils.lerp(map.fog[0] * (1 - 0.45 * rain), 14, dark);
+        (scene.fog as THREE.Fog).far = THREE.MathUtils.lerp(map.fog[1] * (1 - 0.5 * rain), 45, dark); // the dark comes from the lights; heavy fog would swallow candle-lit ground too
       }
     }
     if (rimLightRef.current) {
@@ -4499,7 +4499,7 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
       halo.current.visible = lit;
       halo.current.scale.set(0.16 * fl, 0.22 * fl, 1);
     }
-    if (light.current) light.current.intensity = lit ? 9 * fl : 0;
+    if (light.current) light.current.intensity = lit ? 14 * fl : 0;
     if (shadeRef.current) shadeRef.current.visible = !!c.shade;
   });
   return (
@@ -4552,7 +4552,7 @@ function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableR
           <meshStandardMaterial color="#6b5230" metalness={0.7} roughness={0.4} />
         </mesh>
       </group>
-      <pointLight ref={light} color="#ffb867" intensity={0} distance={10} decay={1.4} position={[0, 0.1, 0]} />
+      <pointLight ref={light} color="#ffb867" intensity={0} distance={11} decay={1.2} position={[0, 0.1, 0]} />
     </group>
   );
 }
