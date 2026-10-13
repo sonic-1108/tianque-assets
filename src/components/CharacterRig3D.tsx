@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
-import { collectLimbs, applyClimbPose, Limbs } from './climbPose';
+import { collectLimbs, applyClimbPose, applySitPose, Limbs } from './climbPose';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
@@ -374,6 +374,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const weaponScaledRef = useRef(false);
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
   const climbKickRef = useRef(-1);
+  const sitBlendRef = useRef(0);
   const limbsRef = useRef<Limbs | null>(null);
   const ladderBlendRef = useRef(0);
   const ladderPhaseRef = useRef(0);
@@ -650,8 +651,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (limbsRef.current && ladderBlendRef.current > 0.01) {
       applyClimbPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), ladderPhaseRef.current, ladderBlendRef.current);
     }
-    // no weapons in hand while swimming or climbing
-    const handsBusy = climbingNow || !!c.swimming;
+    // 青冥寺: sitting in meditation on a prayer cushion
+    sitBlendRef.current = THREE.MathUtils.damp(sitBlendRef.current, (c.meditateT ?? 0) > 0 ? 1 : 0, 6, delta);
+    if (limbsRef.current && sitBlendRef.current > 0.01) applySitPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), sitBlendRef.current);
+    // no weapons in hand while swimming, climbing or sitting
+    const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5;
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy;
@@ -702,7 +706,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     pose.rotation.set(leanRef.current.x - flipRef.current, strafeYawRef.current + spinRef.current, leanRef.current.y, 'YXZ');
     // 梵音 floats a little off the ground while meditating for 万佛朝宗
     const levitate = classId === 'BuddhistMage' && st === 'ultimate' ? 0.45 + Math.sin(performance.now() * 0.003) * 0.05 : 0;
-    pose.position.y = HIP_PIVOT + levitate;
+    pose.position.y = HIP_PIVOT + levitate - 0.62 * sitBlendRef.current; // sitting: down onto the cushion
 
     // ---------- hit flash & blood rage ----------
     const flash = c.whiteFlashTimer > 0 ? Math.min(1, c.whiteFlashTimer / 0.12) : 0;

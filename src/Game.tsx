@@ -13,7 +13,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -119,7 +119,8 @@ const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMag
 /** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
 const SLIP_T = 0.74;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
-const WEATHER = { clear: 25, cloud: 10, rain: 45, storm: 55, ease: 12, dusk: 20, night: 160, dawn: 12 };
+const WEATHER = { clear: 18, cloud: 8, rain: 28, storm: 32, ease: 8, dusk: 10, night: 160, dawn: 12 };
+const WEATHER_CYCLE = Object.values(WEATHER).reduce((a, b) => a + b, 0);
 
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
@@ -3550,6 +3551,26 @@ function GameImpl({
       c.intPrev = !!intent?.interact;
       c.interactHint = c.nearLadder ? '按住 F 爬梯子' : '';
       const items = mapRuntime.items;
+      if ((c.meditateT ?? 0) > 0) {
+        // sitting: any move, attack, or hit breaks it
+        const moved = !!intent && (intent.move.lengthSq() > 0.01 || !!intent.request);
+        if (moved || c.hp <= 0 || c.actionState !== 'idle' || !c.isGrounded) {
+          c.meditateT = 0;
+          c.meditateHeal = 0;
+        } else {
+          const step = Math.min(c.meditateT ?? 0, dt);
+          const heal = ((c.meditateHeal ?? 0) * step) / Math.max(0.001, c.meditateT ?? 0);
+          c.hp = Math.min(c.maxHp, c.hp + heal);
+          c.meditateHeal = (c.meditateHeal ?? 0) - heal;
+          c.meditateT = (c.meditateT ?? 0) - step;
+          c.vel[0] = c.vel[2] = 0;
+          const [bx, bz] = templeToWorld(0, -4);
+          c.rotY = c.targetRotY = yawTo(c.pos, [bx, 0, bz]);
+          if (Math.random() < dt * 3) vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.0, c.pos[2]), 2, '#fde68a', 0.6, 0.04, UP, 0.6);
+          c.interactHint = '打坐中 · 动一下就会中断';
+          return;
+        }
+      }
       if (c.hp > 0) {
         // everything F could do here; the nearest wins, putting things down only when nothing else is in reach
         let best: { d: number; hint: string; act: () => void } | null = null;
@@ -3607,6 +3628,29 @@ function GameImpl({
               items.splice(k, 1);
             });
         });
+        // the prayer cushions: sit, breathe, and a tenth of what you've lost comes back (once a day, i.e. once a night)
+        const day = Math.floor(weatherRef.current.t / WEATHER_CYCLE);
+        if (onHill && (c.meditateT ?? 0) <= 0)
+          for (const [lx, lz] of CUSHIONS) {
+            const [cx, cz] = templeToWorld(lx, lz);
+            const d = Math.hypot(c.pos[0] - cx, c.pos[2] - cz);
+            if (d > 1.0) continue;
+            if (c.restDay === day) offer(d, '今天已经打坐过了 · 下一个黑夜过后再来', () => {});
+            else if (c.hp < c.maxHp)
+              offer(d, '按 F 打坐疗伤', () => {
+                c.restDay = day;
+                c.meditateT = MEDITATE.secs;
+                c.meditateHeal = (c.maxHp - c.hp) * MEDITATE.share;
+                c.pos[0] = cx;
+                c.pos[2] = cz;
+                c.vel = [0, 0, 0];
+                c.actionState = 'idle';
+                const [bx, bz] = templeToWorld(0, -4);
+                c.rotY = c.targetRotY = yawTo(c.pos, [bx, 0, bz]); // facing the Buddhas
+                vfx.ring(vB.set(cx, c.pos[1] + 0.1, cz), 1.2, '#fde68a', 0.8, 0.08, 0.5);
+                say('打坐疗伤 · 动一下就会中断');
+              });
+          }
         const free = c.isGrounded && c.treeClimb === undefined && !c.swimming && !c.nearLadder;
         if (c.candle > 0 && free && items.length < MAX_ITEMS) {
           // hang it on the lookout tree's lantern hook: a little roof keeps the rain off, and it lights the whole deck

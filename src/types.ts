@@ -209,6 +209,9 @@ export interface CombatantState {
   grip?: number; // 0..1 effective friction underfoot (青冥古林 weather)
   slip?: number; // 0..1 loss of balance; at 1 you fall
   candle?: 0 | 1 | 2; // 青冥古林: 0 none, 1 carrying an unlit candle, 2 lit
+  meditateT?: number; // 青冥寺: seconds left of sitting in meditation on a prayer cushion
+  meditateHeal?: number; // HP still to be restored by this sitting
+  restDay?: number; // the day (weather cycle) this fighter last meditated: once per night
   shade?: boolean; // has the candle-shade (rain can't put the candle out)
   intPrev?: boolean; // F was held last frame (pickups fire on the press)
   interactHint?: string; // what F would do right here (HUD)

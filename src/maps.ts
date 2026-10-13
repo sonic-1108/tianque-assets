@@ -149,6 +149,15 @@ export interface PlacedItem {
   /** index into TREE_HOOKS when hung on a lookout tree, else -1 */
   hook: number;
 }
+/** the prayer cushions in the hall (temple-local x, z): sit on one to recover, once a day */
+export const CUSHIONS: [number, number][] = [
+  [-2.4, 0.6],
+  [-0.8, 0.6],
+  [0.8, 0.6],
+  [2.4, 0.6],
+];
+/** meditation: how long the sitting lasts, and the share of lost HP it gives back */
+export const MEDITATE = { secs: 4, share: 0.1 };
 /** most things that can lie about at once */
 export const MAX_ITEMS = 8;
 /** how far a candle lights up around itself (metres): carried, set down, hung high in a tree */

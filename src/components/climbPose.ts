@@ -85,3 +85,28 @@ export function applyClimbPose(l: Limbs, fwd: THREE.Vector3, phase: number, w: n
     aim(B[p + 'leg'], B[p + 'foot'], d, w);
   }
 }
+
+/**
+ * cross-legged meditation on a cushion: knees out to the sides, shins folded in front, hands resting in the lap.
+ * (The hips are lowered by the caller.)
+ */
+export function applySitPose(l: Limbs, fwd: THREE.Vector3, w: number) {
+  if (w <= 0.001) return;
+  right.set(-fwd.z, 0, fwd.x);
+  const B = l.bones;
+  for (const side of [-1, 1]) {
+    const p = side < 0 ? 'left' : 'right';
+    // thigh: out to the side and a little forward, nearly level
+    d.copy(right).multiplyScalar(side * 0.85).addScaledVector(fwd, 0.5).addScaledVector(up, -0.12).normalize();
+    aim(B[p + 'upleg'], B[p + 'leg'], d, w);
+    // shin: folded back across in front of the body
+    d.copy(right).multiplyScalar(-side * 0.9).addScaledVector(fwd, 0.3).addScaledVector(up, -0.05).normalize();
+    aim(B[p + 'leg'], B[p + 'foot'], d, w);
+    // upper arm: hanging down, slightly forward
+    d.copy(up).multiplyScalar(-0.9).addScaledVector(fwd, 0.35).addScaledVector(right, side * 0.12).normalize();
+    aim(B[p + 'arm'], B[p + 'forearm'], d, w);
+    // forearm: in to the lap, hands meeting
+    d.copy(fwd).multiplyScalar(0.7).addScaledVector(right, -side * 0.6).addScaledVector(up, -0.15).normalize();
+    aim(B[p + 'forearm'], B[p + 'hand'], d, w);
+  }
+}

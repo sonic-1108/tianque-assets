@@ -5,7 +5,7 @@ import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT } from '../../maps';
+import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT, CUSHIONS } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -2314,8 +2314,8 @@ function Temple() {
         <planeGeometry args={[1.5, 6.4]} />
       </mesh>
       {/* prayer cushions */}
-      {[-2.4, -0.8, 0.8, 2.4].map((x) => (
-        <mesh key={'cu' + x} position={[x, P + 0.1, 0.6]} scale={[1, 0.35, 1]} material={mats.cushion}>
+      {CUSHIONS.map(([x, z]) => (
+        <mesh key={'cu' + x} position={[x, P + 0.1, z]} scale={[1, 0.35, 1]} material={mats.cushion}>
           <cylinderGeometry args={[0.38, 0.42, 0.4, 16]} />
         </mesh>
       ))}
@@ -2573,6 +2573,10 @@ function FMarkers() {
       const [x, z] = templeToWorld(lx, lz);
       out.push({ x, y: forestFloor(x, z) + 1.0, z, range: 3.2, label: '灯罩', shade: k });
     });
+    for (const [lx, lz] of CUSHIONS) {
+      const [x, z] = templeToWorld(lx, lz);
+      out.push({ x, y: P + 0.9, z, range: 1.4, label: '打坐' });
+    }
     let n = 0;
     for (const [x, z, r, deck] of FOREST.trees) {
       if (deck <= 0) continue;
