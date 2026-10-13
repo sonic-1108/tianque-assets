@@ -427,11 +427,11 @@ export const MAPS = {
     homeClassName: '灵雀',
     homeBonus: '移速 +10%（职业开发中）',
     available: true,
-    radius: 21,
-    rect: { hx: 7.8, hz: 19 },
+    radius: 27,
+    rect: { hx: 8.8, hz: 25 },
     terrain: true,
-    spawnPlayer: [0, 3],
-    spawnEnemy: [0, -4],
+    spawnPlayer: [2.5, 9],
+    spawnEnemy: [-2.5, -10],
     background: '#1b2530',
     fog: [40, 240],
     hemi: ['#8fb3d9', '#10202c', 0.85],
@@ -441,24 +441,27 @@ export const MAPS = {
     cardGradient: 'from-sky-900/80 via-cyan-950/80 to-slate-950/90',
     pillars: [
       // two masts
-      { x: 0, z: -7, r: 0.55 },
-      { x: 0, z: 5, r: 0.55 },
-      // cargo on the main deck: single crates (1.1 m) and two stacks (2.2 m) to climb on
-      { x: 4.4, z: -3.2, r: 0.75, h: 1.1 },
-      { x: -4.5, z: 2.2, r: 0.75, h: 1.1 },
-      { x: -3.6, z: -10.4, r: 0.85, h: 2.2 },
-      { x: 3.6, z: 9.6, r: 0.85, h: 2.2 },
+      { x: 0, z: -9, r: 0.6 },
+      { x: 0, z: 7, r: 0.6 },
+      // cargo on the main deck: single crates (1.1 m) and stacks (2.2 m) to fight around
+      { x: 5.2, z: -3.5, r: 0.75, h: 1.1 },
+      { x: -5.4, z: 2.5, r: 0.75, h: 1.1 },
+      { x: -4.4, z: -15.8, r: 0.85, h: 2.2 },
+      { x: 4.4, z: 15.2, r: 0.85, h: 2.2 },
+      { x: 5.6, z: -12.0, r: 0.7, h: 1.1 },
+      { x: -5.6, z: 11.5, r: 0.7, h: 1.1 },
+      { x: 2.8, z: -1.2, r: 0.6, h: 1.1 },
       // in the cabins (h is the top, measured from the main deck)
-      { x: -5.4, z: -17.0, r: 0.75, h: 1.1 },
-      { x: 5.6, z: -15.0, r: 0.7, h: 1.1 },
-      { x: -5.8, z: 17.4, r: 0.7, h: 1.1 },
-      { x: 4.2, z: 15.2, r: 0.8, h: 0.85 }, // the chart table in the great cabin
-      // up on the forecastle, the quarterdeck and the poop deck
-      { x: 4.6, z: -17.6, r: 0.7, h: 4.5 },
-      { x: -3.6, z: 14.2, r: 0.65, h: 4.5 },
+      { x: -5.6, z: -23.0, r: 0.75, h: 1.1 },
+      { x: 6.0, z: -21.0, r: 0.7, h: 1.1 },
+      { x: -6.4, z: 23.4, r: 0.7, h: 1.1 },
+      { x: 4.2, z: 21.2, r: 0.8, h: 0.85 }, // the chart table in the great cabin
+      // up on the forecastle and the quarterdeck
+      { x: 5.0, z: -23.6, r: 0.7, h: 4.5 },
+      { x: -4.4, z: 20.2, r: 0.65, h: 4.5 },
       // the two mounted crossbows
-      { x: 0, z: -15.3, r: 0.5, h: 4.5 },
-      { x: 0, z: 17.1, r: 0.45, h: 7.7 },
+      { x: 0, z: -21.3, r: 0.5, h: 4.5 },
+      { x: 0, z: 23.1, r: 0.45, h: 7.7 },
     ],
   },
   glacier: {
@@ -943,24 +946,24 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
 // ----------------------------------------------------------------------
 export interface ShipBox { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: 'slab' | 'wall' | 'tread' | 'block' }
 export const SHIP_LAYOUT = {
-  W: 8.3, // boxes run out to here (inside the hull, past the play area)
+  W: 9.3, // boxes run out to here (inside the hull, past the play area)
   slab: 0.3,
-  fore: { edge: -12.8, y: 3.4 },
-  quarter: { edge: 12.0, y: 3.4 },
-  poop: { edge: 16.2, y: 6.6 },
+  fore: { edge: -18.8, y: 3.4 },
+  quarter: { edge: 18.0, y: 3.4 },
+  poop: { edge: 22.2, y: 6.6 },
   wallT: 0.3,
   door: 1.3, // half width of the cabin doors
   captainDoor: 1.1,
-  captainHalf: 5.8,
-  stairX: 5.9, // stairs fill |x| from here out to the bulwark
-  foreStairs: { foot: -7.4, head: -12.8, n: 13 },
-  quarterStairs: { foot: 6.6, head: 12.0, n: 13 },
-  poopStairs: { foot: 12.4, head: 16.2, n: 11 },
+  captainHalf: 6.8,
+  stairX: 6.9, // stairs fill |x| from here out to the bulwark
+  foreStairs: { foot: -13.4, head: -18.8, n: 13 },
+  quarterStairs: { foot: 12.6, head: 18.0, n: 13 },
+  poopStairs: { foot: 18.4, head: 22.2, n: 11 },
   lintel: 2.5, // doorways are this tall
   /** mounted crossbows: where they stand, which way they face by default (yaw), and where the gunner stands */
   ballistae: [
-    { x: 0, z: -15.3, y: 3.4, yaw: Math.PI },
-    { x: 0, z: 17.1, y: 6.6, yaw: 0 },
+    { x: 0, z: -21.3, y: 3.4, yaw: Math.PI },
+    { x: 0, z: 23.1, y: 6.6, yaw: 0 },
   ],
   ballistaArc: Math.PI / 3, // ±60°
 };
@@ -970,27 +973,27 @@ function buildShipBoxes() {
   const out: ShipBox[] = [];
   const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, kind: ShipBox['kind']) => out.push({ x0, x1, y0, y1, z0, z1, kind });
   // forecastle deck and the cabin's front wall with its door
-  box(-W, W, L.fore.y - L.slab, L.fore.y, -22, L.fore.edge, 'slab');
+  box(-W, W, L.fore.y - L.slab, L.fore.y, -36, L.fore.edge, 'slab');
   const fz0 = L.fore.edge - L.wallT;
   box(-W, -L.door, 0, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
   box(L.door, W, 0, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
   box(-L.door, L.door, L.lintel, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
   // quarterdeck over the great cabin
-  box(-W, W, L.quarter.y - L.slab, L.quarter.y, L.quarter.edge, 24, 'slab');
+  box(-W, W, L.quarter.y - L.slab, L.quarter.y, L.quarter.edge, 30, 'slab');
   const qz1 = L.quarter.edge + L.wallT;
   box(-W, -L.door, 0, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
   box(L.door, W, 0, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
   box(-L.door, L.door, L.lintel, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
   // poop deck over the captain's cabin (on the quarterdeck); solid either side of the cabin
-  box(-W, W, L.poop.y - L.slab, L.poop.y, L.poop.edge, 24, 'slab');
+  box(-W, W, L.poop.y - L.slab, L.poop.y, L.poop.edge, 30, 'slab');
   const pz1 = L.poop.edge + L.wallT;
   const cy0 = L.quarter.y;
   const cy1 = L.poop.y - L.slab;
   box(-L.captainHalf, -L.captainDoor, cy0, cy1, L.poop.edge, pz1, 'wall');
   box(L.captainDoor, L.captainHalf, cy0, cy1, L.poop.edge, pz1, 'wall');
   box(-L.captainDoor, L.captainDoor, cy0 + L.lintel - 0.2, cy1, L.poop.edge, pz1, 'wall');
-  box(-W, -L.captainHalf, cy0, cy1, L.poop.edge, 24, 'block');
-  box(L.captainHalf, W, cy0, cy1, L.poop.edge, 24, 'block');
+  box(-W, -L.captainHalf, cy0, cy1, L.poop.edge, 30, 'block');
+  box(L.captainHalf, W, cy0, cy1, L.poop.edge, 30, 'block');
   // stairs: one flight along each bulwark
   const flight = (foot: number, head: number, n: number, y0: number, rise: number) => {
     for (const s of [-1, 1])

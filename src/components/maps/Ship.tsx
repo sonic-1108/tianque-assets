@@ -8,16 +8,16 @@ import { seeded } from '../Scenery';
 // The fighters play on |x| <= 7, |z| <= 19; everything here stays outside that box
 // or lies flat on the deck.
 // ---------------------------------------------------------------
-export const SHIP = { stern: 23.6, bow: -29, beam: 8.6, wall: 0.45 };
+export const SHIP = { stern: 29.6, bow: -35, beam: 9.6, wall: 0.45 };
 
 /** half-width of the hull at the gunwale */
 export function hullW(z: number) {
-  if (z > 19.4) {
-    const t = Math.min(1, (z - 19.4) / (SHIP.stern - 19.4));
+  if (z > 25.4) {
+    const t = Math.min(1, (z - 25.4) / (SHIP.stern - 25.4));
     return SHIP.beam - 1.3 * t * t;
   }
-  if (z < -17) {
-    const t = Math.min(1, (-17 - z) / (-17 - SHIP.bow));
+  if (z < -23) {
+    const t = Math.min(1, (-23 - z) / (-23 - SHIP.bow));
     return SHIP.beam * Math.pow(Math.max(0, 1 - Math.pow(t, 1.8)), 0.75);
   }
   return SHIP.beam;
@@ -29,20 +29,20 @@ const ss = (a: number, b: number, x: number) => {
 /** gunwale height above the main deck: steps up around each raised deck, sweeps up at the bow and the stern */
 export function sheer(z: number) {
   let h = 1.3;
-  h += 3.3 * ss(-12.0, -13.6, z); // forecastle bulwark
-  if (z < -16) h += 2.6 * Math.pow((-16 - z) / (-16 - SHIP.bow), 2);
-  h += 3.3 * ss(11.2, 12.8, z); // quarterdeck
-  h += 3.2 * ss(15.4, 17.0, z); // poop deck
-  if (z > 19) h += 0.6 * Math.min(1, (z - 19) / (SHIP.stern - 19));
+  h += 3.3 * ss(-18.0, -19.6, z); // forecastle bulwark
+  if (z < -22) h += 2.6 * Math.pow((-22 - z) / (-22 - SHIP.bow), 2);
+  h += 3.3 * ss(17.2, 18.8, z); // quarterdeck
+  h += 3.2 * ss(21.4, 23.0, z); // poop deck
+  if (z > 25) h += 0.6 * Math.min(1, (z - 25) / (SHIP.stern - 25));
   return h;
 }
 function keelY(z: number) {
-  if (z < -18) return -5.4 + 3.6 * Math.pow(Math.min(1, (-18 - z) / (-18 - SHIP.bow)), 1.5);
-  if (z > 17) return -5.4 + 1.4 * Math.min(1, (z - 17) / (SHIP.stern - 17));
+  if (z < -24) return -5.4 + 3.6 * Math.pow(Math.min(1, (-24 - z) / (-24 - SHIP.bow)), 1.5);
+  if (z > 23) return -5.4 + 1.4 * Math.min(1, (z - 23) / (SHIP.stern - 23));
   return -5.4;
 }
-const bowness = (z: number) => (z < -17 ? Math.min(1, (-17 - z) / (-17 - SHIP.bow)) : 0);
-const sternness = (z: number) => (z > 19.4 ? Math.min(1, (z - 19.4) / (SHIP.stern - 19.4)) : 0);
+const bowness = (z: number) => (z < -23 ? Math.min(1, (-23 - z) / (-23 - SHIP.bow)) : 0);
+const sternness = (z: number) => (z > 25.4 ? Math.min(1, (z - 25.4) / (SHIP.stern - 25.4)) : 0);
 // round-bilged section with a little flare at the top, keel at v = 1
 const PROF: [number, number][] = [
   [1.0, 0], [1.02, 0.08], [1.025, 0.16], [1.01, 0.28], [0.97, 0.42], [0.88, 0.57], [0.74, 0.7], [0.55, 0.81], [0.33, 0.9], [0.13, 0.97], [0, 1],
@@ -615,19 +615,19 @@ export function ShipHull() {
     // stanchions along the inside of the bulwark
     const st: THREE.Matrix4[] = [];
     const q = new THREE.Quaternion();
-    for (let z = -12.6; z <= 12.2; z += 1.45)
+    for (let z = -18.6; z <= 18.2; z += 1.45)
       for (const s of [1, -1]) {
         const h = sheer(z);
         st.push(new THREE.Matrix4().compose(new THREE.Vector3(s * (hullW(z) - SHIP.wall - 0.07), h / 2, z), q, new THREE.Vector3(0.16, h + 0.02, 0.2)));
       }
     // cannon muzzles poking out of gunports along both sides
     const gn: { p: [number, number, number]; s: number }[] = [];
-    for (const z of [-11, -6.5, -2, 2.5, 7, 11]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), -1.0, z], s });
+    for (const z of [-16, -11, -6, -1, 4, 9, 14]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), -1.0, z], s });
     // a second, upper battery under the raised decks
-    for (const z of [-17.5, -15, 14, 17.5]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 1.4, z], s });
+    for (const z of [-23.5, -21, 20, 23.5]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 1.4, z], s });
     // eyes: sample the skin to sit them flush on the bow
     const ey = [1, -1].map((s) => {
-      const z = -24.6;
+      const z = -30.6;
       const a = hullPoint(z, 2, s);
       const b = hullPoint(z + 0.3, 2, s);
       const c2 = hullPoint(z, 3, s);
@@ -919,10 +919,10 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
         </group>
       ))}
       {/* ---- the forecastle cabin: crew quarters and armoury ---- */}
-      <mesh position={[0, 1.6, -19.65]} material={mats.inner}>
-        <boxGeometry args={[(hullW(-19.65) - SHIP.wall) * 2, 3.2, 0.2]} />
+      <mesh position={[0, 1.6, -25.65]} material={mats.inner}>
+        <boxGeometry args={[(hullW(-25.65) - SHIP.wall) * 2, 3.2, 0.2]} />
       </mesh>
-      <group position={[0, 0, -19.45]}>
+      <group position={[0, 0, -25.45]}>
         {[-3.2, -2.4, -1.6, 1.6, 2.4, 3.2].map((x) => (
           <group key={x} position={[x, 0, 0]}>
             <mesh position={[0, 1.15, 0]} material={mats.wood} castShadow>
@@ -937,17 +937,17 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <boxGeometry args={[7.4, 0.1, 0.1]} />
         </mesh>
       </group>
-      <ShipLantern position={[-3.5, L.fore.y - L.slab - 0.05, -16.0]} seed={11} />
-      <ShipLantern position={[3.5, L.fore.y - L.slab - 0.05, -17.4]} seed={12} />
-      <pointLight position={[0, 2.4, -16.2]} color="#ffa458" intensity={9} distance={10} decay={1.4} />
+      <ShipLantern position={[-3.5, L.fore.y - L.slab - 0.05, -22.0]} seed={11} />
+      <ShipLantern position={[3.5, L.fore.y - L.slab - 0.05, -23.4]} seed={12} />
+      <pointLight position={[0, 2.4, -22.2]} color="#ffa458" intensity={9} distance={10} decay={1.4} />
       {/* ---- the great cabin under the quarterdeck: stern windows, carpet, the chart table ---- */}
-      <mesh position={[0, 1.55, 19.65]} material={useMemo(() => sternWindows(12, 3.1), [])}>
-        <planeGeometry args={[(hullW(19.65) - SHIP.wall) * 2, 3.1]} />
+      <mesh position={[0, 1.55, 25.65]} material={useMemo(() => sternWindows(14, 3.1), [])}>
+        <planeGeometry args={[(hullW(25.65) - SHIP.wall) * 2, 3.1]} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 15.6]} material={mats.carpet} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 21.6]} material={mats.carpet} receiveShadow>
         <planeGeometry args={[6, 5.6]} />
       </mesh>
-      <group position={[4.2, 0, 15.2]}>
+      <group position={[4.2, 0, 21.2]}>
         <mesh position={[0, 0.8, 0]} material={mats.wood} castShadow receiveShadow>
           <cylinderGeometry args={[0.85, 0.85, 0.1, 16]} />
         </mesh>
@@ -959,20 +959,20 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <meshStandardMaterial color="#d8c8a0" roughness={1} />
         </mesh>
       </group>
-      <ShipLantern position={[-2.5, L.quarter.y - L.slab - 0.05, 15.0]} seed={13} />
-      <ShipLantern position={[2.5, L.quarter.y - L.slab - 0.05, 17.6]} seed={14} />
-      <pointLight position={[0, 2.4, 15.6]} color="#ffa458" intensity={10} distance={11} decay={1.4} />
+      <ShipLantern position={[-2.5, L.quarter.y - L.slab - 0.05, 21.0]} seed={13} />
+      <ShipLantern position={[2.5, L.quarter.y - L.slab - 0.05, 23.6]} seed={14} />
+      <pointLight position={[0, 2.4, 21.6]} color="#ffa458" intensity={10} distance={11} decay={1.4} />
       {/* ---- the captain's cabin under the poop deck ---- */}
-      <mesh position={[0, L.quarter.y + 1.45, 19.64]} material={useMemo(() => sternWindows(11.6, 2.9), [])}>
+      <mesh position={[0, L.quarter.y + 1.45, 25.64]} material={useMemo(() => sternWindows(13.6, 2.9), [])}>
         <planeGeometry args={[L.captainHalf * 2, 2.9]} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.quarter.y + 0.012, 18.0]} material={mats.carpet}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.quarter.y + 0.012, 24.0]} material={mats.carpet}>
         <planeGeometry args={[4, 2.6]} />
       </mesh>
-      <ShipLantern position={[0, L.poop.y - L.slab - 0.05, 18.2]} seed={15} />
-      <pointLight position={[0, L.quarter.y + 2.2, 17.9]} color="#ffb060" intensity={7} distance={8} decay={1.4} />
+      <ShipLantern position={[0, L.poop.y - L.slab - 0.05, 24.2]} seed={15} />
+      <pointLight position={[0, L.quarter.y + 2.2, 23.9]} color="#ffb060" intensity={7} distance={8} decay={1.4} />
       {/* windlass and the anchor out at the bow */}
-      <group position={[0, L.fore.y, -21.0]}>
+      <group position={[0, L.fore.y, -27.0]}>
         {[-1.4, 1.4].map((x) => (
           <mesh key={x} position={[x, 0.45, 0]} material={mats.wood} castShadow>
             <boxGeometry args={[0.26, 0.9, 0.5]} />
@@ -985,7 +985,7 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <cylinderGeometry args={[0.32, 0.32, 1.2, 12]} />
         </mesh>
       </group>
-      <group position={[hullW(-24.8) + 0.4, 4.4, -24.8]} rotation={[0, 0.5, 0.06]}>
+      <group position={[hullW(-30.8) + 0.4, 4.4, -30.8]} rotation={[0, 0.5, 0.06]}>
         <mesh material={mats.iron} position={[0, -0.8, 0]}>
           <cylinderGeometry args={[0.08, 0.08, 2.2, 6]} />
         </mesh>
@@ -1226,10 +1226,10 @@ function hipRoof(w: number, d: number, rise: number, ridge: number, sweep: numbe
 
 /** two-storey stern castle with a gallery, a tiled hip roof, the great rudder and stern lanterns */
 export function SternCastle({ base }: { base: number }) {
-  const z0 = 19.6;
-  const z1 = 23.2;
-  const W1 = 7.0;
-  const W2 = 5.2;
+  const z0 = 25.6;
+  const z1 = 29.2;
+  const W1 = 8.0;
+  const W2 = 6.0;
   const H1 = 2.7;
   const H2 = 2.2;
   const { mats, roof, lowRoof, bal } = useMemo(() => {
@@ -1378,7 +1378,7 @@ export function ShipLantern({ position, glow = 1, seed = 0 }: { position: [numbe
 export function RailLanterns() {
   const list = useMemo(() => {
     const out: { x: number; z: number; s: number }[] = [];
-    for (const z of [-17.5, -4.5, 0, 3.6, 14.2, 18.2]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
+    for (const z of [-23.5, -11, -3, 3, 10, 20.2, 24.2]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
     return out;
   }, []);
   return (
@@ -1564,7 +1564,7 @@ export function DistantJunk({ position, rot, scale = 1, burning = false }: { pos
         </group>
       ))}
       {[-3.5, 0, 3.5].map((x) => (
-        <mesh key={x} position={[x, 6.4, 23.15]}>
+        <mesh key={x} position={[x, 6.4, 29.15]}>
           <planeGeometry args={[1.4, 0.8]} />
           <meshBasicMaterial color={new THREE.Color(2.6, 1.3, 0.45)} toneMapped={false} />
         </mesh>

@@ -225,14 +225,14 @@ function softDot() {
  * Runs off mapRuntime.waveRise / waveSide, so it plays the same on every screen.
  */
 export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, number] }) {
-  const N = 1400;
+  const N = 1800;
   const spray = useMemo(() => {
     const g = new THREE.BufferGeometry();
     const a0 = new Float32Array(N * 3); // along the side z, height, outward offset
     const vel = new Float32Array(N * 3);
     const seed = new Float32Array(N * 2); // delay, size
     for (let i = 0; i < N; i++) {
-      a0[i * 3] = (Math.random() * 2 - 1) * 21;
+      a0[i * 3] = (Math.random() * 2 - 1) * 27;
       a0[i * 3 + 1] = -1 + Math.random() * 3.5;
       a0[i * 3 + 2] = Math.random() * 1.5;
       const up = 7 + Math.random() * 11;

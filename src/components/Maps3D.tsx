@@ -986,7 +986,7 @@ function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
   // the sea in its own frame: the hull's waterline footprint keeps the chop down right beside it
-  const ocean = useMemo(() => makeOcean({ halfW: 8.4, z0: -27, z1: 23 }), []);
+  const ocean = useMemo(() => makeOcean({ halfW: 9.4, z0: -33, z1: 29 }), []);
   const worldRef = useRef<THREE.Group>(null);
   const deckMat = useRef<THREE.MeshStandardMaterial>(null);
   const crash = useRef({ t: -1, side: 1, last: 0, wet: 0 });
@@ -1006,9 +1006,9 @@ function SeaMap() {
     if (st.scene.background instanceof THREE.Color) u.uFog.value.copy(st.scene.background);
     // The deck is the fighters' frame of reference, so the world rolls around the ship instead:
     // sample the long swell under the hull: centre for heave, the beams for roll, bow and stern for pitch
-    const h0 = (seaSwell(0, 0, t) + seaSwell(0, -12, t) + seaSwell(0, 12, t)) / 3;
-    const roll = Math.atan2(seaSwell(8.6, 0, t) - seaSwell(-8.6, 0, t), 17.2);
-    const pitch = Math.atan2(seaSwell(0, -22, t) - seaSwell(0, 20, t), 42);
+    const h0 = (seaSwell(0, 0, t) + seaSwell(0, -15, t) + seaSwell(0, 15, t)) / 3;
+    const roll = Math.atan2(seaSwell(9.6, 0, t) - seaSwell(-9.6, 0, t), 19.2);
+    const pitch = Math.atan2(seaSwell(0, -28, t) - seaSwell(0, 26, t), 54);
     const c = crash.current;
     if (mapRuntime.waveRise > 1.05 && c.last <= 1.05) {
       c.t = 0;
@@ -1020,7 +1020,7 @@ function SeaMap() {
       c.t += Math.min(0.05, dtf);
       if (c.t > 3) c.t = -1;
     }
-    rogueState(u.uRogue.value, c.t, 8.6);
+    rogueState(u.uRogue.value, c.t, 9.6);
     // the rearing wave heels her over toward it, and the blow throws her back the other way
     const heel = mapRuntime.waveSide * (Math.min(1, mapRuntime.waveRise) * 0.06 - (c.t >= 0 && c.t < 1.2 ? Math.sin((c.t / 1.2) * Math.PI) * 0.1 : 0));
     mapRuntime.shipRoll = roll * 0.8 + heel;
@@ -1059,8 +1059,8 @@ function SeaMap() {
         pts.push(bx, y0 - H / 2 + v * H, p.z + 0.47, hullW(zb) - 0.1, sheer(zb) + 1.2, zb);
       }
     });
-    pts.push(0, MAST_TOP, masts[0].z, 0, 7.2, -31.6);
-    pts.push(0, MAST_TOP, masts[1].z, 0, 10.5, 19.8);
+    pts.push(0, MAST_TOP, masts[0].z, 0, 7.2, -37.6);
+    pts.push(0, MAST_TOP, masts[1].z, 0, 10.5, 25.8);
     pts.push(0, MAST_TOP, masts[0].z, 0, MAST_TOP, masts[1].z);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -1093,7 +1093,7 @@ function SeaMap() {
       <mesh geometry={ocean.geometry} material={ocean.material} position={[0, SEA_Y, 0]} frustumCulled={false} />
       </group>
       {/* the rogue wave breaking over the side: spray over the rail and foaming water across the main deck */}
-      <WaveCrash beam={8.3} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.quarter.edge]} />
+      <WaveCrash beam={9.3} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.quarter.edge]} />
       <group ref={shipRef}>
         {/* deck */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
@@ -1110,12 +1110,12 @@ function SeaMap() {
         <pointLight position={[0, 2.6, SHIP_LAYOUT.quarter.edge - 1.6]} color="#ffb060" intensity={8} distance={12} decay={1.5} />
         <RailLanterns />
         <HatchGrate position={[0, 0, -2.6]} w={2.4} d={2.8} />
-        <HatchGrate position={[0, 0, 7.9]} w={2.0} d={2.0} />
-        <HatchGrate position={[-2.6, SHIP_LAYOUT.fore.y, -17.2]} w={1.6} d={1.6} />
-        <RopeCoil position={[1.4, 0, -8.3]} />
-        <RopeCoil position={[-1.4, 0, 6.3]} r={0.36} />
-        <RopeCoil position={[-2.6, SHIP_LAYOUT.poop.y, 18.0]} r={0.5} />
-        <RopeCoil position={[3.0, SHIP_LAYOUT.quarter.y, 14.4]} r={0.4} />
+        <HatchGrate position={[0, 0, 11]} w={2.0} d={2.0} />
+        <HatchGrate position={[-2.6, SHIP_LAYOUT.fore.y, -23.2]} w={1.6} d={1.6} />
+        <RopeCoil position={[1.5, 0, -10.4]} />
+        <RopeCoil position={[-1.5, 0, 8.4]} r={0.36} />
+        <RopeCoil position={[-2.6, SHIP_LAYOUT.poop.y, 24.0]} r={0.5} />
+        <RopeCoil position={[3.0, SHIP_LAYOUT.quarter.y, 20.4]} r={0.4} />
         {/* masts with battened junk sails high above the deck, a lantern hung on each, and pennants */}
         {def.pillars!.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
