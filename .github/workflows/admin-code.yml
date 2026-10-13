@@ -1,0 +1,40 @@
+name: Email the admin passcode
+# Every morning (about 6:45 in Chicago during daylight time, 5:45 in winter) send today's admin.html passcode.
+on:
+  schedule:
+    - cron: '45 11 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - id: code
+        env:
+          ADMIN_SEED: ${{ secrets.ADMIN_SEED }}
+        run: |
+          code=$(node tools/admin-codes.mjs)
+          echo "::add-mask::$code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "date=$(TZ=America/Chicago date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: 天阙后台 <${{ secrets.MAIL_USERNAME }}>
+          to: hello@parthenocissus.com
+          subject: 天阙后台口令 ${{ steps.code.outputs.date }}
+          body: |
+            今天（芝加哥时间 ${{ steps.code.outputs.date }}）的后台口令：
+
+                ${{ steps.code.outputs.code }}
+
+            后台地址：https://sonic-1108.github.io/tianque-assets/admin.html
+            口令每天换一次；今天输过一次后，这台浏览器到明天都不用再输。

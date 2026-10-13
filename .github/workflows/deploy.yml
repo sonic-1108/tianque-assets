@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # rebuild weekly so the admin passcode table always reaches a year ahead
+  schedule:
+    - cron: '17 9 * * 1'
 permissions:
   contents: read
   pages: write
@@ -17,6 +20,8 @@ jobs:
         with: { node-version: 20, cache: npm }
       - run: npm ci
       - run: npm run build
+        env:
+          ADMIN_SEED: ${{ secrets.ADMIN_SEED }}
       - uses: actions/upload-pages-artifact@v3
         with: { path: dist }
   deploy:

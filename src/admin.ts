@@ -21,16 +21,28 @@ const css = `
   .t-game { background:#1d3a2a; color:var(--green); } .t-lobby { background:#2a2a1d; color:var(--amber); } .t-stale { background:#2a1d1d; color:var(--red); }
   .dim { color:var(--dim); } .empty { text-align:center; color:var(--dim); padding:40px; }
   .scroll { overflow-x:auto; }
+  .lock { max-width:360px; margin:16vh auto 0; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:28px 24px; text-align:center; }
+  .lock h2 { margin:0 0 6px; font-size:18px; letter-spacing:2px; } .lock h2 b { color:var(--gold); }
+  .lock p { color:var(--dim); font-size:12px; margin:0 0 18px; }
+  .lock input { width:100%; background:#0b0d10; border:1px solid var(--line); border-radius:8px; color:var(--text); font:600 20px/1 ui-monospace,Menlo,monospace; letter-spacing:4px; text-align:center; padding:12px; text-transform:uppercase; }
+  .lock input:focus { outline:none; border-color:var(--gold); }
+  .lock button { margin-top:12px; width:100%; background:var(--gold); color:#1a1408; border:none; border-radius:8px; padding:11px; font-weight:700; font-size:14px; cursor:pointer; }
+  .lock button:disabled { opacity:.6; cursor:default; }
+  .lock .err { color:var(--red); font-size:12px; min-height:18px; margin-top:10px; }
+  .banner { font-size:12px; color:var(--amber); margin-top:6px; }
 `;
 document.head.insertAdjacentHTML('beforeend', `<style>${css}</style>`);
 const app = document.getElementById('app')!;
+function showPage() {
 app.innerHTML = `<div class="wrap">
   <h1><b>天阙</b> · 在线玩家</h1>
   <div class="sub">每个打开游戏的页面每 ${BEAT_MS / 1000} 秒报一次心跳；超过 30 秒没消息就算离线。这个页面自己不算在内。</div>
   <div class="stats" id="stats"></div>
   <div class="conn" id="conn"></div>
+  ${__ADMIN__ ? '' : '<div class="banner">口令还没启用（GitHub 里还没设置 ADMIN_SEED），现在谁都能打开这个页面。</div>'}
   <div class="scroll"><table><thead><tr><th>玩家</th><th>状态</th><th>模式</th><th>地图</th><th>职业</th><th>对手 / 房间</th><th>在线</th><th>设备</th><th>版本</th><th>心跳</th></tr></thead><tbody id="rows"></tbody></table></div>
 </div>`;
+}
 
 const players = new Map<string, PresenceState & { seen: number }>();
 const brokerOk: Record<string, boolean> = {};
@@ -76,7 +88,8 @@ function render() {
     .join('');
 }
 
-(async () => {
+async function start() {
+  showPage();
   const mqtt = (await import('mqtt')).default;
   for (const b of PRESENCE_BROKERS) {
     const url = typeof b === 'string' ? b : b.url;
@@ -114,4 +127,57 @@ function render() {
   }
   render();
   setInterval(render, 2000);
+}
+
+// ---- the daily passcode (emailed every morning; see tools/admin-codes.mjs) ----
+function chicagoDate(offset = 0) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + offset * 86400000));
+}
+async function hashFor(code: string, date: string, iter: number) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(code.toUpperCase().replace(/[^A-Z0-9]/g, '')), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode('tianque-admin|' + date), iterations: iter }, key, 256);
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function lockScreen() {
+  const cfg = __ADMIN__!;
+  app.innerHTML = `<div class="lock"><h2><b>天阙</b> · 后台</h2><p>输入今天的口令（每天早上发到邮箱，芝加哥时间每天换一次）</p>
+    <form id="f"><input id="code" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX" maxlength="12" autofocus /><button id="go">进入</button><div class="err" id="err"></div></form></div>`;
+  const form = document.getElementById('f') as HTMLFormElement;
+  const input = document.getElementById('code') as HTMLInputElement;
+  const btn = document.getElementById('go') as HTMLButtonElement;
+  const err = document.getElementById('err')!;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    btn.disabled = true;
+    err.textContent = '';
+    // today's code, or yesterday's for the hours right after midnight
+    for (const date of [chicagoDate(0), chicagoDate(-1)]) {
+      const want = cfg.days[date];
+      if (want && (await hashFor(input.value, date, cfg.iter)) === want) {
+        try {
+          localStorage.setItem('tq_admin_ok', JSON.stringify({ date, code: input.value }));
+        } catch {
+          /* private window: ask again next time */
+        }
+        start();
+        return;
+      }
+    }
+    btn.disabled = false;
+    err.textContent = '口令不对，或者已经过期了';
+    input.select();
+  };
+}
+
+(async () => {
+  if (!__ADMIN__) return start();
+  // the code entered earlier today (or late last night) is re-checked, not trusted blindly
+  try {
+    const saved = JSON.parse(localStorage.getItem('tq_admin_ok') || 'null');
+    if (saved && (saved.date === chicagoDate(0) || saved.date === chicagoDate(-1)) && __ADMIN__.days[saved.date] && (await hashFor(saved.code, saved.date, __ADMIN__.iter)) === __ADMIN__.days[saved.date]) return start();
+  } catch {
+    /* no storage or junk in it */
+  }
+  lockScreen();
 })();
