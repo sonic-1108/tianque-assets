@@ -3,9 +3,17 @@ import type { CharacterClassId } from './types';
 import type { MapId } from './maps';
 
 /**
- * Online 1v1 over WebRTC (PeerJS public signalling, no server of our own).
- * The host runs the whole simulation; the guest sends its inputs and draws the host's state.
+ * Online rooms over WebRTC (PeerJS public signalling, no server of our own): a host and up to three guests.
+ * The host runs the whole simulation; each guest sends its inputs and draws the host's state.
  */
+export const MAX_GUESTS = 3;
+/** one seat of a room: the host, a guest (by connection id), an AI, or nobody */
+export interface RoomSeat {
+  kind: 'host' | 'guest' | 'ai' | 'empty';
+  id?: string;
+  cls: CharacterClassId;
+  name: string;
+}
 export type NetRole = 'host' | 'guest';
 export type NetStatus = 'idle' | 'opening' | 'waiting' | 'connecting' | 'connected' | 'closed' | 'error';
 
@@ -21,7 +29,8 @@ export interface RemoteInput {
 
 export type NetMessage =
   | { t: 'hello'; cls: CharacterClassId; name?: string }
-  | { t: 'cfg'; map: MapId; hostCls: CharacterClassId; guestCls: CharacterClassId; seq: number; hostName?: string }
+  | { t: 'cfg'; map: MapId; hostCls?: CharacterClassId; guestCls?: CharacterClassId; seq: number; hostName?: string; seats?: RoomSeat[] }
+  | { t: 'room'; seats: RoomSeat[]; map: MapId; started: boolean }
   | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; req: string | null }
   | { t: 's'; f: any[]; p: any[]; m: any; ev: any[]; ts?: number }
   | { t: 're'; e: any }
@@ -87,8 +96,25 @@ export class NetSession {
   error = '';
   peer: Peer | null = null;
   conn: DataConnection | null = null;
-  /** host: the guest's latest controls */
-  remote: RemoteInput = { mx: 0, mz: 0, yaw: 0, blk: false, req: null, reqTtl: 0 };
+  /** host: everyone who has joined, by connection id (their controls, pick, name, line) */
+  guests = new Map<string, { id: string; conn: DataConnection | null; relay: boolean; remote: RemoteInput; cls: CharacterClassId | null; name: string; pingMs: number; heard: number }>();
+  /** host: someone joined or left */
+  onGuests: (() => void) | null = null;
+  /** host: the first guest's controls (kept for older code paths) */
+  get remote(): RemoteInput {
+    const g = this.guests.values().next().value;
+    return g ? g.remote : this.spareRemote;
+  }
+  private spareRemote: RemoteInput = { mx: 0, mz: 0, yaw: 0, blk: false, req: null, reqTtl: 0 };
+  /** host: a guest's latest controls */
+  remoteOf(id?: string): RemoteInput | null {
+    if (!id) return null;
+    return this.guests.get(id)?.remote ?? null;
+  }
+  /** guest: our id as the host knows us */
+  get myId() {
+    return this.via === 'relay' ? this.relayId : this.peer?.id || '';
+  }
   /** guest: the latest state snapshots (a small jitter buffer), each with its host timestamp */
   snaps: { at: number; ts: number; msg: Extract<NetMessage, { t: 's' }>; used?: boolean }[] = [];
   /** guest: local clock minus host clock, plus the smallest network delay seen */
@@ -101,6 +127,7 @@ export class NetSession {
   events: any[] = [];
   /** guest: events waiting to be replayed by the game loop */
   inbox: any[] = [];
+  /** guest: the host's name / host: the first guest's (older code paths) */
   remoteClass: CharacterClassId | null = null;
   remoteName = '';
   pingMs = 0;
@@ -109,13 +136,12 @@ export class NetSession {
   private relays: any[] = [];
   private relayOut: any = null;
   private relayId = Math.random().toString(36).slice(2, 10);
-  private relayPeer = '';
   private relayHeard = 0;
   private relayTimers: number[] = [];
   private relayOpening: Promise<boolean> | null = null;
   private lastIn = 0;
   private listeners = new Set<() => void>();
-  onMessage: ((m: NetMessage) => void) | null = null;
+  onMessage: ((m: NetMessage, from?: string) => void) | null = null;
 
   constructor(role: NetRole, code: string) {
     this.role = role;
@@ -163,11 +189,11 @@ export class NetSession {
     });
     peer.on('connection', (c) => {
       if (this.role !== 'host') return;
-      if ((this.conn && this.conn.open) || this.via === 'relay') {
+      if (this.guests.size >= MAX_GUESTS && !this.guests.has(c.peer)) {
         c.on('open', () => c.close()); // room is full
         return;
       }
-      this.attach(c);
+      this.attachGuest(c);
     });
     peer.on('error', (e: any) => {
       const t = e?.type;
@@ -190,14 +216,59 @@ export class NetSession {
       this.changed('error', msg);
     });
     peer.on('disconnected', () => {
-      if (this.status !== 'connected' && this.status !== 'closed') peer.reconnect();
+      if (this.status === 'closed') return;
+      if (this.role === 'host' || this.status !== 'connected') peer.reconnect();
     });
+  }
+
+  // ---------------- host: guests ----------------
+  private addGuest(id: string, conn: DataConnection | null, relay: boolean) {
+    let g = this.guests.get(id);
+    if (!g) {
+      g = { id, conn, relay, remote: { mx: 0, mz: 0, yaw: 0, blk: false, req: null, reqTtl: 0 }, cls: null, name: '', pingMs: 0, heard: performance.now() };
+      this.guests.set(id, g);
+    } else {
+      g.conn = conn;
+      g.relay = relay;
+      g.heard = performance.now();
+    }
+    if (relay && !this.via) this.via = 'relay';
+    if (!relay && this.via !== 'relay') this.via = 'p2p';
+    this.changed('connected', '');
+    this.onGuests?.();
+  }
+  private dropGuest(id: string) {
+    if (!this.guests.delete(id)) return;
+    if (!this.guests.size) this.changed('waiting', '');
+    else this.changed();
+    this.onGuests?.();
+  }
+  private attachGuest(c: DataConnection) {
+    const id = c.peer;
+    c.on('open', () => this.addGuest(id, c, false));
+    c.on('data', (d: any) => this.receive(d as NetMessage, id));
+    c.on('close', () => {
+      const g = this.guests.get(id);
+      if (g && g.conn === c) this.dropGuest(id);
+    });
+    c.on('error', () => {
+      const g = this.guests.get(id);
+      if (g && g.conn === c) this.dropGuest(id);
+    });
+  }
+  /** host: send to one guest */
+  sendTo(id: string, m: NetMessage) {
+    const g = this.guests.get(id);
+    if (!g) return;
+    if (g.relay) this.relaySend({ ...(m as any), _to: id });
+    else if (g.conn && g.conn.open) g.conn.send(m);
   }
 
   joinTimer = 0;
   /** what the browser's connection is doing right now (shown while joining) */
   iceState = '';
 
+  /** guest: the connection to the host */
   private attach(c: DataConnection) {
     this.conn = c;
     c.on('open', () => {
@@ -225,7 +296,43 @@ export class NetSession {
     c.on('error', () => this.via !== 'relay' && this.status === 'connected' && this.changed('error', '连接中断'));
   }
 
-  private receive(m: NetMessage) {
+  private receive(m: NetMessage, from?: string) {
+    if (this.role === 'host' && from) {
+      const g = this.guests.get(from);
+      if (!g) return;
+      g.heard = performance.now();
+      if (m.t === 'in') {
+        const r = g.remote;
+        r.mx = m.mx;
+        r.mz = m.mz;
+        r.yaw = m.yaw;
+        r.blk = m.blk;
+        r.int = !!m.int;
+        if (m.req) {
+          r.req = m.req;
+          r.reqTtl = 0.35;
+        }
+        return;
+      }
+      if (m.t === 'pi') return void this.sendTo(from, { t: 'po', c: m.c });
+      if (m.t === 'po') {
+        const rtt = performance.now() - m.c;
+        g.pingMs = g.pingMs ? g.pingMs + (rtt - g.pingMs) * 0.25 : rtt;
+        this.pingMs = Math.max(...[...this.guests.values()].map((x) => x.pingMs));
+        return;
+      }
+      if (m.t === 'hello') {
+        g.cls = m.cls;
+        if (m.name) g.name = m.name.slice(0, 12);
+        this.remoteClass = m.cls;
+        this.remoteName = g.name;
+        this.changed();
+        this.onGuests?.();
+      }
+      if (m.t === 'bye') return void this.dropGuest(from);
+      this.onMessage?.(m, from);
+      return;
+    }
     if (m.t === 'in') {
       const r = this.remote;
       r.mx = m.mx;
@@ -275,7 +382,18 @@ export class NetSession {
     this.onMessage?.(m);
   }
 
+  /** guest: to the host. Host: to every guest */
   send(m: NetMessage) {
+    if (this.role === 'host') {
+      let relayed = false;
+      for (const g of this.guests.values()) {
+        if (g.relay) {
+          if (!relayed) this.relaySend(m); // one publish reaches every relayed guest
+          relayed = true;
+        } else if (g.conn && g.conn.open) g.conn.send(m);
+      }
+      return;
+    }
     if (this.via === 'relay') {
       // the relay is a shared public broker: controls go out at most ~30 times a second (actions never dropped)
       if (m.t === 'in' && !m.req) {
@@ -283,7 +401,7 @@ export class NetSession {
         if (now - this.lastIn < 33) return;
         this.lastIn = now;
       }
-      this.relaySend(m);
+      this.relaySend({ ...(m as any), _from: this.relayId });
     }
     else if (this.conn && this.conn.open) this.conn.send(m);
   }
@@ -292,8 +410,13 @@ export class NetSession {
   private topic(side: 'h' | 'g') {
     return RELAY_NS + this.code + '/' + side;
   }
-  private relaySend(m: NetMessage | RelayCtl, client = this.relayOut) {
+  private relaySend(m: NetMessage | RelayCtl | any, client = this.relayOut) {
     try {
+      if (this.role === 'host' && !client) {
+        // every broker a relayed guest might be on
+        for (const c of this.relays) c.publish(this.topic('g'), JSON.stringify(m), { qos: 0 });
+        return;
+      }
       client?.publish(this.topic(this.role === 'host' ? 'g' : 'h'), JSON.stringify(m), { qos: 0 });
     } catch {
       /* ignore */
@@ -354,18 +477,24 @@ export class NetSession {
     } catch {
       return;
     }
-    if (this.role === 'host' && m.t === 'rj') {
-      // a guest that could not reach us directly
-      if ((this.conn && this.conn.open) || (this.via === 'relay' && this.relayPeer && this.relayPeer !== m.id)) return;
-      this.relayOut = client;
-      this.relayPeer = m.id;
-      this.relayHeard = performance.now();
-      this.relaySend({ t: 'ra', id: m.id });
-      if (this.via !== 'relay') {
-        this.via = 'relay';
-        this.startRelayHeartbeat();
-        this.changed('connected', '');
+    if (this.role === 'host') {
+      if (m.t === 'rj') {
+        // a guest that could not reach us directly
+        if (this.guests.size >= MAX_GUESTS && !this.guests.has(m.id)) return;
+        this.relaySend({ t: 'ra', id: m.id }, client);
+        if (!this.guests.has(m.id)) {
+          this.addGuest(m.id, null, true);
+          this.startRelayHeartbeat();
+        }
+        return;
       }
+      const from = m._from as string | undefined;
+      if (!from || !this.guests.get(from)?.relay) return;
+      this.guests.get(from)!.heard = performance.now();
+      if (m.t === 'rp') return;
+      if (m.t === 'bye') return void this.dropGuest(from);
+      delete m._from;
+      this.receive(m as NetMessage, from);
       return;
     }
     if (this.role === 'guest' && m.t === 'ra') {
@@ -384,6 +513,8 @@ export class NetSession {
       return;
     }
     if (this.via !== 'relay' || client !== this.relayOut) return;
+    if (m._to && m._to !== this.relayId) return; // meant for another guest
+    delete m._to;
     this.relayHeard = performance.now();
     if (m.t === 'rp') return;
     if (m.t === 'bye') {
@@ -392,14 +523,22 @@ export class NetSession {
     }
     this.receive(m as NetMessage);
   }
+  private heartbeat = 0;
   private startRelayHeartbeat() {
-    this.relayTimers.push(
-      window.setInterval(() => {
-        if (this.via !== 'relay' || this.status !== 'connected') return;
+    if (this.heartbeat) return;
+    this.heartbeat = window.setInterval(() => {
+      if (this.status !== 'connected') return;
+      if (this.role === 'host') {
+        if (![...this.guests.values()].some((g) => g.relay)) return;
         this.relaySend({ t: 'rp' });
-        if (performance.now() - this.relayHeard > 12000) this.changed('closed', '对方已断开连接（中转超时）');
-      }, 2000)
-    );
+        for (const g of [...this.guests.values()]) if (g.relay && performance.now() - g.heard > 12000) this.dropGuest(g.id);
+        return;
+      }
+      if (this.via !== 'relay') return;
+      this.relaySend({ t: 'rp', _from: this.relayId });
+      if (performance.now() - this.relayHeard > 12000) this.changed('closed', '和房主断开了（中转超时）');
+    }, 2000);
+    this.relayTimers.push(this.heartbeat);
   }
   private joining = false;
   /** guest: peer to peer did not come up, knock on the host's door through the relay */
@@ -435,6 +574,14 @@ export class NetSession {
       window.clearTimeout(this.joinTimer);
       this.conn?.close();
       this.peer?.destroy();
+      for (const g of this.guests.values()) {
+        try {
+          g.conn?.send({ t: 'bye' });
+          g.conn?.close();
+        } catch {
+          /* ignore */
+        }
+      }
       this.relayTimers.forEach((t) => (window.clearTimeout(t), window.clearInterval(t)));
       window.clearInterval(this.pinger);
       this.relays.forEach((c) => c.end(true));

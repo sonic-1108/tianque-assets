@@ -1,3 +1,4 @@
+import { FX } from './fxMute';
 import { getSettings } from './settings';
 import * as THREE from 'three';
 
@@ -46,6 +47,7 @@ export class CameraController {
 
   // Add screen shake trauma (0.0 to 1.0)
   addShake(amount: number) {
+    if (FX.mute > 0) return;
     this.shakeTrauma = Math.min(1.0, this.shakeTrauma + amount);
   }
 

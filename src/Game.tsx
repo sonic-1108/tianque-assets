@@ -7,7 +7,8 @@ import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
-import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId } from './types';
+import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
+import { FX, muteable } from './fxMute';
 import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
@@ -21,7 +22,7 @@ import { CameraController } from './CameraController';
 import type { NetSession } from './net';
 
 export type RoundEvent =
-  | { type: 'ko'; winner: 'player' | 'enemy' }
+  | { type: 'ko'; winner: 'player' | 'enemy'; side?: number }
   | { type: 'reset' }
   | { type: 'playerHit'; heavy: boolean }
   | { type: 'screenFlash'; color: string }
@@ -39,8 +40,14 @@ interface GameSceneProps {
   mapId: MapId;
   playerClass?: CharacterClassId;
   enemyClass?: CharacterClassId;
-  /** online 1v1: host simulates, guest mirrors */
+  /** online: host simulates, guests mirror */
   net?: NetSession | null;
+  /** every fighter in the match, in slot order (2 to 4) */
+  fightersRef: React.MutableRefObject<CombatantState[]>;
+  /** who drives each slot, its class and side */
+  seats: FighterSeat[];
+  /** this browser's own fighter */
+  meSlot: number;
   showBoneAxes?: boolean;
   onRoundEvent?: (e: RoundEvent) => void;
   onVfxCountChange?: (count: number) => void;
@@ -48,6 +55,8 @@ interface GameSceneProps {
   onAutoDpr?: (dpr: number) => void;
   /** every frame: where the opponent's name tag goes on screen (moved directly, not through React state) */
   onFoeTagMove?: (x: number, y: number) => void;
+  /** team fights, every frame: where each fighter's head is on screen (null = off screen / hidden) */
+  onTagsMove?: (tags: ({ x: number; y: number } | null)[]) => void;
   onDebugUpdate?: (data: {
     playerPos: [number, number, number];
     cameraPos: [number, number, number];
@@ -86,22 +95,30 @@ const SHADOW_PLAYER_COLOR = '#22d3ee';
 const SHADOW_ENEMY_COLOR = '#c084fc';
 const phasesFor = (c: CombatantState) =>
   c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : c.classId === 'BuddhistMage' ? MONK_PHASE_CONFIGS : c.classId === 'Shadowblade' ? SHADOW_PHASE_CONFIGS : ACTION_PHASE_CONFIGS;
+/** which side each fighter slot is on (set every frame); side 0 wears the warm colours, side 1 the cold ones */
+const SLOT_SIDE = [0, 1, 0, 1];
+const sideA = (slot: number) => (SLOT_SIDE[slot] ?? 1) === 0;
 const colorFor = (slot: number, c: CombatantState) =>
   c.classId === 'Shadowblade'
-    ? slot === 0
+    ? sideA(slot)
       ? SHADOW_PLAYER_COLOR
       : SHADOW_ENEMY_COLOR
     : c.classId === 'Ranger'
-    ? slot === 0
+    ? sideA(slot)
       ? RANGER_PLAYER_COLOR
       : RANGER_ENEMY_COLOR
     : c.classId === 'BuddhistMage'
-    ? slot === 0
+    ? sideA(slot)
       ? MONK_PLAYER_COLOR
       : MONK_ENEMY_COLOR
-    : slot === 0
+    : sideA(slot)
     ? PLAYER_COLOR
     : ENEMY_COLOR;
+// sounds go quiet during the silent "what if" passes of a team fight (see fxMute)
+{
+  const proto = Object.getPrototypeOf(gameAudio);
+  muteable(proto, Object.getOwnPropertyNames(proto).filter((n) => n.startsWith('play')));
+}
 /** 禅定结界 radius */
 const ZEN_R = 4.5;
 /** 梯云纵: seconds to run up a lookout tree */
@@ -201,18 +218,29 @@ function GameImpl({
   playerClass = 'Berserker',
   enemyClass = 'Berserker',
   net = null,
+  fightersRef,
+  seats,
+  meSlot,
   showBoneAxes,
-  onRoundEvent,
+  onRoundEvent: onRoundEventProp,
   onVfxCountChange,
   onDebugUpdate,
   onAutoDpr,
   onFoeTagMove,
+  onTagsMove,
   onDummyScreenPosUpdate,
   onBloodRageFlash,
   onAnimationDebug,
   onLoadProgress,
 }: GameSceneProps) {
   const { camera, gl, scene, size } = useThree();
+  // nothing reaches the HUD from the silent "what if" passes of a team fight
+  const onRoundEvent = (e: RoundEvent) => {
+    if (FX.mute > 0) return;
+    onRoundEventProp?.(e);
+  };
+  const seatsRef = useRef(seats);
+  seatsRef.current = seats;
   const { quality } = useSettings();
   // a new shadow-map size only takes effect once the old map is thrown away
   useEffect(() => {
@@ -269,13 +297,13 @@ function GameImpl({
     (globalThis as any).__TQ_PERF = { fps: Math.round(fps), dpr: P.dpr, tier: P.tier };
   });
 
-  const playerGroupRef = useRef<THREE.Group>(null);
-  const enemyGroupRef = useRef<THREE.Group>(null);
+  /** one group / rig sockets / combatant ref per fighter slot */
+  const groupRefs = useMemo(() => [0, 1, 2, 3].map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
+  const slotRefs = useMemo(() => [0, 1, 2, 3].map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const cameraControllerRef = useRef<CameraController | null>(null);
-  const playerSockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null });
-  const enemySockets = useRef<RigSockets>({ rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null });
+  const sockets = useMemo(() => [0, 1, 2, 3].map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
 
   const slowMoTimerRef = useRef(0);
   const gameTimeRef = useRef(0);
@@ -289,28 +317,29 @@ function GameImpl({
   const bgNight = useMemo(() => new THREE.Color('#05070c'), []);
   /** weather clock and lightning timer (host / offline) */
   const weatherRef = useRef({ t: 12, phase: '', strike: 6, warn: 0 });
-  const slipPrevRef = useRef([[0, 0], [0, 0]]);
+  const slipPrevRef = useRef([[0, 0], [0, 0], [0, 0], [0, 0]]);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
-  const shipNavRef = useRef(newNavState());
-  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
+  const newShipAi = () => ({ goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
+  const shipNavRefs = useRef([0, 1, 2, 3].map(() => newNavState()));
+  const shipAiRefs = useRef([0, 1, 2, 3].map(newShipAi));
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
-  const footLiftRef = useRef([0, 0]);
-  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false] });
+  const footLiftRef = useRef([0, 0, 0, 0]);
+  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
-  const wallCdRef = useRef([0, 0]);
+  const wallCdRef = useRef([0, 0, 0, 0]);
   const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
   useEffect(() => {
     pendingResetRef.current = true;
-  }, [mapId, playerClass, enemyClass]);
+  }, [mapId, playerClass, enemyClass, seats]);
   const projRef = useRef<Projectile[]>([]);
   /** 雪岭: ground height each fighter last stood on (for the no-climbing rule) */
-  const takeoffY = useRef([0, 0]);
+  const takeoffY = useRef([0, 0, 0, 0]);
   /** 六字真言 syllables in flight (host / offline only; the guest sees them through the vfx replay) */
-  const glyphRef = useRef<{ idx: number; slot: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
+  const glyphRef = useRef<{ idx: number; slot: number; tgt: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
   const lastSnapRef = useRef<unknown>(null);
   const screenRepRef = useRef({ visible: false, hidden: false, t: 0 });
@@ -320,20 +349,27 @@ function GameImpl({
   const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
 
-  const auraTimers = useRef([0, 0]);
-  const footTimers = useRef([0, 0]);
-  const wasGrounded = useRef([true, true]);
+  const auraTimers = useRef([0, 0, 0, 0]);
+  const footTimers = useRef([0, 0, 0, 0]);
+  const wasGrounded = useRef([true, true, true, true]);
+  /** team fights: who each AI is after, and which fighters each attack has already hit this move */
+  const aiTargetRef = useRef([-1, -1, -1, -1]);
+  const hitMaskRef = useRef([0, 1, 2, 3].map(() => ({ mask: 0, state: '', t: 0 })));
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
-  const aiRef = useRef<AIMemory>({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
+  const newAiMem = (): AIMemory => ({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
+  const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3].map(newAiMem));
 
   // ---------- VFX ----------
-  const vfx = useMemo(() => new VFXSystem(), []);
+  const vfx = useMemo(() => {
+    const v = new VFXSystem();
+    // effects go quiet during the silent "what if" passes of a team fight (projectile bookkeeping stays live)
+    const keep = new Set(['constructor', 'update', 'takeProjectile', 'releaseProjectile', 'followFighter', 'createTrail', 'dispose', 'setViewportHeight']);
+    muteable(v, Object.getOwnPropertyNames(VFXSystem.prototype).filter((n) => !keep.has(n)));
+    return v;
+  }, []);
   const trails = useMemo<{ right: RibbonTrail; left: RibbonTrail }[]>(
-    () => [
-      { right: vfx.createTrail(PLAYER_COLOR), left: vfx.createTrail(PLAYER_COLOR) },
-      { right: vfx.createTrail(ENEMY_COLOR), left: vfx.createTrail(ENEMY_COLOR) },
-    ],
+    () => [0, 1, 2, 3].map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
     [vfx]
   );
   useEffect(() => () => vfx.dispose(), [vfx]);
@@ -352,7 +388,7 @@ function GameImpl({
       const orig = v[name];
       if (typeof orig !== 'function') continue;
       v[name] = function (...args: any[]) {
-        if (depth === 0) net.events.push(['v', name, args.map(enc)]);
+        if (depth === 0 && !FX.mute) net.events.push(['v', name, args.map(enc)]);
         depth++;
         try {
           return orig.apply(this, args);
@@ -367,7 +403,7 @@ function GameImpl({
       if (!name.startsWith('play') || typeof a[name] !== 'function') continue;
       const orig = a[name];
       a[name] = function (...args: any[]) {
-        net.events.push(['a', name]);
+        if (!FX.mute) net.events.push(['a', name]);
         return orig.apply(this, args);
       };
       restore.push(() => delete a[name]);
@@ -422,10 +458,50 @@ function GameImpl({
     const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
-    const p1 = p1RefState.current;
-    const en = dummyRefState.current;
-    const fighters = [p1, en];
+    const fighters = fightersRef.current;
+    const N = fighters.length;
+    const ME = Math.min(meSlot, N - 1);
+    const seatsNow = seatsRef.current;
+    for (let k = 0; k < N; k++) {
+      SLOT_SIDE[k] = fighters[k].side ?? (k === 0 ? 0 : 1);
+      slotRefs[k].current = fighters[k];
+    }
     const targeting = targetingRefState.current;
+    const slotOf = (c: CombatantState) => fighters.indexOf(c);
+    /**
+     * Who fighter i is fighting: the player's locked target if any, else the nearest standing fighter of the other
+     * side (an AI sticks with its current pick unless another is clearly closer); with nobody left on the other
+     * side, the nearest anybody. In a 1v1 that's always simply the other fighter.
+     */
+    function foeOf(i: number): CombatantState {
+      const c = fighters[i];
+      if (N === 2) return fighters[1 - i];
+      if (i === ME && targeting.lockedEnemyId) {
+        const t = fighters.find((f) => f.id === targeting.lockedEnemyId && f !== c);
+        if (t && t.hp > 0) return t;
+      }
+      let best = -1;
+      let bd = 1e9;
+      for (let pass = 0; pass < 2 && best < 0; pass++)
+        for (let j = 0; j < N; j++) {
+          const f = fighters[j];
+          if (j === i || f.hp <= 0 || (pass === 0 && (f.side ?? 0) === (c.side ?? 0))) continue;
+          let d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) + Math.abs(f.pos[1] - c.pos[1]) * 1.5;
+          if (j === aiTargetRef.current[i]) d -= 3;
+          if (d < bd) {
+            bd = d;
+            best = j;
+          }
+        }
+      if (best < 0) best = i === 0 ? 1 : 0;
+      aiTargetRef.current[i] = best;
+      return fighters[best];
+    }
+    const foes = fighters.map((_, i) => foeOf(i));
+    const p1 = fighters[ME];
+    const en = foes[ME];
+    p1RefState.current = p1;
+    dummyRefState.current = en;
     const input = inputRef.current;
     const actions = input.actions;
     const just = input.justPressed;
@@ -479,7 +555,7 @@ function GameImpl({
         c.burrowT = (c.burrowT ?? 0) - dt;
         c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.1);
         if (Math.random() < dt * 14) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 3, 0.35, 1.2, 0.55, '#6b5a40');
-        if ((c.burrowT ?? 0) <= 0 || c.hp <= 0) burstOut(fighters.indexOf(c), c, fighters[1 - fighters.indexOf(c)]);
+        if ((c.burrowT ?? 0) <= 0 || c.hp <= 0) burstOut(slotOf(c), c, foes[slotOf(c)]);
       }
       // 锁链钩: being dragged in
       if (c.pull) {
@@ -510,7 +586,7 @@ function GameImpl({
       }
     }
     // 淬毒: poison damage over time
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < N; i++) {
       const c = fighters[i];
       if ((c.poisonTimer ?? 0) <= 0 || c.hp <= 0) continue;
       c.poisonTimer = (c.poisonTimer ?? 0) - dt;
@@ -521,7 +597,7 @@ function GameImpl({
         c.hp = Math.max(0, c.hp - d);
         vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 1.9, c.pos[2]), d, false, POISON_COLOR);
         vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), 4, '#22c55e', 0.4, 1.2, 0.07);
-        if (c.hp <= 0) koCheck(i, colorFor(1 - i, fighters[1 - i]));
+        if (c.hp <= 0) koCheck(i, colorFor(slotOf(foes[i]), foes[i]));
       }
       if (c.poisonTimer <= 0) c.poisonDps = 0;
     }
@@ -570,54 +646,59 @@ function GameImpl({
       interact: !!actions.interact,
     };
 
-    // Opponent: AI brain
-    const enemyIntent: Intent = { move: new THREE.Vector3(), faceYaw: yawTo(en.pos, p1.pos), request: null, block: false };
-    if (net?.role === 'host') {
-      // online: the guest's controls drive the second fighter
-      const r = net.remote;
-      enemyIntent.move.set(r.mx, 0, r.mz);
-      if (enemyIntent.move.lengthSq() > 1) enemyIntent.move.normalize();
-      enemyIntent.faceYaw = r.yaw;
-      enemyIntent.block = r.blk && !round.over && en.classId !== 'Ranger';
-      enemyIntent.interact = !!r.int;
-      enemyIntent.request = round.over || en.hp <= 0 ? null : (r.req as InputKeyAction | null);
-      r.reqTtl -= dt;
-      if (r.reqTtl <= 0) r.req = null;
-    } else if (aiOn && !round.over && en.hp > 0) {
-      runAI(en, p1, enemyIntent, dt);
-      if (map.id === 'glacier') routeUpMountain(en, p1, enemyIntent);
-      if (map.id === 'forest') leaveLookout(en, p1, enemyIntent);
-      if (map.id === 'sea') routeOnShip(en, p1, enemyIntent);
-    }
-    else if (!aiOn) {
-      enemyIntent.faceYaw = en.targetRotY;
+    // Everyone else: the AI, a guest's controls, or (training dummy) nothing
+    const intents: Intent[] = fighters.map((c, i) => (i === ME ? playerIntent : { move: new THREE.Vector3(), faceYaw: yawTo(c.pos, foes[i].pos), request: null, block: false }));
+    for (let i = 0; i < N; i++) {
+      if (i === ME) continue;
+      const c = fighters[i];
+      const it = intents[i];
+      const seat = seatsNow[i];
+      const r = seat?.ctl === 'remote' && net?.role === 'host' ? net.remoteOf(seat.remote) : null;
+      if (r) {
+        it.move.set(r.mx, 0, r.mz);
+        if (it.move.lengthSq() > 1) it.move.normalize();
+        it.faceYaw = r.yaw;
+        it.block = r.blk && !round.over && c.classId !== 'Ranger';
+        it.interact = !!r.int;
+        it.request = round.over || c.hp <= 0 ? null : (r.req as InputKeyAction | null);
+        r.reqTtl -= dt;
+        if (r.reqTtl <= 0) r.req = null;
+      } else if (aiOn && !round.over && c.hp > 0) {
+        runAI(c, foes[i], it, dt);
+        if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
+        if (map.id === 'forest') leaveLookout(c, foes[i], it);
+        if (map.id === 'sea') routeOnShip(c, foes[i], it);
+      } else if (!aiOn) {
+        it.faceYaw = c.targetRotY;
+      }
     }
 
     // ================= ACTIONS =================
     if (map.id === 'sea') {
-      if (manBallista(0, p1, en, playerIntent)) input.consumeBuffer();
-      manBallista(1, en, p1, enemyIntent);
+      for (let i = 0; i < N; i++) if (manBallista(i, fighters[i], foes[i], intents[i]) && i === ME) input.consumeBuffer();
       updateBolts(dt);
     }
-    const p1Ok = executeIntent(0, p1, en, playerIntent);
-    if (p1Ok && playerIntent.request) input.consumeBuffer();
-    const enOk = executeIntent(1, en, p1, enemyIntent);
-    if (enOk) {
-      aiRef.current.request = null;
-      if (net?.role === 'host') net.remote.req = null;
+    for (let i = 0; i < N; i++) {
+      const ok = executeIntent(i, fighters[i], foes[i], intents[i]);
+      if (i === ME) {
+        if (ok && playerIntent.request) input.consumeBuffer();
+      } else if (ok) {
+        aiRefs.current[i].request = null;
+        const seat = seatsNow[i];
+        const r = seat?.ctl === 'remote' && net?.role === 'host' ? net.remoteOf(seat.remote) : null;
+        if (r) r.req = null;
+      }
     }
 
-    applyMovement(p1, playerIntent);
-    applyMovement(en, enemyIntent);
+    for (let i = 0; i < N; i++) applyMovement(fighters[i], intents[i]);
 
     // ================= COMBAT =================
-    resolveAttacks(0, p1, en);
-    resolveAttacks(1, en, p1);
+    resolveAll();
     updateProjectiles(dt);
     updateGlyphs(dt);
 
     // ================= PHYSICS =================
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < N; i++) {
       const c = fighters[i];
       const cdt = c.hitStopTimer > 0 ? dt * 0.08 : dt;
       c.stateTimer += cdt;
@@ -710,7 +791,7 @@ function GameImpl({
       if (map.id === 'forest') {
         updateWater(c);
         updateGrip(i, c);
-        updateItems(i, c, i === 0 ? playerIntent : enemyIntent);
+        updateItems(i, c, intents[i]);
       }
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
@@ -736,12 +817,12 @@ function GameImpl({
         if (footTimers.current[i] > 0.28) {
           footTimers.current[i] = 0;
           vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2, 0.15, 0.6, 0.35, '#7d7166');
-          if (i === 0) gameAudio.playStep();
+          if (i === ME) gameAudio.playStep();
         }
       }
       if (!wasGrounded.current[i] && c.isGrounded && c.actionState !== 'ultimate') {
         vfx.dustPuff(vB.set(c.pos[0], c.pos[1], c.pos[2]), 6, 0.3, 1.4, 0.45);
-        if (i === 0) gameAudio.playLand();
+        if (i === ME) gameAudio.playLand();
       }
       wasGrounded.current[i] = c.isGrounded;
 
@@ -750,42 +831,46 @@ function GameImpl({
         auraTimers.current[i] += dt;
         if (auraTimers.current[i] > 0.05) {
           auraTimers.current[i] = 0;
-          vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.2, c.pos[2]), 2, i === 0 ? '#ff2a1a' : '#2a8bff', 0.45, 2.2, 0.06);
+          vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.2, c.pos[2]), 2, sideA(i) ? '#ff2a1a' : '#2a8bff', 0.45, 2.2, 0.06);
         }
       }
     }
 
     // body separation
-    {
-      const dx = p1.pos[0] - en.pos[0];
-      const dz = p1.pos[2] - en.pos[2];
-      const d = Math.hypot(dx, dz);
-      if (d < 0.85 && d > 0.0001 && p1.actionState !== 'dodge' && en.actionState !== 'dodge') {
-        const push = (0.85 - d) / d / 2;
-        p1.pos[0] += dx * push;
-        p1.pos[2] += dz * push;
-        en.pos[0] -= dx * push;
-        en.pos[2] -= dz * push;
+    for (let i = 0; i < N; i++)
+      for (let j = i + 1; j < N; j++) {
+        const A = fighters[i];
+        const B = fighters[j];
+        if (A.hp <= 0 || B.hp <= 0 || Math.abs(A.pos[1] - B.pos[1]) > 1.6) continue;
+        const dx = A.pos[0] - B.pos[0];
+        const dz = A.pos[2] - B.pos[2];
+        const d = Math.hypot(dx, dz);
+        if (d < 0.85 && d > 0.0001 && A.actionState !== 'dodge' && B.actionState !== 'dodge') {
+          const push = (0.85 - d) / d / 2;
+          A.pos[0] += dx * push;
+          A.pos[2] += dz * push;
+          B.pos[0] -= dx * push;
+          B.pos[2] -= dz * push;
+        }
       }
-    }
 
-    if (!aiOn && en.hp <= 0) {
-      en.hp = en.maxHp;
-      gameAudio.playPowerupChime();
-    }
+    if (!aiOn)
+      for (let i = 0; i < N; i++)
+        if (i !== ME && fighters[i].hp <= 0) {
+          fighters[i].hp = fighters[i].maxHp;
+          gameAudio.playPowerupChime();
+        }
 
     }
 
     // ================= TRANSFORMS / CAMERA / LIGHTS =================
-    if (playerGroupRef.current) {
-      playerGroupRef.current.position.set(p1.pos[0], p1.pos[1] + footLift(p1, 0), p1.pos[2]);
-      playerGroupRef.current.rotation.y = p1.rotY;
-      playerGroupRef.current.updateMatrixWorld(true);
-    }
-    if (enemyGroupRef.current) {
-      enemyGroupRef.current.position.set(en.pos[0], en.pos[1] + footLift(en, 1), en.pos[2]);
-      enemyGroupRef.current.rotation.y = en.rotY;
-      enemyGroupRef.current.updateMatrixWorld(true);
+    for (let i = 0; i < N; i++) {
+      const g = groupRefs[i].current;
+      if (!g) continue;
+      const c = fighters[i];
+      g.position.set(c.pos[0], c.pos[1] + footLift(c, i), c.pos[2]);
+      g.rotation.y = c.rotY;
+      g.updateMatrixWorld(true);
     }
 
     playerVec.set(p1.pos[0], p1.pos[1], p1.pos[2]);
@@ -859,8 +944,8 @@ function GameImpl({
 
     // ================= TRAILS & VFX =================
     const now = performance.now() / 1000;
-    [p1, en].forEach((c, i) => {
-      const s = (i === 0 ? playerSockets : enemySockets).current;
+    fighters.forEach((c, i) => {
+      const s = sockets[i].current;
       const t = trails[i];
       const cfg = phasesFor(c)[c.actionState];
       const swinging =
@@ -873,7 +958,7 @@ function GameImpl({
       t.right.emitting = monkC ? false : rangerC ? c.actionState === 'attack_3' && !!c.backSlash && c.stateTimer > 0.18 && c.stateTimer < 0.42 : swinging;
       t.left.emitting = !rangerC && !monkC && swinging && c.actionState !== 'attack_1';
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
-      const col = rangerC ? colorFor(i, c) : i === 0 ? (rage ? '#ff1030' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
+      const col = rangerC ? colorFor(i, c) : sideA(i) ? (rage ? '#ff1030' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
       t.right.setColor(col, 2.2);
       t.left.setColor(col, 2.2);
       if (s.rightBase && s.rightTip) t.right.update(rawDt, s.rightBase.getWorldPosition(vA), s.rightTip.getWorldPosition(vB), now);
@@ -910,6 +995,16 @@ function GameImpl({
         onDummyScreenPosUpdate?.({ visible, hidden: hiddenInDark, screenX: sx, screenY: sy, angle: Math.atan2(vD.x, -vD.z), dist: enDist });
       }
     }
+    if (onTagsMove && N > 2) {
+      const tags = fighters.map((c, k) => {
+        if (k === ME) return null;
+        const hidden = (c.stealthT ?? 0) > 0 || (c.burrowT ?? 0) > 0;
+        headProj.set(c.pos[0], c.pos[1] + 2.25, c.pos[2]).project(camera);
+        if (hidden || headProj.z >= 1 || Math.abs(headProj.x) > 1.05 || Math.abs(headProj.y) > 1.05) return null;
+        return { x: (headProj.x * 0.5 + 0.5) * size.width, y: (-headProj.y * 0.5 + 0.5) * size.height };
+      });
+      onTagsMove(tags);
+    }
     const nowMs = performance.now();
     if (nowMs - lastReportRef.current > 150) {
       lastReportRef.current = nowMs;
@@ -931,7 +1026,7 @@ function GameImpl({
       netSendRef.current = nowMs;
       net.send({
         t: 's',
-        f: [slimFighter(p1), slimFighter(en)],
+        f: fighters.map(slimFighter),
         p: projRef.current.map((pr) => [
           pr.kind,
           +pr.pos.x.toFixed(3),
@@ -979,7 +1074,7 @@ function GameImpl({
       const req = input.consumeBuffer();
       n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, req });
 
-      // ---- host state -> our two fighters (we are the host's slot 1)
+      // ---- host state -> every fighter (we are slot ME)
       const snaps = n.snaps;
       if (snaps.length) {
         // draw the host's state a little in the past, between the two snapshots around that moment
@@ -1002,8 +1097,10 @@ function GameImpl({
           if (s1.msg.ev.length) n.inbox.push(...s1.msg.ev);
         }
         const fresh = s1 !== lastSnapRef.current;
-        ([[p1, 1], [en, 0]] as [CombatantState, number][]).forEach(([c, idx], local) => {
-          // ourselves: the newest state (no interpolation delay); the opponent: smoothly, a little in the past
+        fighters.forEach((c, idx) => {
+          const local = idx === ME ? 0 : 1;
+          if (!s1.msg.f[idx] || !s0.msg.f[idx]) return;
+          // ourselves: the newest state (no interpolation delay); everyone else: smoothly, a little in the past
           const a = local === 0 ? snaps[snaps.length - 1].msg.f[idx] : s0.msg.f[idx];
           const b = local === 0 ? snaps[snaps.length - 1].msg.f[idx] : s1.msg.f[idx];
           const prevHp = c.hp;
@@ -1028,7 +1125,7 @@ function GameImpl({
         {
           const P = predRef.current;
           const newest = snaps[snaps.length - 1];
-          const nb = newest.msg.f[1];
+          const nb = newest.msg.f[ME] ?? newest.msg.f[1];
           const now = performance.now();
           const age = Math.min(0.25, (now - newest.at) / 1000);
           const ax = nb.pos[0] + nb.vel[0] * age;
@@ -1130,10 +1227,7 @@ function GameImpl({
         const fn = (vfx as any)[ev[1]];
         if (typeof fn !== 'function') continue;
         const args = (ev[2] as any[]).map((x) => (x && typeof x === 'object' && 'v3' in x ? new THREE.Vector3(x.v3[0], x.v3[1], x.v3[2]) : x));
-        // slot-indexed effects: the host's slot 0 is our opponent
-        const SLOT_ARG: Record<string, number> = { setVortex: 2, pillarAt: 2, glyph: 3, bell: 1, bellHit: 0, zenField: 3 };
-        const si = SLOT_ARG[ev[1]];
-        if (si !== undefined) args[si] = 1 - (typeof args[si] === 'number' ? args[si] : 0); // a missing slot meant the default 0
+        // slot-indexed effects use the host's slot numbers, and so do we
         fn.apply(vfx, args);
       }
       // sky tint from lightning / eruption, same as on the host
@@ -1164,7 +1258,7 @@ function GameImpl({
 
     function executeIntent(slot: number, c: CombatantState, foe: CombatantState, intent: Intent): boolean {
       if (c.hp <= 0) return false;
-      const isPlayer = slot === 0;
+      const isPlayer = slot === ME;
       const ranger = c.classId === 'Ranger';
       const skills = CLASS_CONFIGS[c.classId].skills;
       const dbg = input.debug;
@@ -1534,9 +1628,9 @@ function GameImpl({
           start('skill_4');
           c.buffs = c.buffs.filter((b) => b.type !== 'blood_rage');
           c.buffs.push({ id: `rage_${slot}_${Date.now()}`, type: 'blood_rage', duration: 8, value: 0.35 });
-          vfx.pillarAt(1.1, isPlayer ? '#ff1f1f' : '#1f6bff', slot);
-          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2.6, isPlayer ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
-          vfx.embers(vC.set(c.pos[0], 0.2, c.pos[2]), 45, isPlayer ? '#ff3b2a' : '#3b8bff', 0.7, 3.5, 0.08);
+          vfx.pillarAt(1.1, sideA(slot) ? '#ff1f1f' : '#1f6bff', slot);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2.6, sideA(slot) ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
+          vfx.embers(vC.set(c.pos[0], 0.2, c.pos[2]), 45, sideA(slot) ? '#ff3b2a' : '#3b8bff', 0.7, 3.5, 0.08);
           if (isPlayer) {
             controller?.addShake(0.25);
             onBloodRageFlash?.();
@@ -1643,7 +1737,7 @@ function GameImpl({
         // close to the trunk: any direction works; a bit further out you have to be heading for it
         if (d > pl.r + 1.2 && (dir.x * dx + dir.z * dz) / d < 0.2) return;
         // the AI only goes up after you
-        if (aiOn && i === 1 && !(fighters[0].pos[1] > (pl.h ?? 0) - 1 && Math.hypot(fighters[0].pos[0] - pl.x, fighters[0].pos[2] - pl.z) < (pl.deck ?? pl.r) + 0.5)) return;
+        if (aiOn && i !== ME && seatsNow[i]?.ctl !== 'remote' && !(foes[i].pos[1] > (pl.h ?? 0) - 1 && Math.hypot(foes[i].pos[0] - pl.x, foes[i].pos[2] - pl.z) < (pl.deck ?? pl.r) + 0.5)) return;
         if (d < bestD) {
           bestD = d;
           best = k;
@@ -1651,7 +1745,7 @@ function GameImpl({
       });
       if (best < 0) return false;
       if ((c.stamina ?? 0) < 25) {
-        if (i === 0) onRoundEvent?.({ type: 'toast', text: '体力不够，上不去树' });
+        if (i === ME) onRoundEvent?.({ type: 'toast', text: '体力不够，上不去树' });
         return false;
       }
       const pl = map.pillars![best];
@@ -1857,16 +1951,21 @@ function GameImpl({
       }
     }
 
-    function applyHit(
-      slot: number,
-      att: CombatantState,
-      def: CombatantState,
-      base: number,
-      oIn: { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean; flinch?: boolean; breakArmor?: boolean }
-    ) {
+    type HitOpts = { heavy?: boolean; crit?: boolean; launch?: number; knock?: number; state?: CharacterActionState; dur?: number; shake?: number; unblockable?: boolean; noMark?: boolean; noStop?: boolean; ranged?: boolean; flinch?: boolean; breakArmor?: boolean };
+    /** a hit always shows, even when it lands during a team fight's silent re-run of an attack */
+    function applyHit(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
+      const m = FX.mute;
+      FX.mute = 0;
+      try {
+        applyHitInner(slot, att, def, base, oIn);
+      } finally {
+        FX.mute = m;
+      }
+    }
+    function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
       if (def.hp <= 0) return;
       const o = { ...oIn };
-      const attackerIsPlayer = slot === 0;
+      const attackerIsPlayer = slot === ME;
       const hitDir = vC.set(def.pos[0] - att.pos[0], 0, def.pos[2] - att.pos[2]).normalize();
       const chest = vB.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]).addScaledVector(hitDir, -0.35);
       const color = colorFor(slot, att);
@@ -1880,7 +1979,7 @@ function GameImpl({
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.45);
           vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]) + 0.05, def.pos[2]), 2.4, '#7dd3fc', 0.5, 0.1, 0.3);
           vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '极限闪避', true, '#a5f3fc');
-          if (slot === 1) onRoundEvent?.({ type: 'screenFlash', color: 'rgba(125,211,252,0.35)' });
+          if (slotOf(def) === ME) onRoundEvent?.({ type: 'screenFlash', color: 'rgba(125,211,252,0.35)' });
         } else {
           vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.0, def.pos[2]), '闪避', false, '#a7f3d0');
         }
@@ -1933,8 +2032,7 @@ function GameImpl({
       if (belled) {
         dmg *= 0.35;
         def.mp = Math.min(def.maxMp, def.mp + 4);
-        const sl = def === p1 ? 0 : 1;
-        vfx.bellHit(sl);
+        vfx.bellHit(slotOf(def));
         gameAudio.playGong();
         const near = Math.hypot(att.pos[0] - def.pos[0], att.pos[2] - def.pos[2]) < 3.5;
         if (near && !o.ranged && att.hp > 0) {
@@ -1985,7 +2083,7 @@ function GameImpl({
         vfx.flash(chest, '#d8ecff', 14, 0.1, 5);
         vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.0, def.pos[2]), `格挡 ${dmg}`, false, '#bfdbfe');
         gameAudio.playClash();
-        if (slot === 1) onRoundEvent?.({ type: 'playerHit', heavy: false });
+        if (slotOf(def) === ME) onRoundEvent?.({ type: 'playerHit', heavy: false });
         return;
       }
 
@@ -2056,7 +2154,58 @@ function GameImpl({
         if (!o.noStop) onRoundEvent?.({ type: 'playerHit', heavy: !!o.heavy });
       }
 
-      koCheck(def === p1 ? 0 : 1, color);
+      koCheck(slotOf(def), color);
+    }
+
+    /**
+     * Every fighter's attack this frame. In a 1v1 that's simply attacker against opponent. In a team fight an attack
+     * is worked out for the attacker's target, then re-run silently against everyone else standing (teammates too:
+     * friendly fire is on), starting from the attacker's state before the first run, with effects muted except an
+     * actual hit; whatever the re-runs did to the attacker is thrown away. Each move remembers whom it already hit.
+     */
+    function resolveAll() {
+      if (N === 2) {
+        resolveAttacks(0, fighters[0], fighters[1]);
+        resolveAttacks(1, fighters[1], fighters[0]);
+        return;
+      }
+      for (let i = 0; i < N; i++) {
+        const c = fighters[i];
+        if (c.hp <= 0) continue;
+        const H = hitMaskRef.current[i];
+        if (c.actionState !== H.state || c.stateTimer < H.t) H.mask = 0;
+        const prim = foes[i];
+        const pi = slotOf(prim);
+        const others = fighters.filter((f, j) => j !== i && j !== pi && f.hp > 0 && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < 14);
+        const before = others.length ? structuredClone(c) : null;
+        c.hasHitCurrentMove = !!(H.mask & (1 << pi));
+        resolveAttacks(i, c, prim);
+        if (c.hasHitCurrentMove) H.mask |= 1 << pi;
+        if (before) {
+          const after = structuredClone(c);
+          for (const f of others) {
+            const j = slotOf(f);
+            Object.assign(c, structuredClone(before));
+            c.hasHitCurrentMove = !!(H.mask & (1 << j));
+            const np = projRef.current.length;
+            const ng = glyphRef.current.length;
+            FX.mute++;
+            try {
+              resolveAttacks(i, c, f);
+            } finally {
+              FX.mute--;
+            }
+            if (c.hasHitCurrentMove) H.mask |= 1 << j;
+            // a re-run never launches a second volley
+            for (const pr of projRef.current.splice(np)) vfx.releaseProjectile(pr.obj);
+            glyphRef.current.splice(ng);
+          }
+          Object.assign(c, after);
+          c.hasHitCurrentMove = !!(H.mask & (1 << pi));
+        }
+        H.state = c.actionState;
+        H.t = c.stateTimer;
+      }
     }
 
     function resolveAttacks(slot: number, c: CombatantState, foe: CombatantState) {
@@ -2068,7 +2217,7 @@ function GameImpl({
       const cfg = phasesFor(c)[c.actionState];
       const active = !!cfg && c.stateTimer >= cfg.startup && c.stateTimer <= cfg.startup + cfg.active;
       const rage = c.buffs.some((b) => b.type === 'blood_rage');
-      const color = slot === 0 ? (rage ? '#ff1f2f' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
+      const color = sideA(slot) ? (rage ? '#ff1f2f' : PLAYER_COLOR) : rage ? '#1f6bff' : ENEMY_COLOR;
       if (c.classId === 'Ranger') {
         resolveRanger(slot, c, foe, fwd, dist, inFront, active);
         return;
@@ -2102,7 +2251,7 @@ function GameImpl({
           const ix = c.pos[0] + fwd.x * 0.8;
           const iz = c.pos[2] + fwd.z * 0.8;
           vfx.groundSlam(vB.set(ix, fy(ix, iz), iz), 0.85, color);
-          controller?.addShake(slot === 0 ? 0.55 : 0.3);
+          controller?.addShake(slot === ME ? 0.55 : 0.3);
           gameAudio.playSlam();
           if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.8 && foe.hp > 0) {
             applyHit(slot, c, foe, 160, { heavy: true, crit: true, knock: 0, state: 'buried', dur: 0.5 });
@@ -2128,7 +2277,7 @@ function GameImpl({
           vfx.ring(vB.set(ix, fy(ix, iz), iz), 1.8, color, 0.35, 0.14, 0.5);
           vfx.dustPuff(vB, 12, 0.5, 2.5, 0.6);
           vfx.rocks(vB, 6, 5, 0.08);
-          controller?.addShake(slot === 0 ? 0.35 : 0.2);
+          controller?.addShake(slot === ME ? 0.35 : 0.2);
           if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 2.4 && foe.hp > 0) {
             applyHit(slot, c, foe, 120, { heavy: true, knock: 5, state: 'knockdown', dur: 0.8, launch: 3 });
           }
@@ -2167,7 +2316,7 @@ function GameImpl({
             });
           }
         }
-        if (slot === 0) controller?.addShake(0.6);
+        if (slot === ME) controller?.addShake(0.6);
         else controller?.addShake(Math.max(0, 0.5 - dist * 0.05));
         gameAudio.playSlam();
         if (Math.hypot(foe.pos[0] - ix, foe.pos[2] - iz) < 3.4) applyHit(slot, c, foe, 210, { heavy: true, crit: true, launch: 9.5, knock: 3, state: 'launched', dur: 0.9 });
@@ -2220,13 +2369,13 @@ function GameImpl({
           c.vel[2] = fwd.z * 6;
         }
         if (!c.isGrounded) {
-          vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), c.ultSlamStarted ? 14 : 3, slot === 0 ? '#ff7a2a' : '#5ab0ff', 0.4, c.ultSlamStarted ? 6 : -1, c.ultSlamStarted ? 0.14 : 0.1);
-          if (c.ultSlamStarted) vfx.flash(vB.set(c.pos[0], c.pos[1] + 1, c.pos[2]), slot === 0 ? '#ff8a3a' : '#5ab0ff', 18, 0.06, 6);
+          vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), c.ultSlamStarted ? 14 : 3, sideA(slot) ? '#ff7a2a' : '#5ab0ff', 0.4, c.ultSlamStarted ? 6 : -1, c.ultSlamStarted ? 0.14 : 0.1);
+          if (c.ultSlamStarted) vfx.flash(vB.set(c.pos[0], c.pos[1] + 1, c.pos[2]), sideA(slot) ? '#ff8a3a' : '#5ab0ff', 18, 0.06, 6);
         }
         if (c.ultSlamStarted && c.isGrounded && !c.hasHitCurrentMove) {
           c.hasHitCurrentMove = true;
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.3);
-          controller?.addShake(slot === 0 ? 1 : 0.7);
+          controller?.addShake(slot === ME ? 1 : 0.7);
           vfx.ultimateImpact(vB.set(c.pos[0] + fwd.x * 0.8, 0, c.pos[2] + fwd.z * 0.8));
           gameAudio.playUltImpact();
           
@@ -2243,10 +2392,13 @@ function GameImpl({
     // ======================================================
     /** standing inside the opponent's 禅定结界 */
     function inZen(c: CombatantState) {
-      const o = c === p1 ? en : p1;
-      const z = o.zenField;
-      if (!z || z.t <= 0 || o.hp <= 0) return false;
-      return Math.hypot(c.pos[0] - z.x, c.pos[2] - z.z) < ZEN_R && c.pos[1] - fy(z.x, z.z) < 2.5;
+      // anyone else's field (friendly fire: a teammate's slows you too)
+      for (const o of fighters) {
+        const z = o.zenField;
+        if (o === c || !z || z.t <= 0 || o.hp <= 0) continue;
+        if (Math.hypot(c.pos[0] - z.x, c.pos[2] - z.z) < ZEN_R && c.pos[1] - fy(z.x, z.z) < 2.5) return true;
+      }
+      return false;
     }
 
     function executeMonk(
@@ -2309,7 +2461,7 @@ function GameImpl({
           vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 2.2, h.color, 0.5, 0.14, 0.4);
           vfx.embers(vC.set(c.pos[0], c.pos[1] + 0.3, c.pos[2]), 30, '#ffd36a', 0.9, 3, 0.08);
           gameAudio.playGong();
-          if (slot === 0) controller?.addShake(0.15);
+          if (slot === ME) controller?.addShake(0.15);
           return true;
         }
         case 'ultimate': {
@@ -2354,7 +2506,7 @@ function GameImpl({
       vfx.groundSlam(vB.set(c.pos[0], gy, c.pos[2]), 0.7, colorFor(slot, c));
       vfx.dustPuff(vB.set(c.pos[0], gy + 0.2, c.pos[2]), 22, 1, 3.5, 0.9, '#6b5a40');
       gameAudio.playSlam();
-      if (slot === 0) controller?.addShake(0.35);
+      if (slot === ME) controller?.addShake(0.35);
       if (foe.hp > 0 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) < 2.6 && Math.abs(foe.pos[1] - gy) < 1.5)
         applyHit(slot, c, foe, 130, { heavy: true, launch: 7, state: 'launched', dur: 0.9, knock: 2, shake: 0.4 });
     }
@@ -2427,7 +2579,7 @@ function GameImpl({
             if (moved) {
               c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
               intent.faceYaw = c.rotY; // and stays facing them
-              if (slot === 0 && controller) controller.yaw = c.rotY; // the camera swings round behind you
+              if (slot === ME && controller) controller.yaw = c.rotY; // the camera swings round behind you
             }
           }
           if (!moved) {
@@ -2453,7 +2605,7 @@ function GameImpl({
           start('skill_3');
           c.burrowT = 2.2;
           c.dodgeIframeTimer = 0.3;
-          if (slot === 1 && targeting.lockedEnemyId) targeting.lockedEnemyId = null;
+          if (slot !== ME && targeting.lockedEnemyId === c.id) targeting.lockedEnemyId = null;
           const gy = fy(c.pos[0], c.pos[2], c.pos[1]);
           vfx.dustPuff(vB.set(c.pos[0], gy + 0.1, c.pos[2]), 18, 0.7, 2.5, 0.8, '#6b5a40');
           vfx.rocks(vB.set(c.pos[0], gy, c.pos[2]), 6, 4, 0.1);
@@ -2496,7 +2648,7 @@ function GameImpl({
           shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
           vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.06, c.pos[2]), 3, color, 0.6, 0.14, 0.4);
           gameAudio.playUltRise();
-          if (slot === 0) controller?.addShake(0.2);
+          if (slot === ME) controller?.addShake(0.2);
           return true;
         }
       }
@@ -2612,7 +2764,7 @@ function GameImpl({
           vfx.chargeWave(vA.set(c.pos[0], gy, c.pos[2]), fwd, color);
           vfx.flash(chest(), '#ffd36a', 40, 0.2, 9);
           gameAudio.playHitHeavy();
-          if (slot === 0) controller?.addShake(0.35);
+          if (slot === ME) controller?.addShake(0.35);
           if (dist < 3.2 && inFront) applyHit(slot, c, foe, 160, { heavy: true, crit: true, knock: 17, dur: 0.75, shake: 0.5 });
           c.stateTimer = Math.max(c.stateTimer, cfg.startup + cfg.active);
           c.vel[0] *= 0.2;
@@ -2628,7 +2780,7 @@ function GameImpl({
         vfx.ring(vB.set(c.pos[0], gy + 0.05, c.pos[2]), ZEN_R, color, 0.6, 0.12, 0.25);
         vfx.dustPuff(vB, 14, 1.5, 3, 0.7);
         gameAudio.playSlam();
-        if (slot === 0) controller?.addShake(0.2);
+        if (slot === ME) controller?.addShake(0.2);
       }
       // the circle hums while it lasts
       if (c.zenField && c.zenField.t > 0 && Math.random() < dt * 6) {
@@ -2651,13 +2803,13 @@ function GameImpl({
           vfx.ring(vB, 2.8, '#ffe9a8', 0.4, 0.18, 0.15);
           vfx.flash(vA.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), '#ffe2a0', 40, 0.2, 8);
           gameAudio.playGong();
-          controller?.addShake(slot === 0 ? 0.2 : 0.1);
+          controller?.addShake(slot === ME ? 0.2 : 0.1);
           const d3 = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
           if (d3 < 2.8 && Math.abs(foe.pos[1] - c.pos[1]) < 2.5 && foe.hp > 0) {
             const casting = foe.actionState.startsWith('skill_') || foe.actionState === 'ultimate';
             applyHit(slot, c, foe, 40, { knock: 5, state: 'hitstun', dur: 0.45, unblockable: true, breakArmor: true });
             if (casting && foe.actionState === 'hitstun') {
-              vfx.setVortex(false, 0, slot === 0 ? 1 : 0);
+              vfx.setVortex(false, 0, slotOf(foe));
               vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.5, foe.pos[2]), '打断!', true, '#fde68a');
             }
           }
@@ -2670,8 +2822,8 @@ function GameImpl({
           const ang = (shots - 2.5) * 0.55;
           const from = new THREE.Vector3(c.pos[0], c.pos[1] + 2.0 + Math.cos(ang) * 0.35, c.pos[2]).addScaledVector(side, Math.sin(ang) * 1.1).addScaledVector(fwd, -0.3);
           const vel = side.clone().multiplyScalar(Math.sin(ang) * 6).addScaledVector(fwd, 2.5).add(new THREE.Vector3(0, 2.2 + Math.cos(ang) * 1.5, 0));
-          glyphRef.current.push({ idx: shots, slot, pos: from.clone(), vel: vel.clone(), age: 0 });
-          vfx.glyph(shots, from, vel, 1 - slot);
+          glyphRef.current.push({ idx: shots, slot, tgt: slotOf(foe), pos: from.clone(), vel: vel.clone(), age: 0 });
+          vfx.glyph(shots, from, vel, slotOf(foe));
           if (shots === 0 || shots === 5) gameAudio.playPowerupChime();
           if (shots === 5) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.8, c.pos[2]), '唵嘛呢叭咪吽', true, '#fde68a');
         }
@@ -2921,7 +3073,7 @@ function GameImpl({
       for (let n = list.length - 1; n >= 0; n--) {
         const g = list[n];
         const owner = fighters[g.slot];
-        const def = fighters[1 - g.slot];
+        const def = fighters[g.tgt] ?? fighters[1 - g.slot];
         g.age += step;
         const tgt = new THREE.Vector3(def.pos[0], def.pos[1] + 1.15, def.pos[2]);
         glyphSteer(g.pos, g.vel, tgt, g.age, step);
@@ -2960,7 +3112,7 @@ function GameImpl({
       for (let n = list.length - 1; n >= 0; n--) {
         const p = list[n];
         const owner = fighters[p.slot];
-        const def = fighters[1 - p.slot];
+        const homeT = foes[p.slot] ?? fighters[1 - p.slot];
         p.life -= step;
         if (p.stuck !== undefined) {
           p.stuck -= step;
@@ -3018,9 +3170,9 @@ function GameImpl({
               break;
             }
           } else {
-            if (p.home && def.hp > 0 && !p.spent) {
+            if (p.home && homeT.hp > 0 && !p.spent) {
               const sp = p.vel.length();
-              const want = vA.set(def.pos[0] - p.pos.x, def.pos[1] + 1.1 - p.pos.y, def.pos[2] - p.pos.z).normalize();
+              const want = vA.set(homeT.pos[0] - p.pos.x, homeT.pos[1] + 1.1 - p.pos.y, homeT.pos[2] - p.pos.z).normalize();
               const cur = vB.copy(p.vel).normalize();
               p.vel.copy(cur.lerp(want, Math.min(1, (p.home * step) / 2)).normalize().multiplyScalar(sp));
             }
@@ -3048,10 +3200,15 @@ function GameImpl({
             }
           }
           const can = p.kind === 'boomerang' ? (p.back ? !p.hitBack : !p.hitOut) : !p.spent;
-          if (!can || def.hp <= 0) continue;
-          const hd = Math.hypot(p.pos.x - def.pos[0], p.pos.z - def.pos[2]);
+          if (!can) continue;
           const rad = p.kind === 'boomerang' ? 0.9 : 0.55;
-          if (hd < rad && p.pos.y > def.pos[1] - 0.1 && p.pos.y < def.pos[1] + 1.95) {
+          let def: CombatantState | null = null;
+          for (const f of fighters)
+            if (f !== owner && f.hp > 0 && Math.hypot(p.pos.x - f.pos[0], p.pos.z - f.pos[2]) < rad && p.pos.y > f.pos[1] - 0.1 && p.pos.y < f.pos[1] + 1.95) {
+              def = f;
+              break;
+            }
+          if (def) {
             if (p.kind === 'boomerang') {
               if (p.back) p.hitBack = true;
               else p.hitOut = true;
@@ -3128,7 +3285,7 @@ function GameImpl({
     }
 
     function runRangerAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
-      const ai = aiRef.current;
+      const ai = aiRefs.current[Math.max(0, slotOf(me))];
       const dx = foe.pos[0] - me.pos[0];
       const dz = foe.pos[2] - me.pos[2];
       const dist = Math.hypot(dx, dz);
@@ -3230,8 +3387,14 @@ function GameImpl({
     // ======================================================
     function resetRound(fromKO: boolean) {
       round.over = false;
-      p1.classId = playerClass;
-      en.classId = enemyClass;
+      fighters.forEach((c, k) => {
+        const seat = seatsNow[k];
+        if (seat) {
+          c.classId = seat.cls;
+          c.side = seat.side;
+          c.tag = seat.name;
+        }
+      });
       for (const c of fighters) {
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = cc.hp;
@@ -3277,12 +3440,34 @@ function GameImpl({
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
       projRef.current = [];
       glyphRef.current = [];
-      p1.pos = [map.spawnPlayer[0], fy(map.spawnPlayer[0], map.spawnPlayer[1]), map.spawnPlayer[1]];
-      en.pos = [map.spawnEnemy[0], fy(map.spawnEnemy[0], map.spawnEnemy[1]), map.spawnEnemy[1]];
-      p1.rotY = p1.targetRotY = yawTo(p1.pos, en.pos);
-      en.rotY = en.targetRotY = yawTo(en.pos, p1.pos);
+      // each side starts at its spawn, teammates a little apart, facing the other side
+      {
+        const S = [map.spawnPlayer, map.spawnEnemy];
+        const dx = S[1][0] - S[0][0];
+        const dz = S[1][1] - S[0][1];
+        const L = Math.hypot(dx, dz) || 1;
+        const px = -dz / L;
+        const pz = dx / L;
+        const count = [0, 0];
+        const total = [0, 1].map((sd) => fighters.filter((f) => (f.side ?? 0) === sd).length);
+        fighters.forEach((c) => {
+          const sd = (c.side ?? 0) === 0 ? 0 : 1;
+          const k = count[sd]++;
+          const off = total[sd] > 1 ? (k - (total[sd] - 1) / 2) * 2.4 : 0;
+          const x = S[sd][0] + px * off;
+          const z = S[sd][1] + pz * off;
+          c.pos = [x, fy(x, z), z];
+        });
+        fighters.forEach((c, k) => {
+          const o = fighters.find((f) => (f.side ?? 0) !== (c.side ?? 0)) ?? fighters[k === 0 ? 1 : 0];
+          c.rotY = c.targetRotY = yawTo(c.pos, o.pos);
+        });
+        if (map.id === 'sea') for (const c of fighters) shipUnstick(c);
+      }
       if (controller) controller.yaw = p1.rotY;
-      aiRef.current.think = 1.2;
+      for (const a of aiRefs.current) a.think = 1.2;
+      aiTargetRef.current = [-1, -1, -1, -1];
+      for (const h of hitMaskRef.current) h.mask = 0;
       mapTimeRef.current = 0;
       eruptRef.current = { timer: 9 };
       bombZonesRef.current = [];
@@ -3299,9 +3484,9 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipNavRef.current = newNavState();
+      shipNavRefs.current = [0, 1, 2, 3].map(() => newNavState());
       if (map.id === 'sea') shipGraph();
-      shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 };
+      shipAiRefs.current = [0, 1, 2, 3].map(newShipAi);
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -3536,11 +3721,8 @@ function GameImpl({
 
     function koCheck(defSlot: number, color: string) {
       const def = fighters[defSlot];
-      if (def.hp > 0 || !aiOn || round.over) return;
-      round.over = true;
-      round.timer = 3.2;
-      fighters[1 - defSlot].celebrate = true;
-      slowMoTimerRef.current = 0.7;
+      if (!def || def.hp > 0 || !aiOn || round.over || def.stateDuration === 99) return;
+      // down for the rest of the round
       def.stateTimer = 0;
       def.stateDuration = 99;
       def.actionState = 'launched';
@@ -3550,7 +3732,19 @@ function GameImpl({
       }
       vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
-      onRoundEvent?.({ type: 'ko', winner: defSlot === 1 ? 'player' : 'enemy' });
+      if (def.ballista !== undefined) leaveBallista(defSlot, def);
+      // the round ends when one side has nobody left standing
+      const standing = [0, 1].map((sd) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0));
+      if (standing[0] && standing[1]) {
+        if (N > 2) onRoundEvent?.({ type: 'toast', text: defSlot === ME ? '你倒下了 · 等队友' : `${def.tag || '有人'}倒下了` });
+        return;
+      }
+      round.over = true;
+      round.timer = 3.2;
+      const winSide = standing[0] ? 0 : standing[1] ? 1 : 1 - (def.side ?? 0);
+      for (const f of fighters) if ((f.side ?? 0) === winSide && f.hp > 0) f.celebrate = true;
+      slowMoTimerRef.current = 0.7;
+      onRoundEvent?.({ type: 'ko', winner: winSide === (p1.side ?? 0) ? 'player' : 'enemy', side: winSide });
     }
 
     /** Environmental damage (vents, lava, ring-out) */
@@ -3574,7 +3768,7 @@ function GameImpl({
         c.stateDuration = 0.9;
         c.airSlam = c.airSlash = c.dodgeSlash = false;
       }
-      if (i === 0) {
+      if (i === ME) {
         controller?.addShake(launch > 0 ? 0.4 : 0.06);
         if (launch > 0) onRoundEvent?.({ type: 'playerHit', heavy: true });
       }
@@ -3670,8 +3864,8 @@ function GameImpl({
       const knocked = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown';
       if (!knocked || speed < 6 || wallCdRef.current[i] > 0 || c.hp <= 0) return;
       wallCdRef.current[i] = 0.8;
-      const other = 1 - i;
-      const att = fighters[other];
+      const att = foes[i];
+      const other = slotOf(att);
       const pt = new THREE.Vector3(wx, c.pos[1] + 1.1, wz);
       vfx.rocks(pt, 8, 4.5, 0.09);
       vfx.dustPuff(pt, 12, 0.4, 2.2, 0.7, '#8a7f72');
@@ -3691,7 +3885,7 @@ function GameImpl({
       if (aiOn && !round.over && c.hp > 0) {
         c.hp = 0;
         const where = map.id === 'summit' ? '坠入云海' : '坠入岩浆';
-        onRoundEvent?.({ type: 'toast', text: i === 0 ? `你${where}！` : `对手${where}！` });
+        onRoundEvent?.({ type: 'toast', text: i === ME ? `你${where}！` : `${fighters[i].tag || '对手'}${where}！` });
         koCheck(i, '#ff6a1a');
       }
       // respawn above the platform (practice mode, or after the KO is decided)
@@ -3703,7 +3897,7 @@ function GameImpl({
       c.stateDuration = 0.9;
       if (!aiOn) {
         c.hp = Math.max(1, c.hp - 200);
-        if (c === en) c.hp = c.maxHp;
+        if (fighters.indexOf(c) !== ME) c.hp = c.maxHp;
       }
     }
 
@@ -3721,7 +3915,7 @@ function GameImpl({
       c.stateTimer = 0;
       c.stateDuration = 0.7;
       c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 1.2);
-      if (i === 0) onRoundEvent?.({ type: 'toast', text: '掉进天井！' });
+      if (i === ME) onRoundEvent?.({ type: 'toast', text: '掉进天井！' });
     }
 
     /** 长安上元夜: festival fireworks keep raining down on the tallest ridge. Sparks crawl along it first. */
@@ -3913,7 +4107,7 @@ function GameImpl({
           if (round.over || map.id !== 'lavacliff') return;
           let tx: number;
           let tz: number;
-          const near = k % 3 === 0 ? p1 : k % 3 === 1 ? en : null;
+          const near = k % 3 === 0 ? p1 : k % 3 === 1 ? fighters[(ME + 1 + Math.floor(Math.random() * (N - 1))) % N] : null;
           if (near) {
             tx = near.pos[0] + (Math.random() - 0.5) * 3;
             tz = near.pos[2] + (Math.random() - 0.5) * 3;
@@ -3990,7 +4184,7 @@ function GameImpl({
         };
         const onHill = Math.abs(c.pos[1] - FOREST.hill.h) < 2.5;
         const spark = (x: number, y: number, z: number, col = '#ffcf6a') => vfx.sparkBurst(vB.set(x, y, z), 10, col, 2, 0.05, UP, 0.8);
-        const say = (text: string) => i === 0 && onRoundEvent?.({ type: 'toast', text });
+        const say = (text: string) => i === ME && onRoundEvent?.({ type: 'toast', text });
         // the altar and the candle racks: a fresh candle, or light yours again
         if (onHill && c.candle !== 2)
           for (const [lx, lz] of CANDLE_POINTS) {
@@ -4111,9 +4305,9 @@ function GameImpl({
       if (c.candle === 2 && !c.shade && mapRuntime.rain > 0.25 && !sheltered(c.pos[0], c.pos[2], c.pos[1]) && Math.random() < dt * 0.22 * mapRuntime.rain) {
         c.candle = 1;
         vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), 4, 0.1, 0.8, 0.5, '#9ca3af');
-        if (i === 0) onRoundEvent?.({ type: 'toast', text: '蜡烛被雨浇灭了 · 回寺里供桌按 F 重新点' });
+        if (i === ME) onRoundEvent?.({ type: 'toast', text: '蜡烛被雨浇灭了 · 回寺里供桌按 F 重新点' });
       }
-      if (i === 0)
+      if (i === ME)
         for (const it of items)
           if (it.kind === 'candle' && it.lit && !it.shade && it.hook < 0 && mapRuntime.rain > 0.25 && !sheltered(it.x, it.z, it.y) && Math.random() < dt * 0.11 * mapRuntime.rain) {
             it.lit = false;
@@ -4167,7 +4361,7 @@ function GameImpl({
         vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.1, c.pos[2]), '滑倒!', true, '#93c5fd');
         vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 10, 0.4, 2, 0.6, '#6b5a40');
         gameAudio.playLand();
-        if (i === 0) controller?.addShake(0.2);
+        if (i === ME) controller?.addShake(0.2);
       }
     }
 
@@ -4362,7 +4556,7 @@ function GameImpl({
 
     /** 青冥古林: splashes in the river, and now and then a gust brings dead branches down */
     function updateForest() {
-      for (let i = 0; i < 2; i++) {
+      for (let i = 0; i < N; i++) {
         const c = fighters[i];
         const moving = Math.hypot(c.vel[0], c.vel[2]) > 1.2;
         const wet = c.isGrounded && c.pos[1] < FOREST.waterY && waterDepth(c.pos[0], c.pos[2]) > 0.12;
@@ -4379,7 +4573,7 @@ function GameImpl({
         gameAudio.playWhirl();
         const spots: [number, number][] = [];
         for (let k = 0; k < 4; k++) {
-          const near = k < 2 ? fighters[k] : null;
+          const near = k < N ? fighters[k] : null;
           let x: number;
           let z: number;
           if (near) {
@@ -4463,7 +4657,7 @@ function GameImpl({
           c.stateDuration = 0.9;
           c.whiteFlashTimer = 0.1;
           vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.1, c.pos[2]), '雪崩 110', true, '#e0f2fe');
-          if (i === 0) onRoundEvent?.({ type: 'playerHit', heavy: true });
+          if (i === ME) onRoundEvent?.({ type: 'playerHit', heavy: true });
           koCheck(i, '#e0f2fe');
         });
         if (A.z > GLACIER.avalancheEnd) {
@@ -4561,7 +4755,7 @@ function GameImpl({
           c.stateDuration = 0;
           c.isBlocking = false;
           vfx.dustPuff(vB.set(d.x, d.y + 0.2, d.z), 5, 0.4, 1.2, 0.4, '#b8a890');
-          if (i === 0) onRoundEvent?.({ type: 'toast', text: '抢到床弩！转动视角瞄准（左右 60°），左键发射' });
+          if (i === ME) onRoundEvent?.({ type: 'toast', text: '抢到床弩！转动视角瞄准（左右 60°），左键发射' });
         }
         break;
       }
@@ -4591,7 +4785,7 @@ function GameImpl({
       vfx.ring(vC.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.2, '#4ade80', 0.5, 0.12);
       vfx.dustPuff(vC.set(T.x, SHIP_LAYOUT.holdY + T.h + 0.3, T.z), 6, 0.3, 0.8, 0.8, '#f5f0e6');
       vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), `+${heal}`, false, '#4ade80');
-      if (i === 0) onRoundEvent?.({ type: 'toast', text: `吃了一口热饭，回复 ${heal} 气血` });
+      if (i === ME) onRoundEvent?.({ type: 'toast', text: `吃了一口热饭，回复 ${heal} 气血` });
     }
     function looseBolt(i: number, k: number, c: CombatantState, foe: CombatantState) {
       const b = mapRuntime.ballistae[k];
@@ -4614,7 +4808,7 @@ function GameImpl({
       vfx.ring(vB.set(d.x, d.y + 0.06, d.z), 2.2, '#fbbf24', 0.35, 0.12);
       vfx.flash(from, '#ffd27a', 10, 0.12, 6);
       gameAudio.playThrowHeavy();
-      if (i === 0) controller?.addShake(0.18);
+      if (i === ME) controller?.addShake(0.18);
     }
     function updateBolts(step: number) {
       for (const b of mapRuntime.ballistae) {
@@ -4631,14 +4825,14 @@ function GameImpl({
         }
         if (bo.stuck) continue;
         const owner = fighters[bo.slot];
-        const def = fighters[1 - bo.slot];
         for (let s = 0; s < 4; s++) {
           const h = step / 4;
           bo.vy -= 2.5 * h;
           bo.x += bo.vx * h;
           bo.y += bo.vy * h;
           bo.z += bo.vz * h;
-          if (def.hp > 0 && Math.hypot(bo.x - def.pos[0], bo.z - def.pos[2]) < 0.62 && bo.y > def.pos[1] - 0.1 && bo.y < def.pos[1] + 1.95) {
+          const def = fighters.find((f) => f !== owner && f.hp > 0 && Math.hypot(bo.x - f.pos[0], bo.z - f.pos[2]) < 0.62 && bo.y > f.pos[1] - 0.1 && bo.y < f.pos[1] + 1.95);
+          if (def) {
             boltHit(bo, owner, def);
             break;
           }
@@ -4697,7 +4891,7 @@ function GameImpl({
         vfx.sparkBurst(chest, 22, '#a5f3fc', 8, 0.08, vC.set(dx, 0.4, dz), 0.7);
         vfx.flash(chest, '#9be7ff', 14, 0.16, 7);
         vfx.damageNumber(vC.set(def.pos[0], def.pos[1] + 2.5, def.pos[2]), '钉身!', true, '#67e8f9');
-        if (bo.slot === 0 || 1 - bo.slot === 0) controller?.addShake(0.22);
+        if (bo.slot === ME || slotOf(def) === ME) controller?.addShake(0.22);
       } else {
         vfx.sparkBurst(chest, 12, '#fff7d6', 6, 0.06);
       }
@@ -4708,7 +4902,7 @@ function GameImpl({
      * and now and then go and man a crossbow when the player is far away.
      */
     function routeOnShip(me: CombatantState, foe: CombatantState, out: Intent) {
-      const S = shipAiRef.current;
+      const S = shipAiRefs.current[Math.max(0, slotOf(me))];
       const B = mapRuntime.ballistae;
       S.cool -= dt;
       out.interact = false;
@@ -4809,7 +5003,7 @@ function GameImpl({
         }
       }
       // walk the ship's floor graph: stairs, doors, the hatch, round the crates and the hatch rail
-      const st = shipSteer(shipNavRef.current, { x: me.pos[0], y: me.pos[1], z: me.pos[2], grounded: me.isGrounded }, tx, ty, tz, dt, S.goal >= 0);
+      const st = shipSteer(shipNavRefs.current[Math.max(0, slotOf(me))], { x: me.pos[0], y: me.pos[1], z: me.pos[2], grounded: me.isGrounded }, tx, ty, tz, dt, S.goal >= 0);
       if (!st) {
         if (S.goal >= 0) {
           out.move.set(tx - me.pos[0], 0, tz - me.pos[2]);
@@ -4993,7 +5187,7 @@ function GameImpl({
       if (me.classId === 'Ranger') return runRangerAI(me, foe, out, dt2);
       const monkAI = me.classId === 'BuddhistMage';
       const shadowAI = me.classId === 'Shadowblade';
-      const ai = aiRef.current;
+      const ai = aiRefs.current[Math.max(0, slotOf(me))];
       const dx = foe.pos[0] - me.pos[0];
       const dz = foe.pos[2] - me.pos[2];
       const dist = Math.hypot(dx, dz);
@@ -5234,25 +5428,20 @@ function GameImpl({
 
       <Maps3D mapId={mapId} />
 
-      <group ref={playerGroupRef}>
-        <CharacterRig3D
-          classId={playerClass}
-          combatantRef={p1RefState}
-          isPlayer
-          socketsRef={playerSockets}
-          showBoneAxes={showBoneAxes}
-          onAnimationDebug={onAnimationDebug}
-          onLoadProgress={onLoadProgress}
-        />
-      </group>
-
-      <group ref={enemyGroupRef} position={[0, 0, -6]}>
-        <CharacterRig3D classId={enemyClass} combatantRef={dummyRefState} isPlayer={false} socketsRef={enemySockets} />
-      </group>
-      <group>
-        {mapId === 'forest' && <HeldCandle combatantRef={p1RefState} socketsRef={playerSockets} />}
-        {mapId === 'forest' && <HeldCandle combatantRef={dummyRefState} socketsRef={enemySockets} />}
-      </group>
+      {seats.map((seat, k) => (
+        <group key={k} ref={groupRefs[k]} position={[0, 0, k === meSlot ? 0 : -6]}>
+          <CharacterRig3D
+            classId={seat.cls}
+            combatantRef={slotRefs[k]}
+            isPlayer={k === meSlot}
+            socketsRef={sockets[k]}
+            showBoneAxes={k === meSlot ? showBoneAxes : undefined}
+            onAnimationDebug={k === meSlot ? onAnimationDebug : undefined}
+            onLoadProgress={k === meSlot ? onLoadProgress : undefined}
+          />
+        </group>
+      ))}
+      <group>{mapId === 'forest' && seats.map((_, k) => <HeldCandle key={k} combatantRef={slotRefs[k]} socketsRef={sockets[k]} />)}</group>
 
       <primitive object={vfx.root} />
 

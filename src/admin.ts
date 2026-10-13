@@ -58,7 +58,7 @@ function render() {
   for (const [id, p] of players) if (now - p.seen > 30000) players.delete(id);
   const list = [...players.values()].sort((a, b) => (a.page === b.page ? a.since - b.since : a.page === 'game' ? -1 : 1));
   const inGame = list.filter((p) => p.page === 'game').length;
-  const online = list.filter((p) => p.mode === 'host' || p.mode === 'guest').length;
+  const online = list.filter((p) => /^(host|guest)/.test(p.mode)).length;
   document.getElementById('stats')!.innerHTML = [
     [list.length, '在线'],
     [inGame, '对战中'],
@@ -83,7 +83,7 @@ function render() {
       const stale = age > 18000;
       const st = stale ? '<span class="tag t-stale">可能掉线</span>' : p.page === 'game' ? '<span class="tag t-game">对战中</span>' : '<span class="tag t-lobby">大厅</span>';
       const vs = p.room ? `${p.vs ? esc(p.vs) + ' · ' : ''}<span class="dim">房间 ${esc(p.room)}</span>` : '<span class="dim">—</span>';
-      return `<tr><td class="name">${esc(p.name || '无名')}</td><td>${st}</td><td>${MODE[p.mode] ?? esc(p.mode)}</td><td>${esc(p.map || '—')}</td><td>${esc(p.cls || '—')}</td><td>${vs}</td><td>${dur(now - p.since)}</td><td>${p.mobile ? '手机' : '电脑'}</td><td class="dim">${esc(p.ver || '')}</td><td class="dim">${Math.round(age / 1000)} 秒前</td></tr>`;
+      return `<tr><td class="name">${esc(p.name || '无名')}</td><td>${st}</td><td>${(MODE[p.mode.split(' ')[0]] ?? esc(p.mode.split(' ')[0])) + (p.mode.split(' ')[1] ? ' ' + esc(p.mode.split(' ')[1]) : '')}</td><td>${esc(p.map || '—')}</td><td>${esc(p.cls || '—')}</td><td>${vs}</td><td>${dur(now - p.since)}</td><td>${p.mobile ? '手机' : '电脑'}</td><td class="dim">${esc(p.ver || '')}</td><td class="dim">${Math.round(age / 1000)} 秒前</td></tr>`;
     })
     .join('');
 }

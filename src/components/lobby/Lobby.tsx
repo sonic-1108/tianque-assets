@@ -1,3 +1,4 @@
+import type { RoomSeat } from '../../net';
 import React, { useState } from 'react';
 import { InkBackdrop } from './InkBackdrop';
 import { MAPS, MAP_ORDER, MapId } from '../../maps';
@@ -30,9 +31,15 @@ export interface LobbyProps {
   onRename: () => void;
   heroes: CharacterClassId[];
   playerClass: CharacterClassId;
-  enemyClass: CharacterClassId;
   onPlayerClass: (c: CharacterClassId) => void;
-  onEnemyClass: (c: CharacterClassId) => void;
+  /** the four seats (two a side) and which one is yours */
+  room: RoomSeat[];
+  localSeat: number;
+  /** the host (or you, offline) sets up the seats */
+  canEdit: boolean;
+  onSeat: (k: number, change: { kind?: 'ai' | 'empty'; cls?: CharacterClassId; swap?: boolean }) => void;
+  /** both sides have someone */
+  ready: boolean;
   /** online: the opponent's hero is theirs to pick */
   online: boolean;
   aiEnabled: boolean;
@@ -81,7 +88,7 @@ export function Lobby(p: LobbyProps) {
               <button className="tq-pop-x" onClick={() => setShowOnline(false)} aria-label="关闭">
                 ×
               </button>
-              <div className="tq-pop-h">联机对战 · 一对一</div>
+              <div className="tq-pop-h">联机房间 · 最多四人</div>
               {p.onlinePanel}
             </div>
           )}
@@ -122,27 +129,62 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          {/* opponent */}
+          {/* the lineup: two seats a side; 1v1, 2v1, 2v2 are just which seats are filled */}
           <div className="tq-foe">
-            <span className="tq-foe-l">对手</span>
-            {p.online ? (
-              <span className="tq-foe-note">由对方自选</span>
-            ) : (
-              <>
-                {p.heroes.map((cid) => (
-                  <button key={cid} className={`tq-foe-a ${cid === p.enemyClass ? 'on' : ''}`} onClick={() => p.onEnemyClass(cid)} title={`${CLASS_CONFIGS[cid].name} · ${CLASS_CONFIGS[cid].defaultCharacter}`}>
-                    {PORTRAIT[cid] ? <img src={PORTRAIT[cid]} alt="" draggable={false} /> : CLASS_CONFIGS[cid].name.slice(0, 1)}
-                  </button>
-                ))}
-                <span className="tq-seg">
-                  <button className={p.aiEnabled ? 'on' : ''} onClick={() => p.onAI(true)}>
-                    会还手
-                  </button>
-                  <button className={!p.aiEnabled ? 'on' : ''} onClick={() => p.onAI(false)}>
-                    木桩
-                  </button>
-                </span>
-              </>
+            <span className="tq-foe-l">阵容</span>
+            {[0, 1].map((side) => (
+              <React.Fragment key={side}>
+                {side === 1 && <span className="tq-vs">对</span>}
+                <div className={`tq-side s${side}`}>
+                  {[side * 2, side * 2 + 1].map((k) => {
+                    const st = p.room[k];
+                    const mine = k === p.localSeat;
+                    const next = (c: CharacterClassId) => p.heroes[(p.heroes.indexOf(c) + 1) % p.heroes.length];
+                    if (!st || st.kind === 'empty')
+                      return (
+                        <button key={k} className="tq-seat empty" disabled={!p.canEdit} onClick={() => p.onSeat(k, { kind: 'ai' })} title={p.canEdit ? '加一个 AI' : '空位'}>
+                          {p.canEdit ? '+ AI' : '空'}
+                        </button>
+                      );
+                    return (
+                      <div key={k} className={`tq-seat ${mine ? 'me' : ''}`}>
+                        <button
+                          className="tq-seat-face"
+                          disabled={!(st.kind === 'ai' && p.canEdit)}
+                          onClick={() => p.onSeat(k, { cls: next(st.cls) })}
+                          title={st.kind === 'ai' && p.canEdit ? '点击换侠客' : CLASS_CONFIGS[st.cls].name}
+                        >
+                          {PORTRAIT[st.cls] ? <img src={PORTRAIT[st.cls]} alt="" draggable={false} /> : CLASS_CONFIGS[st.cls].name.slice(0, 1)}
+                        </button>
+                        <span className="tq-seat-n">
+                          {mine ? '你' : st.kind === 'ai' ? 'AI' : st.name || '侠客'}
+                          <i>{CLASS_CONFIGS[st.cls].name}</i>
+                        </span>
+                        {p.canEdit && k !== 0 && (
+                          <span className="tq-seat-ops">
+                            <button onClick={() => p.onSeat(k, { swap: true })} title="换到另一边">⇄</button>
+                            {st.kind === 'ai' && (
+                              <button onClick={() => p.onSeat(k, { kind: 'empty' })} title="空出这个位置">
+                                ×
+                              </button>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </React.Fragment>
+            ))}
+            {!p.online && (
+              <span className="tq-seg">
+                <button className={p.aiEnabled ? 'on' : ''} onClick={() => p.onAI(true)}>
+                  会还手
+                </button>
+                <button className={!p.aiEnabled ? 'on' : ''} onClick={() => p.onAI(false)}>
+                  木桩
+                </button>
+              </span>
             )}
           </div>
         </section>
@@ -198,11 +240,15 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          <button className="tq-go" disabled={p.hostPicks || !map.available} onClick={() => p.onStart(pick)}>
+          <button className="tq-go" disabled={p.hostPicks || !map.available || !p.ready} onClick={() => p.onStart(pick)}>
             {p.hostPicks ? (
               <small>等房主
                 <br />
                 选战场</small>
+            ) : !p.ready ? (
+              <small>两边
+                <br />
+                都要有人</small>
             ) : (
               <>
                 出<br />征
@@ -263,6 +309,22 @@ const LOBBY_CSS = `
 .tq-foe { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .tq-foe-l { font-size:12px; letter-spacing:.4em; color:var(--ink2); margin-right:4px; }
 .tq-foe-note { font-size:13px; color:var(--ink2); }
+.tq-vs { font:400 22px "Ma Shan Zheng",serif; color:var(--ink2); margin:0 2px; }
+.tq-side { display:flex; gap:6px; padding:4px; border-radius:12px; }
+.tq-side.s0 { background:rgba(163,64,43,.08); }
+.tq-side.s1 { background:rgba(44,74,110,.08); }
+.tq-seat { display:flex; align-items:center; gap:6px; min-width:118px; height:46px; padding:3px 8px 3px 3px; border-radius:999px; border:1px solid rgba(31,28,24,.18); background:rgba(246,241,231,.7); position:relative; }
+.tq-seat.me { border:2px solid var(--ink); }
+.tq-seat.empty { justify-content:center; color:var(--ink2); font:600 12px "Noto Serif SC",serif; letter-spacing:.2em; border-style:dashed; cursor:pointer; background:rgba(246,241,231,.35); }
+.tq-seat.empty:disabled { cursor:default; }
+.tq-seat-face { width:38px; height:38px; border-radius:50%; overflow:hidden; border:none; padding:0; background:rgba(31,28,24,.08); cursor:pointer; flex:none; }
+.tq-seat-face:disabled { cursor:default; }
+.tq-seat-face img { width:100%; height:100%; object-fit:cover; object-position:50% 20%; }
+.tq-seat-n { display:flex; flex-direction:column; font:600 12.5px "Noto Serif SC",serif; color:var(--ink); line-height:1.15; max-width:70px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.tq-seat-n i { font-style:normal; font-weight:400; font-size:11px; color:var(--ink2); }
+.tq-seat-ops { display:flex; gap:2px; margin-left:auto; }
+.tq-seat-ops button { border:none; background:none; font-size:13px; color:var(--ink2); cursor:pointer; padding:0 3px; }
+.tq-seat-ops button:hover { color:var(--ink); }
 .tq-foe-a { width:40px; height:40px; border-radius:50%; overflow:hidden; border:1px solid rgba(31,28,24,.2); background:rgba(246,241,231,.7); padding:0; cursor:pointer; transition:all .2s; }
 .tq-foe-a img { width:100%; height:100%; object-fit:cover; object-position:50% 20%; filter:grayscale(.7); }
 .tq-foe-a.on { border:2px solid var(--ink); }

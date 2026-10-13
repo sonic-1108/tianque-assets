@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { startPresence, setPresence } from './presence';
 import { Lobby, NameGate } from './components/lobby/Lobby';
 import * as THREE from 'three';
@@ -11,7 +11,8 @@ import { MAPS, MAP_ORDER, MapId, mapRuntime } from './maps';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSettings, QUALITY } from './settings';
 import type { CharacterClassId } from './types';
-import { NetSession, makeRoomCode, NetMessage } from './net';
+import { NetSession, makeRoomCode, NetMessage, RoomSeat } from './net';
+import { defaultRoom, lineupOf, roomReady, seatGuests, SEAT_SIDE, aiName } from './room';
 import { UnitFrame, UnitStats } from './components/UnitFrame';
 import {
   GameState,
@@ -200,6 +201,8 @@ export default function App() {
   const [skillCard, setSkillCard] = useState<string | null>(null);
   const [mapId, setMapId] = useState<MapId>('temple');
   const [isMapSelectOpen, setIsMapSelectOpen] = useState(true);
+  const isMapSelectOpenRef = useRef(true);
+  isMapSelectOpenRef.current = isMapSelectOpen;
   // 江湖名号: asked once, remembered in this browser
   const [nickname, setNickname] = useState<string>(() => {
     try {
@@ -244,7 +247,15 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const cfgKeyRef = useRef('');
   const online = !!net && net.status === 'connected';
-  const enemyShadow = online ? net?.remoteName || "对手" : `${CLASS_CONFIGS[enemyClass].defaultCharacter}影`;
+  // ---------- the room: four seats, two a side (offline too: the other seats are AIs or empty) ----------
+  const [room, setRoom] = useState<RoomSeat[]>(() => defaultRoom('Berserker', '', 'Berserker'));
+  const roomRef = useRef(room);
+  roomRef.current = room;
+  const localSeat = net && net.role === 'guest' ? room.findIndex((s) => s.kind === 'guest' && s.id === net.myId) : 0;
+  const lineupKey = JSON.stringify(room.map((s) => [s.kind, s.id, s.cls, s.name])) + '|' + localSeat;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const lineup = useMemo(() => lineupOf(room, Math.max(0, localSeat)), [lineupKey]);
+  const teamFight = lineup.seats.length > 2;
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
@@ -274,7 +285,7 @@ export default function App() {
   }, [toggleAI]);
   const handleRoundEvent = useCallback((e: RoundEvent) => {
     const n = netRef.current;
-    if (n && n.role === 'host' && e.type !== 'playerHit') n.send({ t: 're', e });
+    if (n && n.role === 'host' && e.type !== 'playerHit' && e.type !== 'toast') n.send({ t: 're', e });
     if (e.type === 'ko') {
       setRoundBanner(e.winner);
       setScore((s) => ({ ...s, [e.winner]: s[e.winner] + 1 }));
@@ -308,19 +319,27 @@ export default function App() {
           setIsMapSelectOpen(true);
         }
       });
+      n.onGuests = () => {
+        setRoom((r) => seatGuests(r, [...n.guests.values()].map((g) => ({ id: g.id, cls: g.cls, name: g.name })), !isMapSelectOpenRef.current));
+      };
       n.onMessage = (m: NetMessage) => {
-        if (m.t === 'cfg' && n.role === 'guest') {
+        if (m.t === 'room' && n.role === 'guest') {
+          setRoom(m.seats);
+          if (m.map) setMapId(m.map);
+        } else if (m.t === 'cfg' && n.role === 'guest') {
           if (m.hostName) n.remoteName = m.hostName.slice(0, 12);
+          if (m.seats) setRoom(m.seats);
           setMapId(m.map);
-          setPlayerClass(m.guestCls);
-          setEnemyClass(m.hostCls);
           setRoundBanner(null);
           setIsMapSelectOpen(false);
         } else if (m.t === 're' && n.role === 'guest') {
           const e = m.e as RoundEvent;
-          // the host's "player" is our opponent
-          if (e.type === 'ko') handleRoundEvent({ type: 'ko', winner: e.winner === 'player' ? 'enemy' : 'player' });
-          else handleRoundEvent(e);
+          // who won is told by side; ours is our seat's
+          if (e.type === 'ko') {
+            const mine = roomRef.current.findIndex((s) => s.kind === 'guest' && s.id === n.myId);
+            const side = e.side ?? (e.winner === 'player' ? 0 : 1);
+            handleRoundEvent({ type: 'ko', winner: side === SEAT_SIDE[Math.max(0, mine)] ? 'player' : 'enemy', side });
+          } else handleRoundEvent(e);
         } else if (m.t === 'bye') {
           n.close();
         }
@@ -342,18 +361,31 @@ export default function App() {
   useEffect(() => {
     if (net && net.role === 'guest' && net.status === 'connected') net.send({ t: 'hello', cls: playerClass, name: nickname });
   }, [net, net?.status, playerClass, nickname]);
-  // host: the guest's pick is our opponent; push the match config whenever we start / change it
+  // host / offline: seat 0 is us
+  useEffect(() => {
+    if (net && net.role === 'guest') return;
+    setRoom((r) => (r[0].kind === 'host' && r[0].cls === playerClass && r[0].name === nickname ? r : [{ kind: 'host', cls: playerClass, name: nickname }, ...r.slice(1)]));
+  }, [net, playerClass, nickname]);
+  // host: everyone in the room sees the seats; once the match is on, the match config goes out on every change
+  const roomSentRef = useRef('');
   useEffect(() => {
     if (!net || net.role !== 'host' || net.status !== 'connected') return;
-    if (net.remoteClass && net.remoteClass !== enemyClass) setEnemyClass(net.remoteClass);
-    const guestCls = net.remoteClass || enemyClass;
-    const key = `${mapId}|${playerClass}|${guestCls}|${isMapSelectOpen}|${nickname}`;
+    const rk = `${lineupKey}|${mapId}|${isMapSelectOpen}|${net.guests.size}`;
+    if (rk !== roomSentRef.current) {
+      roomSentRef.current = rk;
+      net.send({ t: 'room', seats: room, map: mapId, started: !isMapSelectOpen });
+    }
+    const key = `${mapId}|${lineupKey}|${isMapSelectOpen}|${nickname}`;
     if (!isMapSelectOpen && key !== cfgKeyRef.current) {
       cfgKeyRef.current = key;
-      net.send({ t: 'cfg', map: mapId, hostCls: playerClass, guestCls, seq: Date.now(), hostName: nickname });
+      net.send({ t: 'cfg', map: mapId, seq: Date.now(), hostName: nickname, seats: room });
     }
     if (isMapSelectOpen) cfgKeyRef.current = '';
   });
+  // a new arrival: send them the room straight away
+  useEffect(() => {
+    if (net && net.role === 'host') roomSentRef.current = '';
+  }, [net, net?.guests.size]);
 
   // Blood Rage Screen Edge Flash
   const [bloodRageFlash, setBloodRageFlash] = useState(false);
@@ -454,6 +486,22 @@ export default function App() {
       el.style.top = y + 'px';
     }
   }, []);
+  // team fights: a name tag over every other fighter, moved directly every frame
+  const tagEls = useRef<(HTMLDivElement | null)[]>([]);
+  const moveTags = useCallback((tags: ({ x: number; y: number } | null)[]) => {
+    tags.forEach((t, k) => {
+      const el = tagEls.current[k];
+      if (!el) return;
+      if (!t) {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = '';
+      el.style.left = t.x + 'px';
+      el.style.top = t.y + 'px';
+    });
+  }, []);
+  const [roster, setRoster] = useState<{ name: string; side: number; hp: number; maxHp: number; cls: CharacterClassId; target: boolean }[]>([]);
   const handleBloodRageFlash = useCallback(() => {
     setBloodRageFlash(true);
     setTimeout(() => setBloodRageFlash(false), 380);
@@ -510,8 +558,24 @@ export default function App() {
     };
   }, []);
 
-  const p1RefState = useRef<CombatantState>(createCombatant('p1', true));
-  const dummyRefState = useRef<CombatantState>(createCombatant('dummy', false));
+  const p1RefState = useRef<CombatantState>(createCombatant('f0', true));
+  const dummyRefState = useRef<CombatantState>(createCombatant('f1', false));
+  // every fighter of the match, slot order (2 to 4); slot 0 and 1 reuse the two above
+  const fightersRef = useRef<CombatantState[]>([p1RefState.current, dummyRefState.current]);
+  if (fightersRef.current.length !== lineup.seats.length) {
+    const pool = [p1RefState.current, dummyRefState.current, ...fightersRef.current];
+    const next: CombatantState[] = [];
+    for (let k = 0; k < lineup.seats.length; k++) next.push(pool.find((c) => c.id === `f${k}`) ?? createCombatant(`f${k}`, false));
+    fightersRef.current = next;
+  }
+  fightersRef.current.forEach((c, k) => {
+    c.isPlayer = k === lineup.me;
+    c.side = lineup.seats[k].side;
+    c.tag = lineup.seats[k].name;
+  });
+  if (!fightersRef.current.includes(p1RefState.current) || p1RefState.current !== fightersRef.current[lineup.me]) p1RefState.current = fightersRef.current[lineup.me];
+  if (!fightersRef.current.includes(dummyRefState.current) || dummyRefState.current === p1RefState.current)
+    dummyRefState.current = fightersRef.current.find((c) => (c.side ?? 0) !== (p1RefState.current.side ?? 0)) ?? fightersRef.current[lineup.me === 0 ? 1 : 0];
   // Debug handle (used by automated visual tests; harmless in production)
   (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef };
   const targetingRefState = useRef<TargetingState>({
@@ -530,9 +594,9 @@ export default function App() {
       page: isMapSelectOpen ? 'lobby' : 'game',
       map: MAPS[mapId]?.name ?? mapId,
       cls: CLASS_CONFIGS[playerClass]?.name ?? playerClass,
-      mode: net ? net.role : aiEnabled ? 'ai' : 'dummy',
+      mode: (net ? net.role : aiEnabled ? 'ai' : 'dummy') + ` ${[0, 1].map((sd) => lineup.seats.filter((x) => x.side === sd).length).join('v')}`,
       room: net?.code || undefined,
-      vs: net ? net.remoteName || undefined : undefined,
+      vs: lineup.seats.filter((_, k) => k !== lineup.me).map((x) => x.name).join('、') || undefined,
     });
   });
   const [hudMirror, setHudMirror] = useState({
@@ -610,6 +674,9 @@ export default function App() {
     const interval = setInterval(() => {
       const p1 = p1RefState.current;
       const dummy = dummyRefState.current;
+      const all = fightersRef.current;
+      if (all.length > 2) setRoster(all.map((c) => ({ name: c.tag || c.name, side: c.side ?? 0, hp: Math.max(0, c.hp), maxHp: c.maxHp, cls: c.classId, target: c === dummy })));
+      else setRoster((r) => (r.length ? [] : r));
       const zenHas = (owner: typeof p1, c: typeof p1) => !!owner.zenField && owner.zenField.t > 0 && Math.hypot(c.pos[0] - owner.zenField.x, c.pos[2] - owner.zenField.z) < 4.5;
       setHudMirror({
         p1Bell: p1.bellTimer || 0,
@@ -739,16 +806,31 @@ export default function App() {
           }}
           heroes={PLAYABLE}
           playerClass={playerClass}
-          enemyClass={enemyClass}
           onPlayerClass={(cid) => {
             gameAudio.playCrispClick();
             setPlayerClass(cid);
             setScore({ player: 0, enemy: 0 });
           }}
-          onEnemyClass={(cid) => {
+          room={room}
+          localSeat={localSeat}
+          canEdit={!net || net.role === 'host'}
+          ready={roomReady(room) && localSeat >= 0}
+          onSeat={(k, ch) => {
             gameAudio.playCrispClick();
-            setEnemyClass(cid);
             setScore({ player: 0, enemy: 0 });
+            setRoom((r) => {
+              const out = r.map((x) => ({ ...x }));
+              const st = out[k];
+              if (ch.kind === 'ai') out[k] = { kind: 'ai', cls: st.cls, name: aiName(st.cls) };
+              else if (ch.kind === 'empty' && st.kind === 'ai') out[k] = { kind: 'empty', cls: st.cls, name: '' };
+              if (ch.cls && out[k].kind === 'ai') out[k] = { ...out[k], cls: ch.cls, name: aiName(ch.cls) };
+              if (ch.swap) {
+                const other = SEAT_SIDE[k] === 0 ? [2, 3] : [0, 1];
+                const j = other.find((n) => n !== 0 && out[n].kind === 'empty') ?? other.find((n) => n !== 0 && out[n].kind === 'ai') ?? other.find((n) => n !== 0);
+                if (j !== undefined) [out[k], out[j]] = [out[j], out[k]];
+              }
+              return out;
+            });
           }}
           online={!!net}
           aiEnabled={aiEnabled}
@@ -799,7 +881,7 @@ export default function App() {
                     </div>
                   )}
                   {net.status === 'opening' && <div>正在连接联机服务器…</div>}
-                  {net.status === 'waiting' && <div>把房间号发给朋友，在这里输入就能加入。等待对手…{net.relayState && <div style={{ fontSize: 11 }}>{net.relayState}</div>}</div>}
+                  {net.status === 'waiting' && <div>把房间号发给朋友（最多 3 人），在这里输入就能加入。等人加入…{net.relayState && <div style={{ fontSize: 11 }}>{net.relayState}</div>}</div>}
                   {net.status === 'connecting' && (
                     <div>
                       正在加入房间 {net.code}…
@@ -807,9 +889,14 @@ export default function App() {
                     </div>
                   )}
                   {net.status === 'connected' && net.role === 'host' && (
-                    <div className="tq-on-ok">对手已加入（{CLASS_CONFIGS[net.remoteClass || enemyClass].name}）· 选好侠客和战场就出征</div>
+                    <div className="tq-on-ok">
+                      已加入 {net.guests.size} 人：{[...net.guests.values()].map((g) => g.name || '侠客').join('、')}
+                      <div style={{ fontSize: 11 }}>在下面「阵容」里安排两边的位置（空位可放 AI 或空着），选好战场就出征{net.guests.size < 3 ? ' · 还能再进 ' + (3 - net.guests.size) + ' 人' : ''}</div>
+                    </div>
                   )}
-                  {net.status === 'connected' && net.role === 'guest' && <div className="tq-on-ok">已加入 · 选好侠客，等房主选战场</div>}
+                  {net.status === 'connected' && net.role === 'guest' && (
+                    <div className="tq-on-ok">{localSeat >= 0 ? `已加入 · 你在${SEAT_SIDE[localSeat] === 0 ? '房主这边' : '房主对面'} · 选好侠客，等房主出征` : '已连上 · 房间满了或正在安排座位'}</div>
+                  )}
                   {net.status === 'connected' && <div style={{ fontSize: 11 }}>{net.via === 'relay' ? '线路：中转（直连没打通，延迟高一些）' : '线路：直连'}</div>}
                   {net.status === 'error' && <div className="tq-on-err">{net.error}</div>}
                   <button className="tq-btn ghost" onClick={leaveNet}>
@@ -829,7 +916,7 @@ export default function App() {
             {roundBanner === 'player' ? '胜' : '败'}
           </span>
           <span className="text-sm font-bold text-zinc-200 bg-black/60 px-3 py-1 rounded-full">
-            {roundBanner === 'player' ? `${enemyShadow} 被击倒` : `你被${enemyShadow}击倒`} · {score.player} : {score.enemy} · 下一回合即将开始
+            {teamFight ? (roundBanner === 'player' ? '对方全部倒下' : '我方全部倒下') : roundBanner === 'player' ? `${dummyRefState.current.tag || '对手'} 被击倒` : `你被${dummyRefState.current.tag || '对手'}击倒`} · {score.player} : {score.enemy} · 下一回合即将开始
           </span>
         </div>
       )}
@@ -875,6 +962,10 @@ export default function App() {
               inputRef={inputRef}
               p1RefState={p1RefState}
               dummyRefState={dummyRefState}
+              fightersRef={fightersRef}
+              seats={lineup.seats}
+              meSlot={lineup.me}
+              onTagsMove={teamFight ? moveTags : undefined}
               targetingRefState={targetingRefState}
               aiEnabledRef={aiEnabledRef}
               mapId={mapId}
@@ -917,7 +1008,37 @@ export default function App() {
           </div>
         )}
         {/* Projected Screen Space Healthbar for Dummy */}
-        {dummyScreenPos.visible && !isGameMenuOpen && !isHowToPlayOpen && (
+        {teamFight &&
+          !isGameMenuOpen &&
+          !isMapSelectOpen &&
+          roster.map((r, k) =>
+            k === lineup.me ? null : (
+              <div
+                key={k}
+                ref={(el) => {
+                  tagEls.current[k] = el;
+                }}
+                className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-full z-20 flex flex-col items-center gap-0.5"
+                style={{ display: 'none' }}
+              >
+                <div
+                  className={`flex items-center gap-1 bg-black/80 px-2 py-0.5 rounded-full border text-[11px] font-bold shadow-lg ${
+                    r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'border-emerald-400/60 text-emerald-200' : 'border-red-500/60 text-red-300'
+                  }`}
+                >
+                  <span>{r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'} · {r.name}</span>
+                  {r.target && r.side !== (lineup.seats[lineup.me]?.side ?? 0) && <span className="text-yellow-300 text-[10px]">◎</span>}
+                </div>
+                <div className="w-28 h-2 bg-zinc-950 rounded-full border border-zinc-500/70 overflow-hidden">
+                  <div
+                    className={`h-full ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`}
+                    style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )
+          )}
+        {!teamFight && dummyScreenPos.visible && !isGameMenuOpen && !isHowToPlayOpen && (
           <div
             ref={foeTagRef}
             className="absolute pointer-events-none transform -translate-x-1/2 -translate-y-full z-20 flex flex-col items-center gap-1"
@@ -927,7 +1048,7 @@ export default function App() {
             }}
           >
             <div className="flex items-center gap-1 bg-black/85 px-2.5 py-0.5 rounded-full border border-red-500/50 text-[11px] font-bold text-red-300 shadow-lg">
-              <span>{aiEnabled ? `${enemyShadow} · 对手` : `演武木桩 · ${enemyShadow}`}</span>
+              <span>{aiEnabled ? `${dummyRefState.current.tag || '对手'} · 对手` : `演武木桩 · ${dummyRefState.current.tag || ''}`}</span>
               {targetingRefState.current.lockedEnemyId && (
                 <span className="text-yellow-400 font-mono text-[10px]">🎯 锁定</span>
               )}
@@ -1016,9 +1137,9 @@ export default function App() {
           if (hudMirror.dPoisoned) foeChips.push({ text: '中毒', tone: 'green', pulse: true });
           if (hudMirror.dRooted) foeChips.push({ text: '定身', tone: 'teal', pulse: true });
           const foe: UnitStats = {
-            name: online ? net?.remoteName || '对手' : aiEnabled ? `${ec.defaultCharacter}影` : '演武木桩',
+            name: aiEnabled || online ? dummyRefState.current.tag || `${ec.defaultCharacter}影` : '演武木桩',
             classId: hudMirror.dClass,
-            className: `${ec.name} · ${online ? '玩家' : aiEnabled ? 'AI' : '木桩'}`,
+            className: `${ec.name} · ${lineup.seats[fightersRef.current.indexOf(dummyRefState.current)]?.ctl === 'ai' ? (aiEnabled ? 'AI' : '木桩') : '玩家'}`,
             hp: hudMirror.dummyHp,
             maxHp: hudMirror.dMaxHp,
             mp: hudMirror.dMp,
@@ -1031,6 +1152,25 @@ export default function App() {
             <>
               <UnitFrame s={me} me />
               <UnitFrame s={foe} me={false} />
+              {teamFight && (
+                <div className="mt-1 flex flex-col gap-1 w-56">
+                  {roster.map((r, k) =>
+                    k === lineup.me || r.target ? null : (
+                      <div key={k} className="flex items-center gap-2 bg-black/60 rounded-md px-2 py-1 border border-zinc-700/60">
+                        <span className={`text-[10px] font-black ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'text-emerald-300' : 'text-red-300'}`}>
+                          {r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'}
+                        </span>
+                        <span className="text-[11px] text-zinc-200 font-bold truncate w-16">{r.name}</span>
+                        <span className="text-[10px] text-zinc-400">{CLASS_CONFIGS[r.cls]?.name}</span>
+                        <div className="flex-1 h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                          <div className={`h-full ${r.hp <= 0 ? '' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`} style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }} />
+                        </div>
+                        {r.hp <= 0 && <span className="text-[10px] text-zinc-500">倒下</span>}
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
             </>
           );
         })()}
@@ -1463,7 +1603,7 @@ export default function App() {
                 onClick={toggleAI}
                 className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-sky-700 text-sky-300 font-bold rounded-xl text-xs flex items-center justify-center gap-2"
               >
-                {aiEnabled ? '切换为木桩模式（不还手）' : `切换为对战模式（${enemyShadow}会还手）`} · P
+                {aiEnabled ? '切换为木桩模式（不还手）' : `切换为对战模式（对手会还手）`} · P
               </button>
 
               <button

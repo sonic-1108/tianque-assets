@@ -129,6 +129,10 @@ export interface CombatantBuff {
 export interface CombatantState {
   id: string;
   isPlayer: boolean;
+  /** team fights: which side (0 or 1). Friendly fire is on, this only decides who wins and who the AI goes after */
+  side?: number;
+  /** shown over the fighter's head in team fights */
+  tag?: string;
   isDummy?: boolean;
   team: 'player_team' | 'enemy_team' | 'neutral';
   name: string;
@@ -267,4 +271,14 @@ export interface GameState {
   isDebugPanelOpen: boolean;
   isPointerLocked: boolean;
   [key: string]: any;
+}
+
+/** one fighter in a match: who controls it, what class, which side */
+export interface FighterSeat {
+  cls: CharacterClassId;
+  side: number;
+  /** local: this browser's player; ai: run by the host's AI; remote: a guest's controls (by connection id) */
+  ctl: 'local' | 'ai' | 'remote';
+  remote?: string;
+  name: string;
 }
