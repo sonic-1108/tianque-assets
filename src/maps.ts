@@ -422,15 +422,16 @@ export const MAPS = {
     name: '怒海战船',
     subtitle: '风暴夜里，大海上的古战船甲板',
     icon: '🌊',
-    mechanics: ['长条甲板，两侧是船舷，有桅杆和货箱挡路', '巨浪会从一侧拍上甲板，把所有人冲向另一边', '被冲到船舷上会撞伤眩晕，格挡可以站稳'],
+    mechanics: ['四层甲板：主甲板、船头楼、船尾的后甲板和最高的艉楼，走楼梯上去，或者冲向墙边一跃而上', '巨浪会从一侧拍上主甲板，把人冲向另一边；站在高层甲板上不会被冲走', '被冲到船舷上会撞伤眩晕，格挡可以站稳'],
     homeClass: 'LightHealer',
     homeClassName: '灵雀',
     homeBonus: '移速 +10%（职业开发中）',
     available: true,
     radius: 21,
-    rect: { hx: 7, hz: 19 },
-    spawnPlayer: [0, 9],
-    spawnEnemy: [0, -9],
+    rect: { hx: 7.8, hz: 19 },
+    terrain: true,
+    spawnPlayer: [0, 7.5],
+    spawnEnemy: [0, -8.5],
     background: '#1b2530',
     fog: [40, 240],
     hemi: ['#8fb3d9', '#10202c', 0.85],
@@ -440,17 +441,18 @@ export const MAPS = {
     cardGradient: 'from-sky-900/80 via-cyan-950/80 to-slate-950/90',
     pillars: [
       // two masts
-      { x: 0, z: -8, r: 0.5 },
-      { x: 0, z: 6, r: 0.5 },
-      // cargo: single crates (1.1 m) and two stacks (2.2 m) to climb on
-      { x: 4.3, z: -14, r: 0.8, h: 1.1 },
-      { x: -4.4, z: 13, r: 0.8, h: 1.1 },
-      { x: -4.6, z: -2.5, r: 0.75, h: 1.1 },
-      { x: 4.7, z: 2.5, r: 0.75, h: 1.1 },
-      { x: -4.2, z: -11, r: 0.9, h: 2.2 },
-      { x: 4.2, z: 11, r: 0.9, h: 2.2 },
-      { x: 1.8, z: 15.5, r: 0.7, h: 1.1 },
-      { x: -1.6, z: -16.5, r: 0.7, h: 1.1 },
+      { x: 0, z: -7, r: 0.55 },
+      { x: 0, z: 5, r: 0.55 },
+      // cargo on the main deck: single crates (1.1 m) and two stacks (2.2 m) to climb on
+      { x: 4.8, z: -3.5, r: 0.75, h: 1.1 },
+      { x: -4.9, z: 1.8, r: 0.75, h: 1.1 },
+      { x: -4.6, z: -9.2, r: 0.9, h: 2.2 },
+      { x: 4.7, z: 8.4, r: 0.9, h: 2.2 },
+      // up on the forecastle, the quarterdeck and the poop deck (h is the top, measured from the main deck)
+      { x: 4.6, z: -16.8, r: 0.8, h: 3.5 },
+      { x: -2.8, z: -17.6, r: 0.7, h: 3.5 },
+      { x: -5.6, z: 14.4, r: 0.75, h: 3.7 },
+      { x: 2.6, z: 18.2, r: 0.7, h: 6.1 },
     ],
   },
   glacier: {
@@ -899,6 +901,7 @@ export function roofHeight(x: number, z: number) {
 
 /** Floor height for maps with a height field (0 for flat maps) */
 export function terrainHeight(id: MapId, x: number, z: number) {
+  if (id === 'sea') return shipFloor(x, z);
   if (id === 'glacier') return glacierHeight(x, z);
   if (id === 'forest') return forestHeight(x, z);
   if (id === 'rooftop') return roofHeight(x, z);
@@ -919,6 +922,38 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
     return v < h0 - 1.2 ? h0 : v;
   };
   return [(s(e, 0) - s(-e, 0)) / (2 * e), (s(0, e) - s(0, -e)) / (2 * e)];
+}
+
+// ----------------------------------------------------------------------
+// 怒海战船: a war junk with four walkable levels. Main deck at 0; a forecastle at the bow;
+// a quarterdeck and above it a poop deck at the stern, each reached by stairs.
+// ----------------------------------------------------------------------
+export const SHIP_DECKS = {
+  fore: { edge: -13.2, y: 2.4 }, // z < edge
+  foreStairs: { z0: -10.4, z1: -13.2, half: 2.0, n: 8 }, // climbing toward -z
+  quarter: { edge: 12.6, y: 2.6 }, // z > edge
+  quarterStairs: { z0: 9.8, z1: 12.6, half: 2.0, n: 8 },
+  poop: { edge: 16.2, y: 5.0 },
+  poopStairs: { z0: 12.9, z1: 16.2, x0: 4.9, n: 8 }, // one flight along each side, climbing toward +z
+};
+/** height of a stair tread at fraction t (0 at the foot, 1 at the head) of a flight of n treads */
+export function stairTread(t: number, n: number, rise: number) {
+  const k = Math.min(n - 1, Math.max(0, Math.floor(t * n)));
+  return ((k + 1) / n) * rise;
+}
+export function shipFloor(x: number, z: number) {
+  const D = SHIP_DECKS;
+  const ax = Math.abs(x);
+  if (z <= D.fore.edge) return D.fore.y;
+  const fs = D.foreStairs;
+  if (z < fs.z0 && ax < fs.half) return stairTread((fs.z0 - z) / (fs.z0 - fs.z1), fs.n, D.fore.y);
+  if (z >= D.poop.edge) return D.poop.y;
+  const ps = D.poopStairs;
+  if (z > ps.z0 && ax > ps.x0) return D.quarter.y + stairTread((z - ps.z0) / (ps.z1 - ps.z0), ps.n, D.poop.y - D.quarter.y);
+  if (z >= D.quarter.edge) return D.quarter.y;
+  const qs = D.quarterStairs;
+  if (z > qs.z0 && ax < qs.half) return stairTread((z - qs.z0) / (qs.z1 - qs.z0), qs.n, D.quarter.y);
+  return 0;
 }
 
 // ----------------------------------------------------------------------

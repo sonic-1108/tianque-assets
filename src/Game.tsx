@@ -3356,12 +3356,30 @@ function GameImpl({
 
     /** 青冥古林: a walking fighter climbs stairs; a waist-high ledge (the temple podium's sides) gets a small hop, higher ones block */
     function stepWall(c: CombatantState, px0: number, pz0: number) {
-      if (map.id !== 'forest' || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
+      if (map.id === 'sea' && !c.isGrounded && (c.pos[0] !== px0 || c.pos[2] !== pz0)) {
+        // in the air the raised decks' fronts are solid walls: rise clear of the edge before moving over it
+        const inWall = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.05;
+        if (!inWall(c.pos[0], c.pos[2])) return;
+        if (!inWall(c.pos[0], pz0)) {
+          c.pos[2] = pz0;
+          c.vel[2] = 0;
+        } else if (!inWall(px0, c.pos[2])) {
+          c.pos[0] = px0;
+          c.vel[0] = 0;
+        } else {
+          c.pos[0] = px0;
+          c.pos[2] = pz0;
+          c.vel[0] = c.vel[2] = 0;
+        }
+        return;
+      }
+      if ((map.id !== 'forest' && map.id !== 'sea') || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
       const tooHigh = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.55;
       if (!tooHigh(c.pos[0], c.pos[2])) return;
       const rise = terrainHeight(map.id, c.pos[0], c.pos[2]) - c.pos[1];
-      if (rise < 1.3 && (c.actionState === 'idle' || c.actionState === 'run')) {
+      // on the ship a raised deck's edge is a light-footed leap (轻功); in the forest only a waist-high ledge
+      if (rise < (map.id === 'sea' ? 2.9 : 1.3) && (c.actionState === 'idle' || c.actionState === 'run')) {
         // a light hop up onto it instead of popping through the stone
         c.pos[0] = px0;
         c.pos[2] = pz0;
@@ -3384,7 +3402,7 @@ function GameImpl({
     }
 
     function ledgeGuard(c: CombatantState, px0: number, pz0: number) {
-      if (!map.terrain || !c.isGrounded) return;
+      if (!map.terrain || !c.isGrounded || map.id === 'sea') return; // on the ship you may step off a raised deck
       const s = c.actionState;
       if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || s === 'dodge' || c.hp <= 0) return;
       const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;

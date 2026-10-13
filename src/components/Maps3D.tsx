@@ -6,8 +6,8 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
-import { ShipHull, Forecastle, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
-import { MAPS, MapId, mapRuntime, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
+import { ShipHull, Forecastle, AfterDecks, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
+import { MAPS, MapId, mapRuntime, SHIP_DECKS, shipFloor, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -940,7 +940,7 @@ function makeOceanMaterial(hx: number, hz: number) {
       uWaveRise: { value: 0 },
       uFog: { value: new THREE.Color('#1b2530') },
       uLightning: { value: 0 },
-      uShip: { value: new THREE.Vector2(hx + 0.8, hz + 4.5) },
+      uShip: { value: new THREE.Vector2(hx + 1.4, hz + 6) },
     },
     vertexShader: /* glsl */ `
       uniform float uTime; uniform float uWaveSide; uniform float uWaveRise; uniform vec2 uShip;
@@ -967,9 +967,9 @@ function makeOceanMaterial(hx: number, hz: number) {
         float h = bigSwell(p) + vChop;
         // rogue wave: a wall of water rearing up beside the ship (the crash itself is a separate sheet)
         float side = step(0.5, abs(uWaveSide));
-        float x0 = uWaveSide * (uShip.x + 4.5);
+        float x0 = uWaveSide * (uShip.x + 4.0);
         float ridge = exp(-pow(p.x - x0, 2.0) / 10.0) * exp(-pow(p.y / 26.0, 2.0));
-        h += ridge * min(uWaveRise, 1.0) * 5.0 * side;
+        h += ridge * min(uWaveRise, 1.0) * 6.8 * side;
         return h;
       }
       void main(){
@@ -1013,9 +1013,9 @@ function makeOceanMaterial(hx: number, hz: number) {
         // whitecaps where the chop peaks, more of them on top of a swell crest
         float cap = smoothstep(0.75, 1.15, vChop + max(vH - vChop, 0.0) * 0.12 + (fbm(vWorld.xz * 0.4 + uTime * 0.2) - 0.5) * 0.6);
         float churn = smoothstep(0.75, 1.0, vCalm) * smoothstep(0.55, 0.85, fbm(vWorld.xz * 1.3 + vec2(0.0, uTime * 1.2))) * 0.35;
-        float rogue = smoothstep(5.6, 6.6, vH); // only the curling lip of the rogue wave breaks white
+        float rogue = smoothstep(7.2, 8.4, vH); // only the curling lip of the rogue wave breaks white
         // light glows green through the thin, tall water of the rearing wave
-        col = mix(col, vec3(0.02, 0.13, 0.15) + uLightning * 0.2, smoothstep(2.6, 5.8, vH) * 0.55);
+        col = mix(col, vec3(0.02, 0.13, 0.15) + uLightning * 0.2, smoothstep(3.0, 7.4, vH) * 0.55);
         float foam = clamp(cap * 0.7 + churn * 0.8 + rogue, 0.0, 1.0);
         col = mix(col, vec3(0.62, 0.68, 0.72) + uLightning * 0.4, foam * 0.75);
         float d = length(cameraPosition - vWorld);
@@ -1087,6 +1087,13 @@ function Rain() {
   });
   return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
 }
+
+const SEA_Y = -3.4; // the sea surface sits well below the deck: a tall-sided war junk
+const MAST_TOP = 16.6;
+const SAILS = [
+  { w: 12, h: 10, y: 10.6 },
+  { w: 10.5, h: 8.8, y: 11.4 },
+];
 
 function SeaMap() {
   const def = MAPS.sea;
@@ -1171,12 +1178,12 @@ function SeaMap() {
       for (const sx of [-1, 1])
         for (const dz of [-2.4, -0.8, 0.8, 2.4]) {
           const z = p.z + dz;
-          pts.push(p.x, 13.6, p.z, sx * (hullW(z) - 0.05), sheer(z) + 0.08, z);
+          pts.push(p.x, MAST_TOP, p.z, sx * (hullW(z) - 0.05), sheer(z) + 0.1, z);
         }
       // junk sheets: a line from every batten's outer end converging on one block on the rail
-      const W = i ? 9 : 10.5;
-      const H = i ? 7.4 : 8.6;
-      const y0 = i ? 9.6 : 9.0;
+      const W = SAILS[i].w;
+      const H = SAILS[i].h;
+      const y0 = SAILS[i].y;
       const zb = p.z + 3.2;
       for (let k = 0; k <= 6; k++) {
         const v = k / 6;
@@ -1185,9 +1192,9 @@ function SeaMap() {
         pts.push(bx, y0 - H / 2 + v * H, p.z + 0.47, hullW(zb) - 0.1, sheer(zb) + 1.2, zb);
       }
     });
-    pts.push(0, 13.6, masts[0].z, 0, 4.6, -30.5);
-    pts.push(0, 13.6, masts[1].z, 0, 5.2, 21.0);
-    pts.push(0, 13.6, masts[0].z, 0, 13.6, masts[1].z);
+    pts.push(0, MAST_TOP, masts[0].z, 0, 7.2, -31.6);
+    pts.push(0, MAST_TOP, masts[1].z, 0, 10.5, 19.8);
+    pts.push(0, MAST_TOP, masts[0].z, 0, MAST_TOP, masts[1].z);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     return g;
@@ -1216,7 +1223,7 @@ function SeaMap() {
       <DistantJunk position={[78, -0.6, 44]} rot={2.4} scale={0.7} />
 
       <directionalLight ref={boltRef} position={[10, 40, -10]} color="#e6eeff" intensity={0} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.9, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, SEA_Y, 0]}>
         <planeGeometry args={[520, 520, 320, 320]} />
         <primitive object={ocean} attach="material" />
       </mesh>
@@ -1230,21 +1237,24 @@ function SeaMap() {
           <meshStandardMaterial ref={deckMat} map={planks} roughness={0.78} metalness={0.02} color="#8c7c6c" envMapIntensity={0.2} />
         </mesh>
         <ShipHull />
-        <Forecastle deckMap={planks} />
-        <SternCastle />
-        <pointLight position={[0, 2.2, hz + 0.1]} color="#ffb060" intensity={9} distance={11} decay={1.6} />
+        <Forecastle deckMap={planks} decks={{ ...SHIP_DECKS.fore, stairs: SHIP_DECKS.foreStairs }} />
+        <AfterDecks deckMap={planks} d={SHIP_DECKS} />
+        <SternCastle base={SHIP_DECKS.poop.y} />
+        <pointLight position={[0, 2.3, SHIP_DECKS.quarter.edge - 1.2]} color="#ffb060" intensity={9} distance={12} decay={1.5} />
         <RailLanterns />
         <HatchGrate position={[0, 0, -2.6]} w={2.4} d={2.8} />
-        <HatchGrate position={[0, 0, 12.4]} w={2.0} d={2.2} />
-        <RopeCoil position={[1.3, 0, -9.1]} />
-        <RopeCoil position={[-1.25, 0, 7.1]} r={0.36} />
-        <RopeCoil position={[-2.4, 0, 17.6]} r={0.5} />
+        <HatchGrate position={[0, 0, 7.9]} w={2.0} d={2.0} />
+        <HatchGrate position={[-2.2, SHIP_DECKS.fore.y, -16.2]} w={1.6} d={1.6} />
+        <RopeCoil position={[1.4, 0, -8.3]} />
+        <RopeCoil position={[-1.4, 0, 6.3]} r={0.36} />
+        <RopeCoil position={[-2.4, SHIP_DECKS.poop.y, 17.8]} r={0.5} />
+        <RopeCoil position={[3.4, SHIP_DECKS.quarter.y, 14.0]} r={0.4} />
         {/* masts with battened junk sails high above the deck, a lantern hung on each, and pennants */}
         {def.pillars!.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
-            <Mast r={p.r} h={14} />
-            <JunkSail width={i ? 9 : 10.5} height={i ? 7.4 : 8.6} y={i ? 9.6 : 9.0} seed={3 + i * 7} />
-            <Banner position={[0, 13.2, 0]} color="#7a1a14" trim="#c9a24a" height={2.2} width={0.6} pole={1.6} />
+            <Mast r={p.r} h={MAST_TOP + 0.4} />
+            <JunkSail width={SAILS[i].w} height={SAILS[i].h} y={SAILS[i].y} seed={3 + i * 7} />
+            <Banner position={[0, MAST_TOP - 0.4, 0]} color="#7a1a14" trim="#c9a24a" height={2.2} width={0.6} pole={1.6} />
             <ShipLantern position={[0, 3.6, -p.r - 0.18]} seed={i * 3} glow={1.3} />
             <pointLight position={[0, 2.9, -p.r - 0.5]} color="#ff9a50" intensity={7} distance={9} decay={1.5} />
           </group>
@@ -1254,8 +1264,8 @@ function SeaMap() {
         </lineSegments>
         {/* cargo crates lashed with rope */}
         {def.pillars!.slice(2).map((p, i) => (
-          <group key={i} position={[p.x, 0, p.z]} rotation={[0, i * 0.7, 0]}>
-            {Array.from({ length: Math.round((p.h ?? 1.1) / 1.1) }, (_, k) => (
+          <group key={i} position={[p.x, shipFloor(p.x, p.z), p.z]} rotation={[0, i * 0.7, 0]}>
+            {Array.from({ length: Math.max(1, Math.round(((p.h ?? 1.1) - shipFloor(p.x, p.z)) / 1.1)) }, (_, k) => (
               <group key={k} position={[0, k * 1.1, 0]} rotation={[0, k * 0.35, 0]}>
                 <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
                   <boxGeometry args={[p.r * 1.7 - k * 0.08, 1.1, p.r * 1.7 - k * 0.08]} />
