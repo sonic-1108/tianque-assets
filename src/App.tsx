@@ -577,7 +577,7 @@ export default function App() {
   if (!fightersRef.current.includes(dummyRefState.current) || dummyRefState.current === p1RefState.current)
     dummyRefState.current = fightersRef.current.find((c) => (c.side ?? 0) !== (p1RefState.current.side ?? 0)) ?? fightersRef.current[lineup.me === 0 ? 1 : 0];
   // Debug handle (used by automated visual tests; harmless in production)
-  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef };
+  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef, fighters: fightersRef };
   const targetingRefState = useRef<TargetingState>({
     lockedEnemyId: null,
     friendlyTargetId: null,
