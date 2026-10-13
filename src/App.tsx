@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense } from 'react';
+import { startPresence, setPresence } from './presence';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { usePlayground, usePlaygroundGameLifecycle } from './utils/usePlayground';
@@ -518,6 +519,21 @@ export default function App() {
   });
 
   // HUD sync states
+  // who's playing: a heartbeat for admin.html (nickname, screen, map, class, match type)
+  useEffect(() => {
+    startPresence(typeof __BUILD__ !== 'undefined' ? __BUILD__ : '');
+  }, []);
+  useEffect(() => {
+    setPresence({
+      name: nickname || '无名',
+      page: isMapSelectOpen ? 'lobby' : 'game',
+      map: MAPS[mapId]?.name ?? mapId,
+      cls: CLASS_CONFIGS[playerClass]?.name ?? playerClass,
+      mode: net ? net.role : aiEnabled ? 'ai' : 'dummy',
+      room: net?.code || undefined,
+      vs: net ? net.remoteName || undefined : undefined,
+    });
+  });
   const [hudMirror, setHudMirror] = useState({
     p1Bell: 0,
     dBell: 0,
