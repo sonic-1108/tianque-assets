@@ -292,7 +292,7 @@ function GameImpl({
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
-  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0 });
+  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0]);
@@ -3297,7 +3297,7 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0 };
+      shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -4864,6 +4864,19 @@ function GameImpl({
       if (S.stage === 0 && Math.hypot(w[0][0] - me.pos[0], w[0][1] - me.pos[2]) < 0.7) S.stage = 1;
       // knocked off the flight partway up: back to its foot and start again
       if (S.stage === 1 && me.isGrounded && Math.abs(me.pos[0] - w[0][0]) > 1.6 && Math.abs(w[1][1] - w[0][1]) > 3 && shipRegion(me.pos[0], me.pos[1], me.pos[2]) === from && Math.abs(me.pos[1] - S.y0) < 0.3) S.stage = 0;
+      // not getting anywhere (wedged against a flight or a wall): start this leg again; still stuck, give up the errand
+      if (Math.hypot(me.pos[0] - S.lx, me.pos[2] - S.lz) > 0.4) {
+        S.lx = me.pos[0];
+        S.lz = me.pos[2];
+        S.stuckT = 0;
+      } else if (me.isGrounded && isFree(me) && (S.stuckT += dt) > 1.5) {
+        S.stuckT = 0;
+        if (S.stage === 1) S.stage = 0;
+        else if (S.goal >= 0) {
+          S.goal = -1;
+          S.cool = 8;
+        }
+      }
       const pt = w[S.stage];
       out.move.set(pt[0] - me.pos[0], 0, pt[1] - me.pos[2]);
       if (out.move.lengthSq() > 0.01) out.move.normalize();
