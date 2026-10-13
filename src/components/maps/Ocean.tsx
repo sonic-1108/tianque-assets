@@ -246,22 +246,23 @@ function softDot() {
  * Runs off mapRuntime.waveRise / waveSide, so it plays the same on every screen.
  */
 export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, number] }) {
-  const N = 1800;
+  const N = 3600;
   const spray = useMemo(() => {
     const g = new THREE.BufferGeometry();
     const a0 = new Float32Array(N * 3); // along the side z, height, outward offset
     const vel = new Float32Array(N * 3);
     const seed = new Float32Array(N * 2); // delay, size
     for (let i = 0; i < N; i++) {
-      a0[i * 3] = (Math.random() * 2 - 1) * 27;
+      a0[i * 3] = (Math.random() * 2 - 1) * 42 - 4;
       a0[i * 3 + 1] = -1 + Math.random() * 3.5;
       a0[i * 3 + 2] = Math.random() * 1.5;
-      const up = 7 + Math.random() * 11;
-      vel[i * 3] = 4 + Math.random() * 14; // inboard
+      const up = 9 + Math.random() * 15;
+      vel[i * 3] = 5 + Math.random() * 18; // inboard
       vel[i * 3 + 1] = up;
       vel[i * 3 + 2] = (Math.random() - 0.5) * 3;
-      seed[i * 2] = Math.random() * 0.45;
-      seed[i * 2 + 1] = 0.4 + Math.random() * 1.2;
+      const surge = i % 6 < 3 ? 0 : i % 6 < 5 ? 1 : 2;
+      seed[i * 2] = [0, 1.9, 3.8][surge] + Math.random() * 0.6;
+      seed[i * 2 + 1] = 0.5 + Math.random() * 1.6;
     }
     g.setAttribute('position', new THREE.BufferAttribute(a0, 3));
     g.setAttribute('aVel', new THREE.BufferAttribute(vel, 3));
@@ -278,14 +279,14 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
           float t = uT - aSeed.x;
           vA = 0.0;
           vec3 p = vec3(0.0, -50.0, 0.0);
-          if (t > 0.0 && t < 1.8) {
+          if (t > 0.0 && t < 2.2) {
             // thrown up and inboard over the rail, drag slows them, gravity brings them down on the deck
             float drag = (1.0 - exp(-1.6 * t)) / 1.6;
             p.x = uSide * (uBeam + 0.6 + position.z) - uSide * aVel.x * drag;
             p.y = position.y + aVel.y * drag - 0.5 * 11.0 * t * t;
             p.z = position.x + aVel.z * drag;
             p.y = max(p.y, 0.05);
-            vA = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.9, 1.8, t));
+            vA = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(1.1, 2.2, t));
           }
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
@@ -295,7 +296,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap; uniform float uLightning; varying float vA;
         void main(){
-          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.55;
+          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.7;
           if (a < 0.01) discard;
           gl_FragColor = vec4(vec3(0.72, 0.8, 0.85) + uLightning * 0.4, a);
         }`,
@@ -312,17 +313,20 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
         uniform float uT; uniform float uSide; uniform float uBeam; uniform float uTime; uniform float uLightning; varying vec2 vP;
         ${NOISE}
         void main(){
-          if (uT < 0.15 || uT > 2.6) discard;
+          if (uT < 0.15 || uT > 7.0) discard;
           float t = uT - 0.15;
-          // the leading edge races across from the side the wave came over, then the water thins out and drains
-          float front = uSide * uBeam - uSide * t * 16.0;
-          float behind = (vP.x - front) * uSide; // > 0: already covered
-          float edge = smoothstep(-0.4, 0.4, behind);
-          float thin = 1.0 - smoothstep(0.6, 2.4, t);
-          vec2 flow = vec2(vP.x + uSide * t * 6.0, vP.y * 1.6);
+          // the leading edge races across from the side the wave came over, then the water sloshes from rail to rail
+          // as she rolls (fresh surges at 1.9 s and 3.8 s), and finally thins out and drains through the scuppers
+          float front = uSide * uBeam - uSide * min(t, 1.6) * 16.0;
+          float slosh = t > 1.6 ? sin((t - 1.6) * 1.7) * 7.0 * (1.0 - smoothstep(2.0, 6.5, t)) : 0.0;
+          float behind = (vP.x - front - uSide * slosh) * uSide; // > 0: already covered
+          float edge = smoothstep(-0.6, 0.6, behind) * (t > 1.6 ? 0.55 : 1.0) + (t > 1.6 ? 0.45 : 0.0);
+          float surge = exp(-pow((t - 1.9) * 2.2, 2.0)) + exp(-pow((t - 3.8) * 2.2, 2.0));
+          float thin = (1.0 - smoothstep(4.5, 6.8, t)) * (0.75 + 0.25 * surge);
+          vec2 flow = vec2(vP.x + uSide * t * 6.0 - slosh, vP.y * 1.6);
           float f = fbm(flow * 0.7 + uTime * 0.6);
-          float foam = smoothstep(0.35, 0.75, f + (1.0 - smoothstep(0.0, 1.6, behind)) * 0.35);
-          float a = edge * thin * (0.25 + foam * 0.55);
+          float foam = smoothstep(0.35, 0.75, f + (1.0 - smoothstep(0.0, 1.6, behind)) * 0.35 + surge * 0.3);
+          float a = edge * thin * (0.3 + foam * 0.6);
           if (a < 0.01) discard;
           gl_FragColor = vec4(mix(vec3(0.25, 0.4, 0.45), vec3(0.75, 0.82, 0.86), foam) + uLightning * 0.3, a);
         }`,
@@ -339,7 +343,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
     c.last = mapRuntime.waveRise;
     if (c.t >= 0) {
       c.t += Math.min(dt, 0.05);
-      if (c.t > 3) c.t = -1;
+      if (c.t > 7.2) c.t = -1;
     }
     const u = spray.m.uniforms;
     u.uT.value = c.t;
@@ -366,11 +370,11 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
 export function rogueState(out: THREE.Vector4, crashT: number, beam: number) {
   const side = mapRuntime.waveSide;
   const rise = Math.min(1, mapRuntime.waveRise);
-  if (crashT >= 0 && crashT < 1.6) {
-    const k = crashT / 1.6;
-    out.set(side, side * (beam + 1.5 - crashT * 7), 7.5 * (1 - k) * (1 - k), 1 - k);
+  if (crashT >= 0 && crashT < 3.2) {
+    const k = crashT / 3.2;
+    out.set(side, side * (beam + 1.5 - crashT * 5), 11 * (1 - k) * (1 - k), 1 - k * k);
   } else if (rise > 0.01 && Math.abs(side) > 0.5) {
-    out.set(side, side * (beam + 2.5 + (1 - rise) * 60), 1.5 + 6.0 * rise * rise, 0);
+    out.set(side, side * (beam + 2.5 + (1 - rise) * 70), 2.0 + 9.0 * rise * rise, 0);
   } else out.set(0, 999, 0, 0);
 }
 

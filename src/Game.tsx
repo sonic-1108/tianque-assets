@@ -184,6 +184,9 @@ interface AIMemory {
 }
 
 const yawTo = (from: number[], to: number[]) => Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
+/** 怒海战船 rogue wave: seconds it rears up before it breaks, then seconds the water stays sloshing on deck */
+const WAVE_WARN = 3.5;
+const WASH = 5.5;
 const fwdOf = (yaw: number) => vD.set(-Math.sin(yaw), 0, -Math.cos(yaw));
 
 function GameImpl({
@@ -287,7 +290,7 @@ function GameImpl({
   const weatherRef = useRef({ t: 12, phase: '', strike: 6, warn: 0 });
   const slipPrevRef = useRef([[0, 0], [0, 0]]);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
-  const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
+  const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
   const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0 });
   const lightningRef = useRef({ timer: 5 });
@@ -3291,7 +3294,7 @@ function GameImpl({
       mapRuntime.rain = 0;
       mapRuntime.storm = 0;
       mapRuntime.strikeWarn = 0;
-      waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
+      waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
       shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0 };
@@ -4900,7 +4903,7 @@ function GameImpl({
       const hx = map.rect!.hx;
       if (w.warn > 0) {
         w.warn -= dt;
-        mapRuntime.waveRise = Math.min(1, 1 - w.warn / 2.2);
+        mapRuntime.waveRise = Math.min(1, 1 - w.warn / WAVE_WARN);
         if (Math.random() < 0.5) {
           vB.set(w.side * (hx + 0.6), 0.6, (Math.random() - 0.5) * map.rect!.hz * 2);
           vfx.sparkBurst(vB, 2, '#cfe8ff', 4, 0.1, vC.set(-w.side * 0.3, 1, 0), 0.4);
@@ -4909,18 +4912,20 @@ function GameImpl({
           // crash over the deck
           w.warn = 0;
           mapRuntime.waveRise = 1.15;
-          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(170,215,255,0.4)' });
-          controller?.addShake(0.4);
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(170,215,255,0.55)' });
+          controller?.addShake(0.7);
           gameAudio.playWaveCrash();
-          for (let k = 0; k < 20; k++) {
-            const z = -map.rect!.hz + (k / 19) * map.rect!.hz * 2;
+          for (let k = 0; k < 28; k++) {
+            const z = -map.rect!.hz + (k / 27) * map.rect!.hz * 2;
             vB.set(w.side * hx, 0.5, z);
-            vfx.sparkBurst(vB, 6, '#e0f2ff', 9, 0.16, vC.set(-w.side, 0.6, 0), 0.5);
-            vfx.dustPuff(vB, 2, 0.5, 6, 1.1, '#cfe3f5');
+            vfx.sparkBurst(vB, 8, '#e0f2ff', 12, 0.18, vC.set(-w.side, 0.7, 0), 0.6);
+            vfx.dustPuff(vB, 3, 0.7, 8, 1.4, '#cfe3f5');
           }
+          w.wash = WASH;
+          w.washSide = w.side;
           fighters.forEach((c) => {
             if (c.hp <= 0 || c.pos[1] > 1.5 || shipRegion(c.pos[0], c.pos[1], c.pos[2]) !== 'deck' || c.ballista !== undefined) return;
-            const push = c.isBlocking ? 5 : 21;
+            const push = c.isBlocking ? 6 : 26;
             c.vel[0] = -w.side * push;
             c.vel[2] *= 0.3;
             if (!c.isBlocking && !c.hasSuperArmor) {
@@ -4931,15 +4936,48 @@ function GameImpl({
             }
             vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), c.isBlocking ? '站稳!' : '被浪冲走!', false, '#bae6fd');
           });
-          w.timer = 9 + Math.random() * 4;
+          w.timer = 13 + Math.random() * 5;
           w.side = 0;
         }
       } else {
+        // after the crash the water stays on deck for several seconds: a current toward the far rail,
+        // and two more surges breaking over the side as she rolls
+        if (w.wash > 0) {
+          const t0 = WASH - w.wash;
+          w.wash = Math.max(0, w.wash - dt);
+          const t = WASH - w.wash;
+          const fade = 1 - t / WASH;
+          const surge = [1.9, 3.8].find((s) => t0 < s && t >= s);
+          const ws = w.washSide || 1;
+          if (surge !== undefined) {
+            controller?.addShake(0.35);
+            gameAudio.playWaveCrash();
+            for (let k = 0; k < 14; k++) {
+              vB.set(ws * hx, 0.5, -map.rect!.hz + (k / 13) * map.rect!.hz * 2);
+              vfx.sparkBurst(vB, 6, '#e0f2ff', 10, 0.16, vC.set(-ws, 0.6, 0), 0.5);
+            }
+          }
+          fighters.forEach((c) => {
+            if (c.hp <= 0 || c.pos[1] > 1.5 || shipRegion(c.pos[0], c.pos[1], c.pos[2]) !== 'deck' || c.ballista !== undefined) return;
+            const k = c.isBlocking ? 0.25 : 1;
+            if (c.isGrounded) c.pos[0] -= ws * (1.2 + 3.4 * fade) * k * dt;
+            if (Math.random() < dt * 5) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 2, 0.3, 1.6, 0.5, '#e0f2ff');
+            if (surge !== undefined) {
+              c.vel[0] = -ws * (c.isBlocking ? 3 : 13);
+              if (!c.isBlocking && !c.hasSuperArmor && isFree(c)) {
+                c.actionState = 'hitstun';
+                c.stateTimer = 0;
+                c.stateDuration = 0.4;
+              }
+              vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), c.isBlocking ? '站稳!' : '又一浪!', false, '#bae6fd');
+            }
+          });
+        }
         mapRuntime.waveRise = Math.max(0, mapRuntime.waveRise - dt * 0.8);
         if (!round.over) w.timer -= dt;
         if (w.timer <= 0 && !round.over) {
           w.side = Math.random() < 0.5 ? -1 : 1;
-          w.warn = 2.2;
+          w.warn = WAVE_WARN;
           w.aiBlocks = Math.random() < 0.6;
           onRoundEvent?.({ type: 'toast', text: '巨浪来袭！按住右键格挡站稳' });
         }

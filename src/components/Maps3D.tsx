@@ -1013,16 +1013,17 @@ function SeaMap() {
     if (mapRuntime.waveRise > 1.05 && c.last <= 1.05) {
       c.t = 0;
       c.side = mapRuntime.waveSide || 1;
-      c.wet = 1;
+      c.wet = 1.6;
     }
     c.last = mapRuntime.waveRise;
     if (c.t >= 0) {
       c.t += Math.min(0.05, dtf);
-      if (c.t > 3) c.t = -1;
+      if (c.t > 7.2) c.t = -1;
     }
     rogueState(u.uRogue.value, c.t, 12.9);
     // the rearing wave heels her over toward it, and the blow throws her back the other way
-    const heel = mapRuntime.waveSide * (Math.min(1, mapRuntime.waveRise) * 0.06 - (c.t >= 0 && c.t < 1.2 ? Math.sin((c.t / 1.2) * Math.PI) * 0.1 : 0));
+    // (then she wallows back and forth for a few seconds with the water sloshing on deck)
+    const heel = mapRuntime.waveSide * (Math.min(1, mapRuntime.waveRise) * 0.1 - (c.t >= 0 && c.t < 6 ? Math.sin(c.t * 2.2) * 0.16 * Math.exp(-c.t * 0.45) : 0));
     mapRuntime.shipRoll = roll * 0.8 + heel;
     mapRuntime.shipPitch = pitch * 0.8;
     if (worldRef.current) {
@@ -1032,8 +1033,9 @@ function SeaMap() {
     c.wet = Math.max(0, c.wet - dtf / 5);
     if (deckMat.current) {
       // storm-soaked planks: darker and glossier for a while after a wave washes over
-      deckMat.current.roughness = 0.8 - c.wet * 0.38;
-      deckMat.current.color.setRGB(0.3 - c.wet * 0.09, 0.25 - c.wet * 0.08, 0.2 - c.wet * 0.06);
+      const wv = Math.min(1, c.wet);
+      deckMat.current.roughness = 0.8 - wv * 0.38;
+      deckMat.current.color.setRGB(0.3 - wv * 0.09, 0.25 - wv * 0.08, 0.2 - wv * 0.06);
     }
     if (boltRef.current) boltRef.current.intensity = mapRuntime.lightning * 7;
   });
