@@ -1060,27 +1060,48 @@ function buildShipBoxes() {
 }
 export const SHIP_BOXES = buildShipBoxes();
 const inXZ = (b: ShipBox, x: number, z: number, r = 0) => x > b.x0 - r && x < b.x1 + r && z > b.z0 - r && z < b.z1 + r;
+// a coarse grid over the ship: each 2 m cell lists the boxes within reach of it, so a floor / wall query looks at a
+// handful of boxes instead of all ~300 (the camera alone asks twenty times a frame)
+const SG = { cell: 2, x0: -14, z0: -82, nx: 14, nz: 82, pad: 0.6 };
+const SHIP_GRID: ShipBox[][] = (() => {
+  const g: ShipBox[][] = Array.from({ length: SG.nx * SG.nz }, () => []);
+  for (const b of SHIP_BOXES) {
+    const i0 = Math.max(0, Math.floor((b.x0 - SG.pad - SG.x0) / SG.cell));
+    const i1 = Math.min(SG.nx - 1, Math.floor((b.x1 + SG.pad - SG.x0) / SG.cell));
+    const j0 = Math.max(0, Math.floor((b.z0 - SG.pad - SG.z0) / SG.cell));
+    const j1 = Math.min(SG.nz - 1, Math.floor((b.z1 + SG.pad - SG.z0) / SG.cell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) g[j * SG.nx + i].push(b);
+  }
+  return g;
+})();
+/** the boxes that can matter at (x, z) (reach up to SG.pad) */
+function shipNear(x: number, z: number): ShipBox[] {
+  const i = Math.floor((x - SG.x0) / SG.cell);
+  const j = Math.floor((z - SG.z0) / SG.cell);
+  if (i < 0 || j < 0 || i >= SG.nx || j >= SG.nz) return SHIP_BOXES;
+  return SHIP_GRID[j * SG.nx + i];
+}
 /** the highest surface under (x, z) that a fighter whose feet are at y stands on (steps up to 0.6 m count) */
 export function shipFloorAt(x: number, z: number, y: number) {
   let g = SHIP_LAYOUT.holdY;
-  for (const b of SHIP_BOXES) if (b.y1 <= y + 0.6 && b.y1 > g && inXZ(b, x, z)) g = b.y1;
+  for (const b of shipNear(x, z)) if (b.y1 <= y + 0.6 && b.y1 > g && inXZ(b, x, z)) g = b.y1;
   return g;
 }
 /** the underside of whatever is overhead (a deck above a cabin); Infinity in the open */
 export function shipCeilAt(x: number, z: number, y: number) {
   let c = Infinity;
-  for (const b of SHIP_BOXES) if (b.y0 >= y + 0.3 && b.y0 < c && inXZ(b, x, z)) c = b.y0;
+  for (const b of shipNear(x, z)) if (b.y0 >= y + 0.3 && b.y0 < c && inXZ(b, x, z)) c = b.y0;
   return c;
 }
 /** would a fighter (radius r) with feet at y overlap something solid here? Low steps don't count */
 export function shipBlocked(x: number, z: number, y: number, r = 0.38) {
   // stair treads are shallow: a smaller reach there, so the next step up never counts as a wall
-  for (const b of SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inXZ(b, x, z, b.kind === 'tread' ? Math.min(r, 0.05) : r)) return true;
+  for (const b of r <= SG.pad ? shipNear(x, z) : SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inXZ(b, x, z, b.kind === 'tread' ? Math.min(r, 0.05) : r)) return true;
   return false;
 }
 /** is the point inside a solid (camera, projectiles) */
 export function shipSolidAt(x: number, y: number, z: number, r = 0) {
-  for (const b of SHIP_BOXES) if (y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
+  for (const b of r <= SG.pad ? shipNear(x, z) : SHIP_BOXES) if (y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
   return false;
 }
 // the crates and crossbow posts stand on whatever deck is under them, and only there

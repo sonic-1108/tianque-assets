@@ -4,6 +4,41 @@
 // you there and the floor you'd land on is at most a step up (stepping or dropping down is fine).
 // Stairs, doors, the hatch and every way round a crate fall out of that on their own.
 import { SHIP_BOXES, SHIP_LAYOUT, MAPS, shipFloorAt, shipBlocked, type ShipBox } from './maps';
+import navWasmUrl from './wasm/shipnav.wasm?url';
+
+// The graph and A* run in C++ compiled to WebAssembly (native/shipnav.cpp) once it has loaded; until then (or if a
+// browser can't run it) the JavaScript version below does the same job.
+interface NavWasm {
+  memory: WebAssembly.Memory;
+  boxes_buf(): number;
+  pillars_buf(): number;
+  seeds_buf(): number;
+  nav_build(nb: number, np: number, ns: number, hx: number, hz: number, holdY: number): number;
+  nav_px(): number;
+  nav_py(): number;
+  nav_pz(): number;
+  nav_nearest(x: number, y: number, z: number): number;
+  nav_path_buf(): number;
+  nav_path(a: number, b: number): number;
+}
+let W: NavWasm | null = null;
+export const navWasmReady: Promise<boolean> =
+  typeof WebAssembly === 'undefined' || typeof fetch === 'undefined'
+    ? Promise.resolve(false)
+    : fetch(navWasmUrl)
+        .then((r) => r.arrayBuffer())
+        .then((b) => WebAssembly.instantiate(b, {}))
+        .then((m) => {
+          W = m.instance.exports as unknown as NavWasm;
+          if (G && !G.wasm) G = null; // rebuild on the fast path next time it's asked for
+          return true;
+        })
+        .catch(() => false);
+/** test hook: use a module instantiated elsewhere (node) */
+export function useNavWasm(exports: unknown) {
+  W = exports as NavWasm;
+  G = null;
+}
 
 const CELL = 0.5;
 const STEP = 0.6;
@@ -24,6 +59,36 @@ interface Graph {
   cost: Float32Array;
   /** cell index -> nodes standing in it */
   byCell: number[][];
+  /** built by the WebAssembly module (paths and lookups go there too) */
+  wasm?: boolean;
+}
+
+function seedPoints(): [number, number, number][] {
+  const L = SHIP_LAYOUT;
+  return [[3, 9, 0.1], [-6, -14, L.holdY + 0.1], [5, -33, L.fore.y + 0.1], ...L.tiers.map((t) => [4, t.edge + 2.5, t.y + 0.1] as [number, number, number])];
+}
+
+function buildWasm(w: NavWasm): Graph | null {
+  const rect = MAPS.sea.rect!;
+  const hx = rect.hx - 0.35;
+  const hz = rect.hz - 0.35;
+  const f32 = () => new Float32Array(w.memory.buffer);
+  let m = f32();
+  const bo = w.boxes_buf() >> 2;
+  SHIP_BOXES.forEach((b, k) => m.set([b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, b.kind === 'tread' ? 1 : 0], bo + k * 7));
+  const pillars = MAPS.sea.pillars || [];
+  const po = w.pillars_buf() >> 2;
+  pillars.forEach((p, k) => m.set([p.x, p.z, p.r, p.h ?? 99, p.y0 ?? -99], po + k * 5));
+  const seeds = seedPoints();
+  const so = w.seeds_buf() >> 2;
+  seeds.forEach((s, k) => m.set(s, so + k * 3));
+  const n = w.nav_build(SHIP_BOXES.length, pillars.length, seeds.length, hx, hz, SHIP_LAYOUT.holdY);
+  if (n <= 0) return null;
+  m = f32();
+  const view = (ptr: number) => m.subarray(ptr >> 2, (ptr >> 2) + n);
+  const nx = Math.floor((hx * 2) / CELL) + 1;
+  const nz = Math.floor((hz * 2) / CELL) + 1;
+  return { hx, hz, nx, nz, px: view(w.nav_px()), py: view(w.nav_py()), pz: view(w.nav_pz()), start: new Int32Array(0), next: new Int32Array(0), cost: new Float32Array(0), byCell: [], wasm: true };
 }
 
 let G: Graph | null = null;
@@ -86,11 +151,7 @@ function build(): Graph {
     const f = floorAt(c, cx(i), cz(j), y);
     if (!blocked(c, cx(i), cz(j), f)) add(c, f);
   };
-  seed(3, 9, 0.1);
-  seed(-6, -14, SHIP_LAYOUT.holdY + 0.1);
-  const L = SHIP_LAYOUT;
-  seed(5, -33, L.fore.y + 0.1);
-  for (const t of L.tiers) seed(4, t.edge + 2.5, t.y + 0.1);
+  for (const [x, z, y] of seedPoints()) seed(x, z, y);
   const D8: [number, number, number][] = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]];
   while (queue.length) {
     const id = queue.pop()!;
@@ -136,6 +197,7 @@ function build(): Graph {
 }
 
 export function shipGraph() {
+  if (!G && W) G = buildWasm(W);
   if (!G) G = build();
   return G;
 }
@@ -143,6 +205,7 @@ export function shipGraph() {
 /** the node nearest a fighter standing (or hanging in the air) at x, y, z: on a floor at or below their feet */
 export function nearestNode(x: number, y: number, z: number) {
   const g = shipGraph();
+  if (g.wasm && W) return W.nav_nearest(x, y, z);
   const i = Math.round((x + g.hx) / CELL);
   const j = Math.round((z + g.hz) / CELL);
   let best = -1;
@@ -171,6 +234,12 @@ export function nearestNode(x: number, y: number, z: number) {
 export function findPath(a: number, b: number): number[] | null {
   const g = shipGraph();
   if (a < 0 || b < 0) return null;
+  if (g.wasm && W) {
+    const n = W.nav_path(a, b);
+    if (!n) return null;
+    const p = new Int32Array(W.memory.buffer, W.nav_path_buf(), n);
+    return Array.from(p);
+  }
   if (a === b) return [a];
   const n = g.px.length;
   const gs = new Float32Array(n).fill(Infinity);
