@@ -168,7 +168,7 @@ export const MEDITATE = { secs: 4, share: 0.1 };
 /** most things that can lie about at once */
 export const MAX_ITEMS = 8;
 /** how far a candle lights up around itself (metres): carried, set down, hung high in a tree */
-export const CANDLE_LIGHT = { hand: 10, ground: 9, hook: 28 };
+export const CANDLE_LIGHT = { hand: 10, ground: 9, hook: 28, stand: 18 };
 /** the altar's world position (candles are taken here) */
 export function altarPos(): [number, number] {
   return templeToWorld(0, -2.4);
@@ -336,13 +336,27 @@ export function waterDepth(x: number, z: number) {
 export function ladderAngle(n: number) {
   return (n * 1.7) % (Math.PI * 2);
 }
-/** a lantern hook on each lookout tree's trunk, opposite the ladder, at head height above the deck */
-export const TREE_HOOKS: { x: number; y: number; z: number; deck: number; a: number }[] = FOREST.trees
-  .filter((t) => t[3] > 0)
-  .map(([x, z, r, deck], n) => {
-    const a = ladderAngle(n) + Math.PI;
-    return { x: x + Math.cos(a) * (r + 0.18), y: deck + 1.45, z: z + Math.sin(a) * (r + 0.18), deck, a };
-  });
+/** the two incense stands (香火台) in the forecourt before the temple (temple-local x, z) */
+export const INCENSE_STANDS: [number, number][] = [
+  [-3.2, 9.8],
+  [3.2, 9.8],
+];
+/**
+ * Where a candle can be put up: a lantern hook on each lookout tree's trunk (opposite the ladder, at head height
+ * above the deck), then the incense stands before the temple (stand: true; a little roof keeps the rain off too)
+ */
+export const TREE_HOOKS: { x: number; y: number; z: number; deck: number; a: number; stand?: boolean }[] = [
+  ...FOREST.trees
+    .filter((t) => t[3] > 0)
+    .map(([x, z, r, deck], n) => {
+      const a = ladderAngle(n) + Math.PI;
+      return { x: x + Math.cos(a) * (r + 0.18), y: deck + 1.45, z: z + Math.sin(a) * (r + 0.18), deck, a };
+    }),
+  ...INCENSE_STANDS.map(([lx, lz]) => {
+    const [x, z] = templeToWorld(lx, lz);
+    return { x, y: FOREST.hill.h + 1.55, z, deck: FOREST.hill.h, a: TEMPLE_YAW, stand: true };
+  }),
+];
 function forestPillars(): Circle[] {
   // collision a touch wider than the drawn trunk so the root flare never swallows a foot
   let deckIdx = 0;
@@ -378,6 +392,7 @@ function forestPillars(): Circle[] {
     add(2.6, -1.5, 0.5);
     for (const [px, pz] of [[-8.2, 7.6], [-6.2, 7.6], [-8.2, 9.6], [-6.2, 9.6]]) add(px, pz, 0.17); // bell pavilion
     add(0, 8.4, 0.62, FOREST.hill.h + 1.1); // incense burner
+    for (const [sx, sz] of INCENSE_STANDS) add(sx, sz, 0.42); // incense stands
   }
   // small stones you step onto; big boulders are solid (a flat standing top over a rounded rock reads as floating)
   for (const [x, z, sc] of FOREST.rocks) out.push(sc < 0.5 ? { x, z, r: sc * 1.1, h: forestFloor(x, z) + sc * 0.75 } : { x, z, r: sc * 1.15 });
@@ -613,6 +628,7 @@ MAPS.forest = {
     '天气会变：晴 → 转阴 → 下雨 → 暴雨雷暴 → 放晴，大约两分钟一轮',
     '雷暴时天上劈雷，落点先冒电光：雷专劈站得最高的人（瞭望台最危险），劈在河边会沿水导电，泡在水里的人一起挨电',
     '梯子：走到梯子下按住 F 往上爬，S 往下，空格跳下来',
+    '寺门前有两座香火台：拿着点燃的蜡烛走过去按 F 供上，寺前一片都亮了（有顶棚，不怕雨）',
     '山风一起，枯枝会砸下来，落点先出现红圈',
   ],
   homeClass: 'Ranger',

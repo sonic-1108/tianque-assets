@@ -23,6 +23,8 @@ export interface RemoteInput {
   yaw: number;
   blk: boolean;
   int?: boolean;
+  /** R held down: an ultimate only lasts while its key is held */
+  ult?: boolean;
   req: string | null;
   reqTtl: number;
 }
@@ -31,7 +33,7 @@ export type NetMessage =
   | { t: 'hello'; cls: CharacterClassId; name?: string }
   | { t: 'cfg'; map: MapId; hostCls?: CharacterClassId; guestCls?: CharacterClassId; seq: number; hostName?: string; seats?: RoomSeat[] }
   | { t: 'room'; seats: RoomSeat[]; map: MapId; started: boolean }
-  | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; req: string | null }
+  | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; ult?: boolean; req: string | null }
   | { t: 's'; f: any[]; p: any[]; m: any; ev: any[]; ts?: number }
   | { t: 're'; e: any }
   | { t: 'pi'; c: number }
@@ -308,6 +310,8 @@ export class NetSession {
         r.yaw = m.yaw;
         r.blk = m.blk;
         r.int = !!m.int;
+      r.ult = !!m.ult;
+        r.ult = !!m.ult;
         if (m.req) {
           r.req = m.req;
           r.reqTtl = 0.35;
@@ -340,6 +344,7 @@ export class NetSession {
       r.yaw = m.yaw;
       r.blk = m.blk;
       r.int = !!m.int;
+      r.ult = !!m.ult;
       if (m.req) {
         r.req = m.req;
         r.reqTtl = 0.35;

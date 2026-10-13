@@ -183,6 +183,8 @@ interface Intent {
   block: boolean;
   /** F held: climb a ladder */
   interact?: boolean;
+  /** R held: an ultimate only lasts while it's held (undefined = held, for the AI) */
+  ultHeld?: boolean;
 }
 
 interface AIMemory {
@@ -648,6 +650,7 @@ function GameImpl({
       request: round.over ? null : input.peekBuffer(),
       block: actions.special && !round.over && p1.classId !== 'Ranger',
       interact: !!actions.interact,
+      ultHeld: !!actions.ultimate,
     };
 
     // Everyone else: the AI, a guest's controls, or (training dummy) nothing
@@ -664,6 +667,7 @@ function GameImpl({
         it.faceYaw = r.yaw;
         it.block = r.blk && !round.over && c.classId !== 'Ranger';
         it.interact = !!r.int;
+        it.ultHeld = !!r.ult;
         it.request = round.over || c.hp <= 0 ? null : (r.req as InputKeyAction | null);
         r.reqTtl -= dt;
         if (r.reqTtl <= 0) r.req = null;
@@ -692,6 +696,20 @@ function GameImpl({
         const r = seat?.ctl === 'remote' && net?.role === 'host' ? net.remoteOf(seat.remote) : null;
         if (r) r.req = null;
       }
+    }
+
+    // every ultimate is channelled: let go of R and it stops (the cooldown is spent either way)
+    for (let i = 0; i < N; i++) {
+      const c = fighters[i];
+      if (c.actionState !== 'ultimate' || c.hp <= 0 || intents[i].ultHeld !== false || c.stateTimer < 0.2) continue;
+      if (c.classId === 'Berserker' && c.ultSlamStarted) continue; // already crashing down: that lands regardless
+      c.actionState = c.isGrounded ? 'idle' : 'jump';
+      c.stateTimer = 0;
+      c.stateDuration = 0;
+      c.vel[0] = c.vel[2] = 0;
+      vfx.pillarAt(0.05, '#ffc94a', i);
+      vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), '收招', false, '#e5e7eb');
+      if (i === ME) onRoundEvent?.({ type: 'toast', text: '松开了 R，大招中断 · 大招要一直按住' });
     }
 
     for (let i = 0; i < N; i++) applyMovement(fighters[i], intents[i]);
@@ -979,7 +997,7 @@ function GameImpl({
     const enDist = Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]);
     // night: they show only if they carry a flame, stand in your candle's light, or near a candle that's been set down
     const litNear = (x: number, z: number) =>
-      mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground));
+      mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? (TREE_HOOKS[it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground));
     const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
@@ -1080,7 +1098,7 @@ function GameImpl({
       if (mv.lengthSq() > 1) mv.normalize();
       for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
       const req = input.consumeBuffer();
-      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, req });
+      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, ult: !!actions.ultimate, req });
 
       // ---- host state -> every fighter (we are slot ME)
       const snaps = n.snaps;
@@ -4274,12 +4292,14 @@ function GameImpl({
           });
           if (hook >= 0) {
             const h = TREE_HOOKS[hook];
-            offer(50, '按 F 把蜡烛挂在树上', () => {
+            offer(50, h.stand ? '按 F 把蜡烛供在香火台上' : '按 F 把蜡烛挂在树上', () => {
               items.push({ kind: 'candle', x: h.x, y: h.y, z: h.z, lit: c.candle === 2, shade: c.shade, hook });
               c.candle = 0;
               c.shade = false;
               spark(h.x, h.y + 0.2, h.z);
-              say(items[items.length - 1].lit ? '灯笼挂上了 · 照亮一大片林子，天亮得更快' : '挂上了，但它没点着');
+              const lit = items[items.length - 1].lit;
+              if (h.stand) say(lit ? '蜡烛供上了 · 寺前一片都亮了' : '供上了，但它没点着');
+              else say(lit ? '灯笼挂上了 · 照亮一大片林子，天亮得更快' : '挂上了，但它没点着');
             });
           } else
             offer(90, '', () => {
@@ -4335,7 +4355,7 @@ function GameImpl({
         (globalThis as any).__TQ_WEATHER_T = undefined;
       }
       // a candle hung on a lookout tree hurries the night along: dawn comes 1.5x as fast
-      const lanternUp = mapRuntime.night > 0.5 && mapRuntime.items.some((it) => it.kind === 'candle' && it.hook >= 0 && it.lit);
+      const lanternUp = mapRuntime.night > 0.5 && mapRuntime.items.some((it) => it.kind === 'candle' && it.hook >= 0 && !TREE_HOOKS[it.hook]?.stand && it.lit);
       if (!round.over) W.t += dt * (lanternUp ? 1.5 : 1);
       const cyc = WEATHER.clear + WEATHER.cloud + WEATHER.rain + WEATHER.storm + WEATHER.ease + WEATHER.dusk + WEATHER.night + WEATHER.dawn;
       const t = W.t % cyc;

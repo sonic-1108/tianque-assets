@@ -2456,6 +2456,8 @@ function PlacedItems() {
       iron: new THREE.MeshStandardMaterial({ color: '#2f2a26', metalness: 0.6, roughness: 0.6 }),
       paper: new THREE.MeshStandardMaterial({ color: '#f3e3c0', roughness: 0.9, side: THREE.DoubleSide, transparent: true, opacity: 0.85, emissive: '#ffb050', emissiveIntensity: 0 }),
       roof: new THREE.MeshStandardMaterial({ color: '#3b2a1a', roughness: 0.8 }),
+      stone: new THREE.MeshStandardMaterial({ color: "#8a8478", roughness: 0.92 }),
+      wood: new THREE.MeshStandardMaterial({ color: "#5a1f14", roughness: 0.6 }),
       flame: new THREE.SpriteMaterial({ map: flameTex, color: new THREE.Color(2.6, 1.8, 0.9), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
       halo: new THREE.SpriteMaterial({ map: haloTex, color: new THREE.Color(1.6, 1.0, 0.5), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, opacity: 0.55 }),
     };
@@ -2514,7 +2516,7 @@ function PlacedItems() {
       }
       const hung = e.it.hook >= 0;
       l.position.set(e.it.x, e.it.y + (hung ? 0.1 : 0.45), e.it.z);
-      l.distance = hung ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground;
+      l.distance = hung ? (TREE_HOOKS[e.it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground;
       l.intensity = (hung ? 90 : 11) * (0.9 + 0.1 * Math.sin(t * 13 + n * 3));
       l.decay = hung ? 0.9 : 1.2;
     });
@@ -2522,7 +2524,37 @@ function PlacedItems() {
   return (
     <group>
       {/* the iron lantern hooks, so you can see where a candle goes */}
-      {TREE_HOOKS.map((h, n) => (
+      {/* 香火台: a stone incense stand with a little tiled roof; a candle put here hangs under the roof */}
+      {TREE_HOOKS.filter((h) => h.stand).map((h, n) => (
+        <group key={'st' + n} position={[h.x, h.deck, h.z]} rotation={[0, h.a, 0]}>
+          <mesh position={[0, 0.08, 0]} material={mats.stone} castShadow receiveShadow>
+            <boxGeometry args={[0.9, 0.16, 0.9]} />
+          </mesh>
+          <mesh position={[0, 0.55, 0]} material={mats.stone} castShadow>
+            <cylinderGeometry args={[0.22, 0.3, 0.8, 8]} />
+          </mesh>
+          <mesh position={[0, 1.0, 0]} material={mats.bronze} castShadow>
+            <cylinderGeometry args={[0.4, 0.26, 0.18, 14]} />
+          </mesh>
+          {/* incense sticks smouldering in the bowl */}
+          {[-0.12, 0, 0.12].map((x) => (
+            <mesh key={x} position={[x, 1.25, 0]} rotation={[0, 0, x * 0.8]}>
+              <cylinderGeometry args={[0.008, 0.008, 0.36, 4]} />
+              <meshBasicMaterial color="#c2410c" />
+            </mesh>
+          ))}
+          {/* four posts and a little roof over the candle */}
+          {[-1, 1].flatMap((sx) => [-1, 1].map((sz) => (
+            <mesh key={`${sx}${sz}`} position={[sx * 0.36, 1.55, sz * 0.36]} material={mats.wood}>
+              <boxGeometry args={[0.06, 1.1, 0.06]} />
+            </mesh>
+          )))}
+          <mesh position={[0, 2.18, 0]} rotation={[0, Math.PI / 4, 0]} material={mats.roof} castShadow>
+            <coneGeometry args={[0.72, 0.36, 4]} />
+          </mesh>
+        </group>
+      ))}
+      {TREE_HOOKS.map((h, n) => h.stand ? null : (
         <group key={'hk' + n} position={[h.x, h.y, h.z]} rotation={[0, -h.a, 0]}>
           <mesh position={[-0.12, 0.12, 0]} rotation={[0, 0, Math.PI / 2]} material={mats.iron}>
             <cylinderGeometry args={[0.02, 0.02, 0.34, 6]} />
@@ -2630,7 +2662,7 @@ function FMarkers() {
     }
     if (mapRuntime.viewCarry === 1)
       TREE_HOOKS.forEach((h, n) => {
-        if (!mapRuntime.items.some((it) => it.hook === n)) consider(h.x, h.y + 0.4, h.z, 3, '挂蜡烛');
+        if (!mapRuntime.items.some((it) => it.hook === n)) consider(h.x, h.y + 0.4, h.z, 3, h.stand ? '供蜡烛' : '挂蜡烛');
       });
     const pick = best as { x: number; y: number; z: number; label: string } | null;
     const key = pick ? pick.label + pick.x.toFixed(1) + pick.z.toFixed(1) : '';
