@@ -289,7 +289,7 @@ function GameImpl({
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
-  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0 });
+  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0 });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0]);
@@ -692,7 +692,8 @@ function GameImpl({
       c.pos[2] += c.vel[2] * cdt;
       ledgeGuard(c, px0, pz0);
       mountainWall(i, c, px0, pz0);
-      stepWall(c, px0, pz0);
+      if (map.id === 'sea') shipWall(i, c, px0, pz0);
+      else stepWall(c, px0, pz0);
       const free = c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || c.actionState === 'skill_2';
       if (!free || c.actionState === 'dodge') {
         const k = Math.exp(-4.5 * cdt);
@@ -700,6 +701,7 @@ function GameImpl({
         c.vel[2] *= k;
       }
       applyBounds(i, c);
+      if (map.id === 'sea') shipUnstick(c);
       if (map.id === 'forest') {
         updateWater(c);
         updateGrip(i, c);
@@ -3292,7 +3294,7 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipAiRef.current = { goal: -1, cool: 1.2, mountedT: 0, outT: 0, edge: '', stage: 0 };
+      shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -3386,37 +3388,26 @@ function GameImpl({
     }
 
     /**
-     * 怒海战船: the cabins' walls, the deck slabs and the stair treads are solid. Stairs climb a tread at a time;
-     * running at a raised deck's edge from the open is a 轻功 leap up onto it (never through a cabin ceiling).
+     * 怒海战船: cabin walls, deck slabs and stair treads are solid. The raised decks can only be reached by the stairs:
+     * in the air you can't come down onto anything higher than where you took off from (so no jumping or being
+     * knocked up onto them), and walls simply stop you.
      */
-    function shipWall(c: CombatantState, px0: number, pz0: number) {
+    function shipWall(i: number, c: CombatantState, px0: number, pz0: number) {
+      if (c.isGrounded) takeoffY.current[i] = c.pos[1];
       if (c.actionState === 'buried' || (c.pos[0] === px0 && c.pos[2] === pz0)) return;
       const y = c.pos[1];
-      if (!shipBlocked(c.pos[0], c.pos[2], y)) return;
-      if (c.isGrounded && (c.actionState === 'idle' || c.actionState === 'run')) {
-        // look a little ahead, at the face we ran into
-        const mx = c.pos[0] - px0;
-        const mz = c.pos[2] - pz0;
-        const ml = Math.hypot(mx, mz) || 1;
-        const ax = c.pos[0] + (mx / ml) * 0.4;
-        const az = c.pos[2] + (mz / ml) * 0.4;
-        const top = shipFloorAt(ax, az, y + 3.1);
-        const rise = top - y;
-        if (rise > 0.55 && rise < 3.7 && shipCeilAt(px0, pz0, y) > top + 1.8 && shipCeilAt(ax, az, top) > top + 1.8) {
-          c.pos[0] = px0;
-          c.pos[2] = pz0;
-          c.vel[1] = Math.sqrt(2 * gravity * (rise + 0.4));
-          c.isGrounded = false;
-          c.actionState = 'jump';
-          vfx.dustPuff(vB.set(px0, y, pz0), 6, 0.3, 1.5, 0.5, '#b8a890');
-          return;
-        }
-      }
-      // slide along the wall if one axis is free, otherwise stop
-      if (!shipBlocked(c.pos[0], pz0, y)) {
+      const base = Math.min(y, takeoffY.current[i]);
+      const blocked = (x: number, z: number) => {
+        if (shipBlocked(x, z, y)) return true;
+        if (c.isGrounded) return false;
+        // airborne: a deck higher than where you jumped from is a wall all the way up
+        return shipFloorAt(x, z, y + 2) > base + 0.65;
+      };
+      if (!blocked(c.pos[0], c.pos[2])) return;
+      if (!blocked(c.pos[0], pz0)) {
         c.pos[2] = pz0;
         c.vel[2] = 0;
-      } else if (!shipBlocked(px0, c.pos[2], y)) {
+      } else if (!blocked(px0, c.pos[2])) {
         c.pos[0] = px0;
         c.vel[0] = 0;
       } else {
@@ -3426,9 +3417,29 @@ function GameImpl({
       }
     }
 
+    /** 怒海战船 safety net: whatever put a fighter inside a wall or a deck (a teleport, a pull, a lag spike), push them out to the nearest free spot on their level */
+    function shipUnstick(c: CombatantState) {
+      const [x, y, z] = c.pos;
+      const inside = shipBlocked(x, z, y, 0.12) || shipSolidAt(x, y + 0.9, z);
+      if (!inside) return;
+      for (let r = 0.3; r <= 4.5; r += 0.3)
+        for (let k = 0; k < 16; k++) {
+          const a = (k / 16) * Math.PI * 2;
+          const nx = x + Math.cos(a) * r;
+          const nz = z + Math.sin(a) * r;
+          if (Math.abs(nx) > (map.rect?.hx ?? 99) - 0.3 || Math.abs(nz) > (map.rect?.hz ?? 99) - 0.3) continue;
+          const f = shipFloorAt(nx, nz, y + 0.3);
+          if (Math.abs(f - y) > 0.65 && f > y) continue; // don't pop someone up onto a deck above
+          if (shipBlocked(nx, nz, f) || shipSolidAt(nx, f + 0.9, nz)) continue;
+          c.pos = [nx, Math.max(f, Math.min(y, f + 0.01)), nz];
+          if (f < y - 0.05) c.isGrounded = false;
+          c.vel[0] = c.vel[2] = 0;
+          return;
+        }
+    }
+
     /** 青冥古林: a walking fighter climbs stairs; a waist-high ledge (the temple podium's sides) gets a small hop, higher ones block */
     function stepWall(c: CombatantState, px0: number, pz0: number) {
-      if (map.id === 'sea') return shipWall(c, px0, pz0);
       if (map.id !== 'forest' || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
       const tooHigh = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.55;
@@ -4675,36 +4686,37 @@ function GameImpl({
             break;
           }
         }
-        S.outT = !inArc || !clear || dist < 3.0 || S.mountedT > 14 ? S.outT + dt : 0;
+        S.outT = !inArc || !clear || dist < 4.5 || S.mountedT > 9 ? S.outT + dt : 0;
         out.move.set(0, 0, 0);
         out.request = null;
-        if (S.outT > 1.4 || dist < 2.4) {
+        if (S.outT > 0.8 || dist < 3.5) {
           out.interact = !me.intPrev;
-          S.cool = 5;
+          S.cool = 10;
           S.goal = -1;
         } else if (B[k].load >= 1 && Math.abs(wrapA(B[k].yaw - aim)) < 0.07 && Math.random() < dt * 4) out.request = 'attack';
         return;
       }
       S.mountedT = 0;
       S.outT = 0;
-      // go and grab a free crossbow: often, unless the player is right on top of it; more eagerly the further away they are
+      // mostly it fights; once in a while, when the player is well away and nobody holds a crossbow, it runs for one
       if (S.goal < 0 && S.cool <= 0 && isFree(me) && me.isGrounded) {
-        S.cool = 2.2;
-        if (dist > 3.5 && foe.ballista === undefined) {
+        S.cool = 6 + Math.random() * 4;
+        if (dist > 7 && foe.ballista === undefined) {
           let best = -1;
           let bestD = 1e9;
           for (let k = 0; k < B.length; k++) {
             const d = SHIP_LAYOUT.ballistae[k];
             if (B[k].user >= 0) continue;
-            // rough path length: straight line plus the climb
-            const reach = Math.hypot(d.x - me.pos[0], d.z - me.pos[2]) + Math.abs(d.y - me.pos[1]) * 1.5;
+            const reach = Math.hypot(d.x - me.pos[0], d.z - me.pos[2]) + Math.abs(d.y - me.pos[1]) * 2;
             if (reach < bestD) {
               bestD = reach;
               best = k;
             }
           }
-          const chance = dist > 8 ? 0.85 : 0.55;
-          if (best >= 0 && bestD < 26 && Math.random() < chance) S.goal = best;
+          if (best >= 0 && bestD < 20 && Math.random() < (dist > 11 ? 0.5 : 0.3)) {
+            S.goal = best;
+            S.goalT = 0;
+          }
         }
       }
       let tx = foe.pos[0];
@@ -4712,9 +4724,11 @@ function GameImpl({
       let tz = foe.pos[2];
       if (S.goal >= 0) {
         const d = SHIP_LAYOUT.ballistae[S.goal];
-        if (B[S.goal].user >= 0 || dist < 2.4) {
+        S.goalT += dt;
+        // give it up to fight if the player closes in, someone else took it, or it's taking too long
+        if (B[S.goal].user >= 0 || dist < 5 || S.goalT > 9) {
           S.goal = -1;
-          S.cool = 4;
+          S.cool = 8;
         } else {
           const seat = ballistaSeat(S.goal, d.yaw);
           tx = seat[0];
@@ -4758,7 +4772,9 @@ function GameImpl({
       let next: ShipRegion = to;
       while (prev[next] !== from && prev[next] !== undefined && prev[next] !== next) next = prev[next]!;
       const L = SHIP_LAYOUT;
-      const sx = (me.pos[0] >= 0 ? 1 : -1) * 3.6;
+      // which flight of stairs: the side it's already on
+      const sx = (me.pos[0] >= 0 ? 1 : -1) * 7.0;
+      const cx = THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5);
       const ways: Record<string, [number, number][]> = {
         'deck>foreCabin': [[0, L.fore.edge + 1.0], [0, L.fore.edge - 1.4]],
         'foreCabin>deck': [[0, L.fore.edge - 1.0], [0, L.fore.edge + 1.4]],
@@ -4766,13 +4782,13 @@ function GameImpl({
         'greatCabin>deck': [[0, L.quarter.edge + 1.0], [0, L.quarter.edge - 1.4]],
         'quarter>captain': [[0, L.poop.edge - 0.9], [0, L.poop.edge + 1.2]],
         'captain>quarter': [[0, L.poop.edge + 0.9], [0, L.poop.edge - 1.2]],
-        // up: leap at the edge away from the doors; down: walk off the edge
-        'deck>fore': [[sx, L.fore.edge + 1.2], [sx, L.fore.edge - 1.5]],
-        'fore>deck': [[me.pos[0], L.fore.edge - 0.5], [me.pos[0] * 0.8, L.fore.edge + 2.0]],
-        'deck>quarter': [[sx, L.quarter.edge - 1.2], [sx, L.quarter.edge + 1.5]],
-        'quarter>deck': [[THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.quarter.edge + 0.6], [THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.quarter.edge - 2.0]],
-        'quarter>poop': [[sx, L.poop.edge - 1.2], [sx, L.poop.edge + 1.2]],
-        'poop>quarter': [[THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.poop.edge + 0.4], [THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.poop.edge - 1.6]],
+        // up: by the stairs along the bulwark (foot, then past the head); down: walk off the edge
+        'deck>fore': [[sx, L.foreStairs.foot + 0.9], [sx, L.foreStairs.head - 0.9]],
+        'fore>deck': [[cx, L.fore.edge - 0.4], [cx, L.fore.edge + 2.0]],
+        'deck>quarter': [[sx, L.quarterStairs.foot - 0.9], [sx, L.quarterStairs.head + 0.3]],
+        'quarter>deck': [[cx, L.quarter.edge + 0.6], [cx, L.quarter.edge - 2.0]],
+        'quarter>poop': [[sx, L.poopStairs.foot + 0.1], [sx, L.poopStairs.head + 0.9]],
+        'poop>quarter': [[cx, L.poop.edge + 0.4], [cx, L.poop.edge - 1.6]],
       };
       const key = `${from}>${next}`;
       const w = ways[key];

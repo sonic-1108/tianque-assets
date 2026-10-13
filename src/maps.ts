@@ -1022,8 +1022,9 @@ export function shipCeilAt(x: number, z: number, y: number) {
   return c;
 }
 /** would a fighter (radius r) with feet at y overlap something solid here? Low steps don't count */
-export function shipBlocked(x: number, z: number, y: number, r = 0.25) {
-  for (const b of SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.7 && inXZ(b, x, z, r)) return true;
+export function shipBlocked(x: number, z: number, y: number, r = 0.38) {
+  // stair treads are shallow: a smaller reach there, so the next step up never counts as a wall
+  for (const b of SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inXZ(b, x, z, b.kind === 'tread' ? Math.min(r, 0.26) : r)) return true;
   return false;
 }
 /** is the point inside a solid (camera, projectiles) */
