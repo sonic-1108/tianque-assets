@@ -13,7 +13,10 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   Berserker: BERSERKER_MODEL_URL,
   Ranger: `${import.meta.env.BASE_URL}ranger.glb`,
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
+  Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
 };
+/** 影刃's throwing dagger (Tripo prop, laid along +Y with the grip at the origin; see tools/optimize-prop.mjs) */
+export const DAGGER_URL = `${import.meta.env.BASE_URL}dagger.glb`;
 
 /** Tripo / Mixamo models face +Z. Gameplay forward is -Z, so the visual is turned 180°. */
 export const MODEL_YAW_OFFSET = Math.PI;
@@ -138,7 +141,23 @@ const MONK_CLIP_PLAN: Record<string, ClipSpec> = {
   dodge: { match: ['dive', 'roll', 'flip'], start: 0.36, end: 0.92, fit: true },
   cheer: { match: ['bow', 'cheer'], start: 0.0, end: 0.9, loop: true, speed: 0.6 },
 };
-const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : CLIP_PLAN);
+/** 影刃 overrides: quick reverse-grip cuts, a throw, a vanishing crouch, a spell for the rewind */
+const SHADOW_CLIP_PLAN: Record<string, ClipSpec> = {
+  ...CLIP_PLAN,
+  idle: { match: ['standing_relax', 'idle'], loop: true },
+  attack_1: { match: ['box_01', 'slash'], start: 0.08, end: 0.4, fit: true },
+  attack_2: { match: ['box_03', 'box_02', 'slash'], start: 0.12, end: 0.42, fit: true },
+  attack_3: { match: ['slash', 'chop'], start: 0.25, end: 0.52, fit: true },
+  skill_1: { match: ['slash', 'chop'], start: 0.28, end: 0.5, fit: true },
+  skill_2: { match: ['pitch_baseball', 'shoot'], start: 0.3, end: 0.56, fit: true },
+  skill_3: { match: ['jump_down', 'dive'], start: 0.0, end: 0.35, fit: true },
+  skill_4: { match: ['cast_a_spell', 'agree'], start: 0.25, end: 0.6, fit: true },
+  s_ult: { match: ['slash', 'chop'], start: 0.25, end: 0.5, loop: true, speed: 2.2 },
+  r_flip: { match: ['flip'], start: 0.33, end: 0.7, fit: true },
+  dodge: { match: ['dive', 'roll', 'flip'], start: 0.36, end: 0.92, fit: true },
+  cheer: { match: ['swagger', 'agree', 'cheer'], start: 0.0, end: 0.8, loop: true },
+};
+const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : c === 'Shadowblade' ? SHADOW_CLIP_PLAN : CLIP_PLAN);
 
 interface BuiltClip {
   key: string;
@@ -284,6 +303,43 @@ function buildKnife(glow: THREE.Color) {
   return { group, base, tip, fullerMat, steel };
 }
 
+// 影刃's dagger: the Tripo prop, shared geometry, loaded once (blade along +Y, grip at the origin)
+let daggerProto: Promise<THREE.Object3D> | null = null;
+function daggerModel() {
+  if (!daggerProto)
+    daggerProto = new Promise((resolve, reject) =>
+      new GLTFLoader().load(
+        DAGGER_URL,
+        (g) => {
+          g.scene.traverse((o: any) => {
+            if (o.isMesh) o.castShadow = true;
+          });
+          const box = new THREE.Box3().setFromObject(g.scene);
+          const len = Math.max(0.01, box.max.y - box.min.y);
+          g.scene.scale.setScalar(0.42 / len); // about 42 cm from pommel to point
+          resolve(g.scene);
+        },
+        undefined,
+        reject
+      )
+    );
+  return daggerProto;
+}
+function buildDagger(glow: THREE.Color) {
+  const group = new THREE.Group();
+  daggerModel()
+    .then((proto) => group.add(proto.clone()))
+    .catch(() => group.add(buildKnife(glow).group)); // missing file: a plain knife stands in
+  const base = new THREE.Object3D();
+  base.position.y = 0.1;
+  const tip = new THREE.Object3D();
+  tip.position.y = 0.36;
+  group.add(base, tip);
+  const fullerMat = new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0 });
+  const steel = new THREE.MeshStandardMaterial({ color: '#c8d3de', metalness: 0.9, roughness: 0.25 });
+  return { group, base, tip, fullerMat, steel };
+}
+
 // ------------------------------------------------------------------
 // Asset cache
 // ------------------------------------------------------------------
@@ -376,6 +432,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const climbKickRef = useRef(-1);
   const sitBlendRef = useRef(0);
   const castRef = useRef(true);
+  const stealthRef = useRef(1);
+  const lastOpRef = useRef(1);
   const limbsRef = useRef<Limbs | null>(null);
   const ladderBlendRef = useRef(0);
   const ladderPhaseRef = useRef(0);
@@ -466,9 +524,10 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     });
 
     const ranger = classId === 'Ranger';
-    const glow = new THREE.Color(ranger ? (isPlayer ? '#2dd4bf' : '#a78bfa') : isPlayer ? '#ff3b1f' : '#7dd3fc');
-    const right = ranger ? buildKnife(glow) : buildCleaver(glow);
-    const left = ranger ? buildKnife(glow) : buildCleaver(glow);
+    const shadow = classId === 'Shadowblade';
+    const glow = new THREE.Color(ranger ? (isPlayer ? '#2dd4bf' : '#a78bfa') : shadow ? (isPlayer ? '#22d3ee' : '#c084fc') : isPlayer ? '#ff3b1f' : '#7dd3fc');
+    const right = ranger ? buildKnife(glow) : shadow ? buildDagger(glow) : buildCleaver(glow);
+    const left = ranger ? buildKnife(glow) : shadow ? buildDagger(glow) : buildCleaver(glow);
     if (ranger) left.group.visible = false; // 暗器: one knife in the right hand, the rest fly
     if (classId === 'BuddhistMage') right.group.visible = left.group.visible = false; // 梵音 fights bare-handed
     // Hand-local frame (Mixamo): +Y runs along the fingers, the knuckle line is X.
@@ -477,6 +536,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     right.group.position.set(0.0, 0.075, 0.025);
     left.group.rotation.set(Math.PI, 0, -Math.PI / 2);
     left.group.position.set(0.0, 0.075, 0.025);
+    if (shadow) {
+      // 影刃 holds both daggers in a reverse grip: the blade leaves the fist on the little-finger side
+      right.group.rotation.set(0, 0, -Math.PI / 2);
+      left.group.rotation.set(Math.PI, 0, Math.PI / 2);
+    }
     if (bones.righthand) bones.righthand.add(right.group);
     if (bones.lefthand) bones.lefthand.add(left.group);
     weaponsRef.current = { right, left };
@@ -596,6 +660,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       key = 'r_kick';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
+    } else if (st === 'ultimate' && classId === 'Shadowblade') {
+      key = actionsRef.current.s_ult ? 's_ult' : 'attack_3';
     } else if (st === 'ultimate' && classId === 'BuddhistMage') {
       key = actionsRef.current.m_ult ? 'm_ult' : 'idle';
     } else if (st === 'ultimate' && classId === 'Ranger') {
@@ -655,6 +721,26 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // 青冥寺: sitting in meditation on a prayer cushion
     sitBlendRef.current = THREE.MathUtils.damp(sitBlendRef.current, (c.meditateT ?? 0) > 0 ? 1 : 0, 6, delta);
     if (limbsRef.current && sitBlendRef.current > 0.01) applySitPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), sitBlendRef.current);
+    // 影遁: fade almost out of sight (a faint shimmer for the opponent, a ghost of yourself for the player)
+    const veil = (c.stealthT ?? 0) > 0 ? (isPlayer ? 0.32 : 0.07) : 1;
+    stealthRef.current = THREE.MathUtils.damp(stealthRef.current, veil, 12, delta);
+    const op = stealthRef.current;
+    if (Math.abs(op - lastOpRef.current) > 0.01 || (op === 1 && lastOpRef.current !== 1)) {
+      lastOpRef.current = op > 0.99 ? 1 : op;
+      const apply = (o: any) => {
+        if (!o.isMesh) return;
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of ms) {
+          m.transparent = lastOpRef.current < 1;
+          m.opacity = lastOpRef.current;
+          m.depthWrite = lastOpRef.current >= 1;
+        }
+        o.castShadow = lastOpRef.current >= 1 && !c.swimming;
+      };
+      model.traverse(apply);
+      weaponsRef.current.right?.group.traverse(apply);
+      weaponsRef.current.left?.group.traverse(apply);
+    }
     // in the water the body's shadow lands on the river bed and shows through as a dark double: no shadow while swimming
     const shadowOn = !c.swimming;
     if (shadowOn !== castRef.current) {

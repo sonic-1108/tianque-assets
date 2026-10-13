@@ -215,6 +215,19 @@ export const MONK_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPhas
   ultimate: { totalDuration: 2.6, startup: 0.4, active: 1.9, recovery: 0.3, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: false, cancelableBySkill: false, cancelableByJump: false, allowAirCast: false },
 };
 
+/** 影刃 (Shadowblade): quick twin-dagger cuts, a blink, a fan of knives, stealth, a rewind, the thousand shadows. */
+export const SHADOW_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPhaseConfig>> = {
+  ...ACTION_PHASE_CONFIGS,
+  attack_1: { totalDuration: 0.3, startup: 0.08, active: 0.1, recovery: 0.12, canMoveRatio: 0, forwardMomentum: 5, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
+  attack_2: { totalDuration: 0.32, startup: 0.08, active: 0.1, recovery: 0.14, canMoveRatio: 0, forwardMomentum: 5, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
+  attack_3: { totalDuration: 0.5, startup: 0.16, active: 0.14, recovery: 0.2, canMoveRatio: 0, forwardMomentum: 7, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
+  skill_1: { totalDuration: 0.42, startup: 0.12, active: 0.1, recovery: 0.2, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  skill_2: { totalDuration: 0.45, startup: 0.14, active: 0.08, recovery: 0.23, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  skill_3: { totalDuration: 0.32, startup: 0.08, active: 0.08, recovery: 0.16, canMoveRatio: 0.5, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  skill_4: { totalDuration: 0.4, startup: 0.1, active: 0.1, recovery: 0.2, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  ultimate: { totalDuration: 2.2, startup: 0.3, active: 1.6, recovery: 0.3, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: false, cancelableBySkill: false, cancelableByJump: false, allowAirCast: true },
+};
+
 export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
   Berserker: {
     id: 'Berserker',
@@ -511,6 +524,28 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
       { id: 'swallow_flip', name: '燕返', key: '3', description: '向后空翻跃出一大段距离，同时向前方扇形甩出7枚飞镖。翻身过程中短暂无敌，用来逃离近身。', mpCost: 15, cooldown: 6, icon: '🕊️' },
       { id: 'poison', name: '淬毒', key: '4', description: '给接下来3秒内的普通攻击淬毒（左键飞镖、三连镖、右键撩刀）。淬毒的攻击命中后，对手在2秒内额外流失这一击伤害的80%，以最后一次淬毒命中为准重新计算。', mpCost: 10, cooldown: 10, icon: '☠️' },
       { id: 'rain_of_darts', name: '暴雨梨花', key: 'R', description: '纵身跃上半空悬停约2秒，向下方大片区域洒下漫天飞镖。悬空期间霸体。', mpCost: 50, cooldown: 22, icon: '🌸', isSuper: true },
+    ],
+  },
+  Shadowblade: {
+    id: 'Shadowblade',
+    name: '影刃',
+    defaultCharacter: '夜无痕',
+    role: '近身刺客 / 突进爆发 (Assassin)',
+    roleType: 'dps',
+    description: '双手反握飞刀的夜行刺客，身上的符文能扭转片刻光阴。血量偏低，靠瞬移、隐身和回溯近身爆发再全身而退。',
+    hp: 1300,
+    mp: 100,
+    speedRatio: 1.1,
+    attackSpeedRatio: 1.3,
+    staggerPower: 0.8,
+    passiveName: '背刺',
+    passiveDesc: '从对手背后出手，伤害提高30%。',
+    skills: [
+      { id: 'shadow_step', name: '瞬影', key: '1', description: '化作一道影子瞬移到对手身后（10米内，否则向前闪出7米），2.5秒内的下一击必定暴击。', mpCost: 15, cooldown: 7, icon: '👤' },
+      { id: 'fan_knives', name: '飞刀', key: '2', description: '扇形甩出三把飞刀，每把55伤害，命中会短暂打断。', mpCost: 15, cooldown: 4, icon: '🔪' },
+      { id: 'shadow_veil', name: '影遁', key: '3', description: '隐入暗影2.5秒：对手几乎看不见你、锁定被打断，移速提高25%。隐身中出手会现身，这一击暴击。', mpCost: 20, cooldown: 12, icon: '🌫️' },
+      { id: 'rewind', name: '回溯', key: '4', description: '扭转光阴，回到3秒前所在的位置；如果那时血更多，也把血量回到那时。', mpCost: 25, cooldown: 16, icon: '⏳' },
+      { id: 'thousand_shadows', name: '千影杀', key: 'R', description: '锁定12米内的对手，化作六道残影从四面八方连续穿刺，最后一击重斩把人打倒。施放期间无敌。', mpCost: 55, cooldown: 22, icon: '🌑', isSuper: true },
     ],
   },
 };

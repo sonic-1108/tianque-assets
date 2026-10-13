@@ -104,8 +104,28 @@ const MONK_HOTBAR: HotbarEntry[] = [
   { id: 'buddhas', key: 'R', name: MS[4].name, icon: MS[4].icon, short: '九掌天降', cdKey: 'ultimate', super: true, meta: mMeta(4), desc: MS[4].description,
     tip: '先用 2 禅定结界让对手跑不快，再开万佛朝宗，掌印几乎躲不开。' },
 ];
-const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR };
-const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage'];
+const SS = CLASS_CONFIGS.Shadowblade.skills;
+const sMeta = (i: number) => [`MP ${SS[i].mpCost}`, `冷却 ${SS[i].cooldown}s`];
+const SHADOW_HOTBAR: HotbarEntry[] = [
+  { id: 's_attack', key: '左键', name: '双刃', icon: '🗡️', short: '反手三连', basic: true, meta: ['出手很快', '背后出手伤害+30%'],
+    desc: '双手反握飞刀，两下快斩，第三下双刀齐刺。被动「背刺」：从对手背后出手伤害提高30%。',
+    tip: '先用 1 瞬影闪到背后，再接三连，暴击加背刺伤害非常高。' },
+  { id: 's_block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'],
+    desc: '按住右键交叉双刀格挡，正面伤害减少60%。在被打中前0.2秒内按下触发「完美格挡」。',
+    tip: '影刃血薄，硬拼不如躲：能翻滚就翻滚，来不及再格挡。' },
+  { id: 'shadow_step', key: '1', name: SS[0].name, icon: SS[0].icon, short: '闪到身后', cdKey: 'skill1', meta: sMeta(0), desc: SS[0].description,
+    tip: '对手正面对着你出招时用，正好闪到他背后。' },
+  { id: 'fan_knives', key: '2', name: SS[1].name, icon: SS[1].icon, short: '三刀扇射', cdKey: 'skill2', meta: sMeta(1), desc: SS[1].description,
+    tip: '中距离骚扰，或者打断对手正在起手的技能。' },
+  { id: 'shadow_veil', key: '3', name: SS[2].name, icon: SS[2].icon, short: '隐身加速', cdKey: 'skill3', meta: sMeta(2), desc: SS[2].description,
+    tip: '隐身后绕到侧面或背后再出手，破隐一击暴击加背刺。夜里的青冥古林更难被发现。' },
+  { id: 'rewind', key: '4', name: SS[3].name, icon: SS[3].icon, short: '回到3秒前', cdKey: 'skill4', meta: sMeta(3), desc: SS[3].description,
+    tip: '冲进去打一套，被反打掉血时按 4，回到出手前的位置和血量。' },
+  { id: 'thousand_shadows', key: 'R', name: SS[4].name, icon: SS[4].icon, short: '六影穿刺', cdKey: 'ultimate', super: true, meta: sMeta(4), desc: SS[4].description,
+    tip: '施放全程无敌，可以拿来躲对手的大招，同时反打。' },
+];
+const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR };
+const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade'];
 
 interface CanvasLoadingScreenProps {
   progress: number;
@@ -841,7 +861,7 @@ export default function App() {
                             setScore({ player: 0, enemy: 0 });
                           }}
                           className={`flex-1 text-left rounded-xl border px-3 py-2 transition-all ${
-                            on ? (cid === 'Ranger' ? 'border-teal-400 bg-teal-900/40 ring-2 ring-teal-400/50' : cid === 'BuddhistMage' ? 'border-yellow-300 bg-yellow-900/30 ring-2 ring-yellow-300/50' : 'border-amber-400 bg-amber-900/40 ring-2 ring-amber-400/50') : 'border-zinc-700 hover:border-zinc-500'
+                            on ? (cid === 'Shadowblade' ? 'border-cyan-400 bg-indigo-950/60 ring-2 ring-cyan-400/50' : cid === 'Ranger' ? 'border-teal-400 bg-teal-900/40 ring-2 ring-teal-400/50' : cid === 'BuddhistMage' ? 'border-yellow-300 bg-yellow-900/30 ring-2 ring-yellow-300/50' : 'border-amber-400 bg-amber-900/40 ring-2 ring-amber-400/50') : 'border-zinc-700 hover:border-zinc-500'
                           }`}
                         >
                           <div className="text-sm font-black text-white">{cc.name} · {cc.defaultCharacter}</div>

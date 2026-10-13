@@ -8,7 +8,7 @@ import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
 import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId } from './types';
 import { GameInputSnapshot, InputKeyAction } from './input';
-import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
+import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
@@ -81,9 +81,16 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 const MONK_PLAYER_COLOR = '#f6c453';
 const MONK_ENEMY_COLOR = '#93c5fd';
-const phasesFor = (c: CombatantState) => (c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : c.classId === 'BuddhistMage' ? MONK_PHASE_CONFIGS : ACTION_PHASE_CONFIGS);
+const SHADOW_PLAYER_COLOR = '#22d3ee';
+const SHADOW_ENEMY_COLOR = '#c084fc';
+const phasesFor = (c: CombatantState) =>
+  c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : c.classId === 'BuddhistMage' ? MONK_PHASE_CONFIGS : c.classId === 'Shadowblade' ? SHADOW_PHASE_CONFIGS : ACTION_PHASE_CONFIGS;
 const colorFor = (slot: number, c: CombatantState) =>
-  c.classId === 'Ranger'
+  c.classId === 'Shadowblade'
+    ? slot === 0
+      ? SHADOW_PLAYER_COLOR
+      : SHADOW_ENEMY_COLOR
+    : c.classId === 'Ranger'
     ? slot === 0
       ? RANGER_PLAYER_COLOR
       : RANGER_ENEMY_COLOR
@@ -115,7 +122,7 @@ function slimFighter(c: CombatantState) {
 }
 const TREE_RUN_T = 1.0;
 /** 青冥古林: each fighter's own grip (sole friction), before the weather */
-const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMage: 0.95 };
+const GRIP: Record<string, number> = { Berserker: 0.85, Ranger: 0.8, BuddhistMage: 0.95, Shadowblade: 0.82 };
 /** below this friction, sharp turns, stops, rolls and hard landings start to cost balance */
 const SLIP_T = 0.74;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
@@ -403,7 +410,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const p1 = p1RefState.current;
@@ -447,12 +454,23 @@ function GameImpl({
       if ((c.protectTimer ?? 0) > 0) c.protectTimer = (c.protectTimer ?? 0) - dt;
       // 体力 regenerates after a short pause
       if ((c.staminaDelay ?? 0) > 0) c.staminaDelay = (c.staminaDelay ?? 0) - dt;
-      else c.stamina = Math.min(c.maxStamina ?? 100, (c.stamina ?? 100) + dt * (c.classId === 'Ranger' ? 32 : c.classId === 'BuddhistMage' ? 26 : 24));
+      else c.stamina = Math.min(c.maxStamina ?? 100, (c.stamina ?? 100) + dt * (c.classId === 'Ranger' ? 32 : c.classId === 'Shadowblade' ? 30 : c.classId === 'BuddhistMage' ? 26 : 24));
       const stunnedNow = c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown' || c.actionState === 'buried';
       if (!stunnedNow && (c.stunLoad ?? 0) > 0) c.stunLoad = Math.max(0, (c.stunLoad ?? 0) - dt * 4);
       if ((c.poisonBuff ?? 0) > 0) c.poisonBuff = (c.poisonBuff ?? 0) - dt;
       if (c.zenField && c.zenField.t > 0) c.zenField.t -= dt;
       if ((c.silenceTimer ?? 0) > 0) c.silenceTimer = (c.silenceTimer ?? 0) - dt;
+      if ((c.critNext ?? 0) > 0) c.critNext = (c.critNext ?? 0) - dt;
+      if ((c.stealthT ?? 0) > 0) {
+        c.stealthT = (c.stealthT ?? 0) - dt;
+        if (c.hp <= 0) c.stealthT = 0;
+      }
+      // 回溯: remember where (and how hale) 影刃 was over the last few seconds
+      if (c.classId === 'Shadowblade') {
+        const h = (c.rewind ??= []);
+        if (!h.length || gt - h[h.length - 1][0] > 0.1) h.push([gt, c.pos[0], c.pos[1], c.pos[2], c.hp]);
+        while (h.length > 1 && gt - h[0][0] > 3.6) h.shift();
+      }
       if ((c.bellTimer ?? 0) > 0) {
         c.bellTimer = (c.bellTimer ?? 0) - dt;
         if ((c.bellTimer ?? 0) <= 0 && c.hp > 0) {
@@ -824,7 +842,7 @@ function GameImpl({
     // night: they show only if they carry a flame, stand in your candle's light, or near a candle that's been set down
     const litNear = (x: number, z: number) =>
       mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? CANDLE_LIGHT.hook : CANDLE_LIGHT.ground));
-    const hiddenInDark = map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]);
+    const hiddenInDark = ((en.stealthT ?? 0) > 0) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
       // itself is moved every frame without a re-render
@@ -1121,7 +1139,7 @@ function GameImpl({
       // Soft lock: attacks snap toward a nearby opponent that is roughly in front
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-        const range = ranger ? 22 : c.classId === 'BuddhistMage' ? 5.5 : 4.2;
+        const range = ranger ? 22 : c.classId === 'BuddhistMage' ? 5.5 : c.classId === 'Shadowblade' ? 6 : 4.2;
         if (fd < range && foe.hp > 0) {
           const ty = yawTo(c.pos, foe.pos);
           let dd = ty - intent.faceYaw;
@@ -1320,6 +1338,9 @@ function GameImpl({
         return false;
       }
 
+      if (c.classId === 'Shadowblade' && (req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
+        return executeShadow(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
+      }
       if (c.classId === 'BuddhistMage' && (req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
         return executeMonk(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
       }
@@ -1823,6 +1844,24 @@ function GameImpl({
         o.crit = true;
         o.heavy = true;
       }
+      if (att.classId === 'Shadowblade') {
+        // 破隐 / 瞬影: the first blow out of the shadows is a critical
+        if ((att.stealthT ?? 0) > 0 || (att.critNext ?? 0) > 0) {
+          dmg *= 1.6;
+          o.crit = true;
+          att.critNext = 0;
+          if ((att.stealthT ?? 0) > 0) {
+            att.stealthT = 0;
+            vfx.damageNumber(vA.set(att.pos[0], att.pos[1] + 2.3, att.pos[2]), '破隐', true, '#a5f3fc');
+          }
+        }
+        // 背刺: from behind
+        const df = fwdOf(def.rotY);
+        if (df.x * (att.pos[0] - def.pos[0]) + df.z * (att.pos[2] - def.pos[2]) < -0.3 * Math.hypot(att.pos[0] - def.pos[0], att.pos[2] - def.pos[2])) {
+          dmg *= 1.3;
+          vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.5, def.pos[2]), '背刺', true, '#c4b5fd');
+        }
+      }
       // Juggle: airborne targets stay in the air for a few hits, with damage decay
       const airborne = !def.isGrounded && (def.actionState === 'launched' || def.actionState === 'knockdown' || def.actionState === 'hitstun');
       if (airborne && !o.unblockable && o.state !== 'buried') {
@@ -1983,6 +2022,10 @@ function GameImpl({
       }
       if (c.classId === 'BuddhistMage') {
         resolveMonk(slot, c, foe, fwd, dist, inFront, active);
+        return;
+      }
+      if (c.classId === 'Shadowblade') {
+        resolveShadow(slot, c, foe, fwd, dist, inFront, active);
         return;
       }
 
@@ -2232,6 +2275,203 @@ function GameImpl({
         }
       }
       return false;
+    }
+
+    // ======================================================
+    // 影刃: twin daggers, a blink, a fan of knives, stealth, a rewind, the thousand shadows
+    // ======================================================
+    /** a puff of shadow where 影刃 vanishes or appears */
+    function shadowPuff(x: number, y: number, z: number, color: string) {
+      vfx.dustPuff(vB.set(x, y + 0.6, z), 14, 0.5, 2.2, 0.8, '#1e1b2e');
+      vfx.sparkBurst(vB.set(x, y + 1.0, z), 10, color, 3, 0.05, UP, 1);
+      vfx.ring(vB.set(x, y + 0.06, z), 1.3, color, 0.4, 0.08, 0.2);
+    }
+    /** move 影刃 to (x, z) if it's safe ground, landing on it */
+    function shadowTo(c: CombatantState, x: number, z: number) {
+      if (map.radius && Math.hypot(x, z) > map.radius - 0.8 && !map.terrain) return false;
+      if (danger(x, z, 0)) return false;
+      const g = groundAt(x, z, c.pos[1] + 2);
+      if (g < c.pos[1] - 6) return false; // never blink off a cliff
+      c.pos[0] = x;
+      c.pos[2] = z;
+      c.pos[1] = g;
+      c.vel = [0, 0, 0];
+      c.isGrounded = true;
+      return true;
+    }
+
+    function executeShadow(
+      slot: number,
+      c: CombatantState,
+      foe: CombatantState,
+      intent: Intent,
+      req: string,
+      h: {
+        cur: CharacterActionState;
+        phase: string;
+        free: boolean;
+        canSkill: boolean;
+        start: (next: CharacterActionState, push?: number) => void;
+        paySkill: (idx: number, key: string, label: string) => boolean;
+        report: (a: string, r: string) => void;
+        color: string;
+      }
+    ): boolean {
+      const { cur, phase, free, start, paySkill, report } = h;
+      const color = colorFor(slot, c);
+      const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      const foeOk = foe.hp > 0 && Math.abs(foe.pos[1] - c.pos[1]) < 4 && (foe.stealthT ?? 0) <= 0;
+      switch (req) {
+        case 'attack': {
+          let next: CharacterActionState | null = null;
+          if (free) next = 'attack_1';
+          else if (cur === 'attack_1' && phase === 'recovery') next = 'attack_2';
+          else if (cur === 'attack_2' && phase === 'recovery') next = 'attack_3';
+          if (!next) return report('普攻', `被 [${cur} ${phase}] 占用`), false;
+          start(next, phasesFor(c)[next]!.forwardMomentum);
+          if (next === 'attack_3') gameAudio.playSwingHeavy();
+          else gameAudio.playSwingLight();
+          return true;
+        }
+        case 'skill1': {
+          // 瞬影: behind the opponent, or a blink forward
+          if (!paySkill(0, 'skill1', '1')) return false;
+          const x0 = c.pos[0];
+          const y0 = c.pos[1];
+          const z0 = c.pos[2];
+          start('skill_1');
+          let moved = false;
+          if (foeOk && fd < 10) {
+            const ff = fwdOf(foe.rotY);
+            moved = shadowTo(c, foe.pos[0] - ff.x * 1.3, foe.pos[2] - ff.z * 1.3) || shadowTo(c, foe.pos[0] + ff.z * 1.3, foe.pos[2] - ff.x * 1.3);
+            if (moved) c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
+          }
+          if (!moved) {
+            const f = fwdOf(intent.faceYaw);
+            for (let d = 7; d >= 2 && !moved; d -= 1) moved = shadowTo(c, c.pos[0] + f.x * d, c.pos[2] + f.z * d);
+          }
+          c.critNext = 2.5;
+          shadowPuff(x0, y0, z0, color);
+          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
+          gameAudio.playDodge();
+          return true;
+        }
+        case 'skill2': {
+          if (!paySkill(1, 'skill2', '2')) return false;
+          start('skill_2');
+          gameAudio.playSwingLight();
+          return true;
+        }
+        case 'skill3': {
+          // 影遁
+          if (!paySkill(2, 'skill3', '3')) return false;
+          start('skill_3');
+          c.stealthT = 2.5;
+          if (slot === 1 && targeting.lockedEnemyId) targeting.lockedEnemyId = null; // the player loses the lock
+          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
+          gameAudio.playDodge();
+          return true;
+        }
+        case 'skill4': {
+          // 回溯: back to where you stood three seconds ago (and to the HP you had then, if it was more)
+          const hist = c.rewind ?? [];
+          if (hist.length < 2) return report('4: 回溯', '还没有可回溯的轨迹'), false;
+          if (!paySkill(3, 'skill4', '4')) return false;
+          let pick = hist[0];
+          for (const e of hist) if (gt - e[0] >= 3) pick = e;
+          start('skill_4');
+          // the way back, traced in shadow
+          for (let k = hist.length - 1; k >= 0; k -= 3) if (hist[k][0] >= pick[0]) vfx.dustPuff(vB.set(hist[k][1], hist[k][2] + 0.9, hist[k][3]), 3, 0.3, 0.6, 0.6, '#312e81');
+          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
+          c.pos[0] = pick[1];
+          c.pos[1] = pick[2];
+          c.pos[2] = pick[3];
+          c.vel = [0, 0, 0];
+          const healed = Math.max(0, pick[4] - c.hp);
+          c.hp = Math.max(c.hp, pick[4]);
+          c.rewind = [];
+          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
+          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.06, c.pos[2]), 2.2, '#a5b4fc', 0.7, 0.1, 0.3);
+          if (healed > 1) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), `回溯 +${Math.round(healed)}`, true, '#a5b4fc');
+          gameAudio.playPowerupChime();
+          return true;
+        }
+        case 'ultimate': {
+          if (!paySkill(4, 'ultimate', 'R')) return false;
+          start('ultimate');
+          c.shadowHits = 0;
+          c.ultTarget = foeOk && fd < 12;
+          c.dodgeIframeTimer = phasesFor(c).ultimate!.totalDuration;
+          c.stealthT = 0;
+          shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
+          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.06, c.pos[2]), 3, color, 0.6, 0.14, 0.4);
+          gameAudio.playUltRise();
+          if (slot === 0) controller?.addShake(0.2);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function resolveShadow(slot: number, c: CombatantState, foe: CombatantState, fwd: THREE.Vector3, dist: number, inFront: boolean, active: boolean) {
+      const cfg = phasesFor(c)[c.actionState];
+      const st = c.actionState;
+      const t = c.stateTimer;
+      const color = colorFor(slot, c);
+      const chest = () => vB.set(c.pos[0] + fwd.x * 0.6, c.pos[1] + 1.15, c.pos[2] + fwd.z * 0.6);
+      // twin daggers: two quick cuts, then both blades driven in
+      if (st.startsWith('attack_') && active && !c.hasHitCurrentMove && dist < 2.4 && inFront) {
+        c.hasHitCurrentMove = true;
+        vfx.slashMark(chest(), color, st === 'attack_3' ? 1.3 : 0.9);
+        if (st === 'attack_1') applyHit(slot, c, foe, 52, { knock: 2.5 });
+        else if (st === 'attack_2') applyHit(slot, c, foe, 60, { knock: 3 });
+        else applyHit(slot, c, foe, 115, { heavy: true, knock: 6, dur: 0.5, shake: 0.25 });
+      }
+      // 飞刀: three knives in a fan
+      if (st === 'skill_2' && cfg && t >= cfg.startup && !c.hasHitCurrentMove) {
+        c.hasHitCurrentMove = true;
+        const from = vA.set(c.pos[0] + fwd.x * 0.5, c.pos[1] + 1.3, c.pos[2] + fwd.z * 0.5).clone();
+        for (const k of [-1, 0, 1]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.2), 34, { dmg: 55, knock: 2.5, dur: 0.28, stagger: true, noPassive: true });
+      }
+      // 千影杀: six strikes from every side, then the cut that drops them
+      if (st === 'ultimate' && cfg) {
+        c.vel = [0, 0, 0];
+        if (!c.ultTarget) {
+          // nobody in reach: a single dashing cut forward
+          if (t > cfg.startup && !c.hasHitCurrentMove) {
+            c.hasHitCurrentMove = true;
+            shadowTo(c, c.pos[0] + fwd.x * 6, c.pos[2] + fwd.z * 6);
+            vfx.slashMark(chest(), color, 1.6);
+            c.stateTimer = Math.max(t, cfg.startup + cfg.active);
+          }
+          return;
+        }
+        const k = Math.floor((t - cfg.startup) / 0.24);
+        const hits = c.shadowHits ?? 0;
+        if (t >= cfg.startup && k >= hits && hits < 6 && foe.hp > 0) {
+          const a = hits * 2.4 + 0.7;
+          const x0 = c.pos[0];
+          const y0 = c.pos[1];
+          const z0 = c.pos[2];
+          if (!shadowTo(c, foe.pos[0] + Math.cos(a) * 1.6, foe.pos[2] + Math.sin(a) * 1.6)) shadowTo(c, foe.pos[0] - Math.cos(a) * 1.6, foe.pos[2] - Math.sin(a) * 1.6);
+          c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
+          vfx.dustPuff(vB.set(x0, y0 + 0.9, z0), 6, 0.4, 1.2, 0.7, '#1e1b2e');
+          const f2 = fwdOf(c.rotY);
+          vfx.slashMark(vB.set(c.pos[0] + f2.x * 0.8, c.pos[1] + 1.1, c.pos[2] + f2.z * 0.8), color, 1.4);
+          applyHit(slot, c, foe, 44, { knock: 0, dur: 0.45, noStop: true, flinch: true });
+          gameAudio.playSwingLight();
+          c.shadowHits = hits + 1;
+        }
+        if ((c.shadowHits ?? 0) >= 6 && t >= cfg.startup + cfg.active - 0.1 && !c.hasHitCurrentMove) {
+          c.hasHitCurrentMove = true;
+          c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
+          vfx.flash(chest(), color, 40, 0.2, 8);
+          vfx.slashMark(chest(), color, 2.2);
+          if (foe.hp > 0 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) < 3.5)
+            applyHit(slot, c, foe, 170, { heavy: true, crit: true, knock: 9, state: 'knockdown', dur: 0.9, launch: 3, shake: 0.45 });
+          gameAudio.playHitHeavy();
+        }
+      }
     }
 
     function resolveMonk(slot: number, c: CombatantState, foe: CombatantState, fwd: THREE.Vector3, dist: number, inFront: boolean, active: boolean) {
@@ -4209,6 +4449,7 @@ function GameImpl({
     function runAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
       if (me.classId === 'Ranger') return runRangerAI(me, foe, out, dt2);
       const monkAI = me.classId === 'BuddhistMage';
+      const shadowAI = me.classId === 'Shadowblade';
       const ai = aiRef.current;
       const dx = foe.pos[0] - me.pos[0];
       const dz = foe.pos[2] - me.pos[2];
@@ -4236,6 +4477,12 @@ function GameImpl({
         out.request = ai.request;
         return;
       }
+      // a stealthed 影刃 can't be seen: lose track of them unless they're right on top of you
+      if ((foe.stealthT ?? 0) > 0 && dist > 2.2) {
+        ai.request = null;
+        ai.think = Math.max(ai.think, 0.3);
+        if (ai.plan === 'approach') ai.plan = 'circle';
+      }
       // 钉地斩 follow-up after an AI jump
       if (ai.airFollow > 0) {
         ai.airFollow -= dt2;
@@ -4251,6 +4498,37 @@ function GameImpl({
         ai.comboLeft -= 1;
       }
 
+      if (ai.think <= 0 && free && !ai.request && shadowAI) {
+        // 影刃: blink in behind, cut, vanish when hurt, rewind out of a bad trade
+        ai.think = 0.2 + Math.random() * 0.22;
+        const r = Math.random();
+        if (me.hp < me.maxHp * 0.45 && ready('skill4') && me.mp >= 25 && r < 0.35) ask('skill4');
+        else if (foeAttacking && dist < 3.4 && r < 0.5) {
+          if (ready('skill3') && me.mp >= 20 && r < 0.2) ask('skill3');
+          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
+            ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
+            ask('dodge');
+          } else {
+            ai.plan = 'guard';
+            ai.planTimer = 0.4;
+          }
+        } else if (ready('ultimate') && me.mp >= 55 && dist < 9 && r < 0.18) ask('ultimate');
+        else if (dist > 3 && dist < 10 && ready('skill1') && me.mp >= 15 && r < 0.4) ask('skill1');
+        else if (dist > 4 && dist < 16 && ready('skill2') && me.mp >= 15 && r < 0.45) ask('skill2');
+        else if (dist > 2.3) {
+          ai.plan = r < 0.85 ? 'approach' : 'circle';
+          ai.planTimer = 0.45 + Math.random() * 0.3;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        } else if (r < 0.7) {
+          ask('attack');
+          ai.comboLeft = 2;
+        } else if (ready('skill3') && me.mp >= 20 && r < 0.8) ask('skill3');
+        else {
+          ai.plan = 'circle';
+          ai.planTimer = 0.4;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        }
+      }
       if (ai.think <= 0 && free && !ai.request && monkAI) {
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
@@ -4289,7 +4567,7 @@ function GameImpl({
           ai.strafe = Math.random() < 0.5 ? -1 : 1;
         }
       }
-      if (ai.think <= 0 && free && !ai.request && !monkAI) {
+      if (ai.think <= 0 && free && !ai.request && !monkAI && !shadowAI) {
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
         if (foe.pos[1] - me.pos[1] > 2) {

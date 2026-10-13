@@ -6,7 +6,8 @@ export type CharacterClassId =
   | 'BuddhistMage'
   | 'LightHealer'
   | 'HeavyHealer'
-  | 'Ranger';
+  | 'Ranger'
+  | 'Shadowblade';
 
 export type CharacterActionState =
   | 'idle'
@@ -179,6 +180,12 @@ export interface CombatantState {
   /** 梵音 (monk) runtime */
   bellTimer?: number; // 金钟罩 seconds left
   silenceTimer?: number; // 封印: can't cast skills
+  /** 影刃 runtime */
+  stealthT?: number; // 影遁: seconds of invisibility left
+  critNext?: number; // 瞬影 / 破隐: seconds the next blow is a critical
+  rewind?: number[][]; // 回溯: [time, x, y, z, hp] samples of the last few seconds
+  shadowHits?: number; // 千影杀: strikes landed so far
+  ultTarget?: boolean; // 千影杀: a target was in reach when it began
   mantraShots?: number; // 六字真言 syllables released so far
   zenField?: { x: number; z: number; t: number }; // 禅定结界 centre and seconds left
   palmsThrown?: number; // 万佛朝宗 palms already called down
