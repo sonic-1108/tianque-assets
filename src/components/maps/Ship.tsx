@@ -29,11 +29,11 @@ const ss = (a: number, b: number, x: number) => {
 /** gunwale height above the main deck: steps up around each raised deck, sweeps up at the bow and the stern */
 export function sheer(z: number) {
   let h = 1.3;
-  h += 2.2 * ss(-12.0, -13.8, z); // forecastle bulwark
-  if (z < -16) h += 3.0 * Math.pow((-16 - z) / (-16 - SHIP.bow), 2);
-  h += 2.4 * ss(11.4, 13.0, z); // quarterdeck
-  h += 2.4 * ss(15.0, 16.8, z); // poop deck
-  if (z > 19) h += 0.8 * Math.min(1, (z - 19) / (SHIP.stern - 19));
+  h += 3.3 * ss(-12.0, -13.6, z); // forecastle bulwark
+  if (z < -16) h += 2.6 * Math.pow((-16 - z) / (-16 - SHIP.bow), 2);
+  h += 3.3 * ss(11.2, 12.8, z); // quarterdeck
+  h += 3.2 * ss(15.4, 17.0, z); // poop deck
+  if (z > 19) h += 0.6 * Math.min(1, (z - 19) / (SHIP.stern - 19));
   return h;
 }
 function keelY(z: number) {
@@ -624,7 +624,7 @@ export function ShipHull() {
     const gn: { p: [number, number, number]; s: number }[] = [];
     for (const z of [-11, -6.5, -2, 2.5, 7, 11]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), -1.0, z], s });
     // a second, upper battery under the raised decks
-    for (const z of [-17.5, -15, 14, 17.5]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 1.2, z], s });
+    for (const z of [-17.5, -15, 14, 17.5]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 1.4, z], s });
     // eyes: sample the skin to sit them flush on the bow
     const ey = [1, -1].map((s) => {
       const z = -24.6;
@@ -680,7 +680,7 @@ export function ShipHull() {
 
 /** flat deck surface at height y between stations zA < zB, following the hull's inner wall */
 function deckTop(zA: number, zB: number, y: number) {
-  const zs = stationList(80).filter((z) => z > zA && z < zB && hullW(z) - SHIP.wall > 0.05);
+  const zs = stationList(90).filter((z) => z > zA && z < zB && hullW(z) - SHIP.wall > 0.05);
   zs.sort((a, b) => a - b);
   const ws = (z: number) => Math.max(0, hullW(z) - SHIP.wall);
   const pts: [number, number][] = [];
@@ -699,29 +699,9 @@ function deckTop(zA: number, zB: number, y: number) {
   return g;
 }
 
-/** a flight of stairs as solid treads: from (foot z) to (head z), across |x - cx| < half, from y0 rising by rise */
-function Stairs({ cx, half, zFoot, zHead, y0, rise, n, mat }: { cx: number; half: number; zFoot: number; zHead: number; y0: number; rise: number; n: number; mat: THREE.Material }) {
-  const len = zHead - zFoot;
-  return (
-    <group>
-      {Array.from({ length: n }, (_, k) => {
-        const za = zFoot + (k / n) * len;
-        const zb = zFoot + ((k + 1) / n) * len;
-        const h = ((k + 1) / n) * rise;
-        // each tread is a block from the floor below up to its top, so the flight reads solid from the side
-        return (
-          <mesh key={k} position={[cx, y0 + h / 2, (za + zb) / 2 + Math.sign(len) * 0.0]} material={mat} castShadow receiveShadow>
-            <boxGeometry args={[half * 2, h, Math.abs(zb - za) + 0.01]} />
-          </mesh>
-        );
-      })}
-    </group>
-  );
-}
-
 type Seg = [[number, number, number], [number, number, number]];
 /** lacquered balustrade along line segments: posts every ~0.45 m and a top rail */
-function Balustrade({ segs, mat, h = 0.75 }: { segs: Seg[]; mat: THREE.Material; h?: number }) {
+function Balustrade({ segs, mat, h = 0.8 }: { segs: Seg[]; mat: THREE.Material; h?: number }) {
   const { posts, rails } = useMemo(() => {
     const posts: THREE.Vector3[] = [];
     const rails: { p: THREE.Vector3; q: THREE.Quaternion; len: number }[] = [];
@@ -753,92 +733,246 @@ function Balustrade({ segs, mat, h = 0.75 }: { segs: Seg[]; mat: THREE.Material;
       </instancedMesh>
       {rails.map((r, i) => (
         <mesh key={i} position={r.p} quaternion={r.q} material={mat} castShadow>
-          <boxGeometry args={[r.len, 0.09, 0.12]} />
+          <boxGeometry args={[r.len, 0.1, 0.13]} />
         </mesh>
       ))}
     </group>
   );
 }
 
-function deckMats(deckMap: THREE.Texture) {
-  const fm = deckMap.clone();
-  fm.repeat.set(1, 1);
-  fm.needsUpdate = true;
-  return {
-    deck: new THREE.MeshStandardMaterial({ map: fm, roughness: 0.8, color: '#8c7c6c', envMapIntensity: 0.2 }),
-    tread: new THREE.MeshStandardMaterial({ color: '#5a3a24', roughness: 0.8 }),
-    lacq: new THREE.MeshStandardMaterial({ color: '#7a1e14', roughness: 0.5 }),
-    gold: new THREE.MeshStandardMaterial({ color: '#b48a3a', roughness: 0.35, metalness: 0.8 }),
-    wood: new THREE.MeshStandardMaterial({ color: '#4a2e1c', roughness: 0.75 }),
-    iron: new THREE.MeshStandardMaterial({ color: '#2a2622', roughness: 0.5, metalness: 0.7 }),
-    rope: new THREE.MeshStandardMaterial({ color: '#8a7350', roughness: 1 }),
-  };
+function wallMats(widthM: number, heightM: number, outward: 1 | -1, glow: number, inner: THREE.Material, plain: THREE.Material) {
+  const w = castleWall(widthM, heightM, false);
+  const face = new THREE.MeshStandardMaterial({ map: w.map, emissiveMap: w.emissive, emissive: new THREE.Color(glow, glow * 0.55, glow * 0.22), roughness: 0.7 });
+  // box faces: +x, -x, +y, -y, +z, -z
+  return [plain, plain, plain, plain, outward > 0 ? face : inner, outward > 0 ? inner : face];
 }
 
-/** a cabin front: the castle wall texture on the face toward the main deck (−z or +z), from x0 to x1 */
-function CabinFront({ x0, x1, y0, h, z, facing, door = true, glow = 1.6 }: { x0: number; x1: number; y0: number; h: number; z: number; facing: 1 | -1; door?: boolean; glow?: number }) {
-  const mat = useMemo(() => {
-    const w = castleWall(x1 - x0, h, door);
-    return new THREE.MeshStandardMaterial({ map: w.map, emissiveMap: w.emissive, emissive: new THREE.Color(glow, glow * 0.55, glow * 0.22), roughness: 0.7 });
-  }, [x0, x1, h, door, glow]);
-  return (
-    <mesh position={[(x0 + x1) / 2, y0 + h / 2, z + facing * 0.005]} rotation={[0, facing > 0 ? 0 : Math.PI, 0]} material={mat} receiveShadow>
-      <planeGeometry args={[x1 - x0, h]} />
-    </mesh>
-  );
+/** the panelled inside of a cabin wall: dark wood boards and a lacquered dado */
+let innerWallTex: THREE.Texture | null = null;
+function innerWall() {
+  if (innerWallTex) return innerWallTex;
+  const rand = seeded(31);
+  const { c, g } = canvas(256, 256);
+  g.fillStyle = '#3a2416';
+  g.fillRect(0, 0, 256, 256);
+  for (let x = 0; x < 256; x += 32) {
+    g.fillStyle = `hsl(25, 35%, ${16 + rand() * 6}%)`;
+    g.fillRect(x, 0, 30, 256);
+    grain(g, x, 0, 30, 256, rand, 12, true);
+  }
+  g.fillStyle = '#5a1a12';
+  g.fillRect(0, 190, 256, 66);
+  g.fillStyle = '#b48a3a';
+  g.fillRect(0, 188, 256, 4);
+  innerWallTex = tex(c);
+  innerWallTex.repeat.set(2, 1);
+  return innerWallTex;
 }
 
-/** the raised forecastle: deck, cabin fronts either side of the stairs, railings, a bed crossbow, windlass and anchor */
-export function Forecastle({ deckMap, decks }: { deckMap: THREE.Texture; decks: { edge: number; y: number; stairs: { z0: number; z1: number; half: number; n: number } } }) {
-  const { edge, y, stairs } = decks;
-  const { top, mats } = useMemo(() => ({ top: deckTop(SHIP.bow, edge, y), mats: deckMats(deckMap) }), [deckMap, edge, y]);
-  const wIn = hullW(edge) - SHIP.wall;
-  const segs = useMemo<Seg[]>(
-    () => [
-      [[stairs.half + 0.05, y, edge - 0.05], [wIn, y, edge - 0.05]],
-      [[-wIn, y, edge - 0.05], [-stairs.half - 0.05, y, edge - 0.05]],
-      [[stairs.half + 0.05, 0, stairs.z0], [stairs.half + 0.05, y, stairs.z1]],
-      [[-stairs.half - 0.05, 0, stairs.z0], [-stairs.half - 0.05, y, stairs.z1]],
-    ],
-    [stairs, y, edge, wIn],
+/** stern windows: a whole wall of glowing lattice at the back of a cabin */
+function sternWindows(widthM: number, heightM: number) {
+  const w = castleWall(widthM, heightM, false);
+  return new THREE.MeshStandardMaterial({ map: w.map, emissiveMap: w.emissive, emissive: new THREE.Color(1.3, 0.75, 0.32), roughness: 0.7, side: THREE.DoubleSide });
+}
+
+/**
+ * Everything built from SHIP_BOXES (shared with the physics, so what you see is what you bump into):
+ * the forecastle, quarterdeck and poop deck with the cabins under them, their walls and doors, the stairs
+ * along both bulwarks, the cabin interiors, and the railings.
+ */
+export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Texture; boxes: { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: string }[]; layout: any }) {
+  const L = layout;
+  const built = useMemo(() => {
+    const fm = deckMap.clone();
+    fm.repeat.set(1, 1);
+    fm.needsUpdate = true;
+    const inner = new THREE.MeshStandardMaterial({ map: innerWall(), roughness: 0.8 });
+    const mats = {
+      deck: new THREE.MeshStandardMaterial({ map: fm, roughness: 0.8, color: '#8c7c6c', envMapIntensity: 0.2 }),
+      ceil: new THREE.MeshStandardMaterial({ color: '#2e1d12', roughness: 0.9, side: THREE.BackSide }),
+      beam: new THREE.MeshStandardMaterial({ color: '#24160d', roughness: 0.85 }),
+      tread: new THREE.MeshStandardMaterial({ color: '#6a462a', roughness: 0.8 }),
+      lacq: new THREE.MeshStandardMaterial({ color: '#7a1e14', roughness: 0.5 }),
+      gold: new THREE.MeshStandardMaterial({ color: '#b48a3a', roughness: 0.35, metalness: 0.8 }),
+      wood: new THREE.MeshStandardMaterial({ color: '#4a2e1c', roughness: 0.75 }),
+      iron: new THREE.MeshStandardMaterial({ color: '#2a2622', roughness: 0.5, metalness: 0.7 }),
+      rope: new THREE.MeshStandardMaterial({ color: '#8a7350', roughness: 1 }),
+      carpet: new THREE.MeshStandardMaterial({ color: '#6a1414', roughness: 1 }),
+      inner,
+    };
+    // deck slabs: the top you walk on, its underside (the cabin ceiling) with beams, and a gilded edge
+    const slabs = boxes.filter((b) => b.kind === 'slab').map((b) => {
+      const zA = Math.max(b.z0, SHIP.bow + 0.05);
+      const zB = Math.min(b.z1, SHIP.stern - 0.05);
+      const front = b.z1 < 0 ? b.z1 : b.z0; // the edge that faces the open main deck
+      return { top: deckTop(zA, zB, b.y1), under: deckTop(zA, zB, b.y0), front, y0: b.y0, y1: b.y1, zA, zB };
+    });
+    const beams: { x: number; y: number; z: number; w: number }[] = [];
+    for (const s of slabs)
+      for (let z = s.zA + 0.6; z < s.zB - 0.3; z += 1.15) {
+        const w = (hullW(z) - SHIP.wall) * 2;
+        if (w > 1) beams.push({ x: 0, y: s.y0 - 0.11, z, w });
+      }
+    const walls = boxes.filter((b) => b.kind === 'wall' || b.kind === 'block');
+    const treads = boxes.filter((b) => b.kind === 'tread');
+    return { mats, slabs, beams, walls, treads };
+  }, [deckMap, boxes]);
+  const { mats, slabs, beams, walls, treads } = built;
+  const wallMeshes = useMemo(
+    () =>
+      walls.map((b) => {
+        const w = b.x1 - b.x0;
+        const h = b.y1 - b.y0;
+        const d = b.z1 - b.z0;
+        // which way the wall looks out onto open deck: the fore cabin's wall faces aft (+z), the others forward
+        const outward: 1 | -1 = b.z1 <= L.fore.edge + 0.01 ? 1 : -1;
+        const lintel = b.kind === 'wall' && b.x0 < 0 && b.x1 > 0; // the beam over a doorway
+        const material = b.kind === 'block' ? [mats.inner, mats.inner, mats.lacq, mats.lacq, mats.lacq, mats.lacq] : lintel ? mats.lacq : wallMats(w, h, outward, b.y0 >= L.quarter.y - 0.01 ? 1.9 : 1.5, mats.inner, mats.lacq);
+        return { pos: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2] as [number, number, number], size: [w, h, d] as [number, number, number], material, lintel };
+      }),
+    [walls, mats, L],
   );
+  const tRef = useRef<THREE.InstancedMesh>(null);
+  React.useLayoutEffect(() => {
+    const im = tRef.current;
+    if (!im) return;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    treads.forEach((b, i) => {
+      m.compose(new THREE.Vector3((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2), q, new THREE.Vector3(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0 + 0.005));
+      im.setMatrixAt(i, m);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.computeBoundingSphere();
+  }, [treads]);
+  // stair stringers and handrails along the inner side of each flight
+  const flights = useMemo(() => {
+    const out: { s: number; foot: number; head: number; y0: number; rise: number }[] = [];
+    for (const s of [-1, 1]) {
+      out.push({ s, foot: L.foreStairs.foot, head: L.foreStairs.head, y0: 0, rise: L.fore.y });
+      out.push({ s, foot: L.quarterStairs.foot, head: L.quarterStairs.head, y0: 0, rise: L.quarter.y });
+      out.push({ s, foot: L.poopStairs.foot, head: L.poopStairs.head, y0: L.quarter.y, rise: L.poop.y - L.quarter.y });
+    }
+    return out;
+  }, [L]);
+  const segs = useMemo<Seg[]>(() => {
+    const X = L.stairX;
+    const r: Seg[] = [
+      [[-X + 0.05, L.fore.y, L.fore.edge - 0.06], [X - 0.05, L.fore.y, L.fore.edge - 0.06]],
+      [[-X + 0.05, L.quarter.y, L.quarter.edge + 0.06], [X - 0.05, L.quarter.y, L.quarter.edge + 0.06]],
+      [[-L.captainHalf + 0.05, L.poop.y, L.poop.edge + 0.06], [L.captainHalf - 0.05, L.poop.y, L.poop.edge + 0.06]],
+    ];
+    for (const f of flights) r.push([[f.s * (X - 0.04), f.y0, f.foot], [f.s * (X - 0.04), f.y0 + f.rise, f.head]]);
+    return r;
+  }, [L, flights]);
   return (
     <group>
-      <mesh geometry={top} material={mats.deck} receiveShadow />
-      {[-1, 1].map((s) => (
-        <group key={s}>
-          <mesh position={[s * (stairs.half + wIn) / 2, y / 2, edge - 0.2]} material={mats.lacq} receiveShadow>
-            <boxGeometry args={[wIn - stairs.half, y, 0.4]} />
+      {slabs.map((s, i) => (
+        <group key={i}>
+          <mesh geometry={s.top} material={mats.deck} receiveShadow castShadow />
+          <mesh geometry={s.under} material={mats.ceil} />
+          <mesh position={[0, (s.y0 + s.y1) / 2, s.front]} material={mats.lacq} castShadow>
+            <boxGeometry args={[(hullW(s.front) - SHIP.wall) * 2, s.y1 - s.y0, 0.1]} />
           </mesh>
-          <CabinFront x0={s > 0 ? stairs.half + 0.05 : -wIn} x1={s > 0 ? wIn : -stairs.half - 0.05} y0={0} h={y - 0.05} z={edge} facing={1} />
+          <mesh position={[0, s.y1 - 0.02, s.front]} material={mats.gold}>
+            <boxGeometry args={[(hullW(s.front) - SHIP.wall) * 2, 0.05, 0.14]} />
+          </mesh>
         </group>
       ))}
-      <Stairs cx={0} half={stairs.half} zFoot={stairs.z0} zHead={stairs.z1} y0={0} rise={y} n={stairs.n} mat={mats.tread} />
-      <Balustrade segs={segs} mat={mats.lacq} />
-      {/* bed crossbow (床弩) aimed over the bow */}
-      <group position={[0, y, -22.6]}>
-        <mesh position={[0, 0.45, 0]} material={mats.wood} castShadow>
-          <cylinderGeometry args={[0.16, 0.22, 0.9, 8]} />
+      {beams.map((b, i) => (
+        <mesh key={i} position={[b.x, b.y, b.z]} material={mats.beam}>
+          <boxGeometry args={[b.w, 0.22, 0.2]} />
         </mesh>
-        <group position={[0, 1.0, 0]} rotation={[0.12, 0, 0]}>
-          <mesh material={mats.wood} castShadow>
-            <boxGeometry args={[0.32, 0.22, 3.0]} />
+      ))}
+      {wallMeshes.map((w, i) => (
+        <mesh key={i} position={w.pos} material={w.material} castShadow receiveShadow>
+          <boxGeometry args={w.size} />
+        </mesh>
+      ))}
+      <instancedMesh ref={tRef} args={[undefined, undefined, treads.length]} material={mats.tread} castShadow receiveShadow>
+        <boxGeometry args={[1, 1, 1]} />
+      </instancedMesh>
+      {flights.map((f, i) => {
+        const len = Math.hypot(f.head - f.foot, f.rise);
+        const ang = Math.atan2(f.rise, f.head - f.foot);
+        return (
+          <mesh key={i} position={[f.s * (L.stairX - 0.04), f.y0 + f.rise / 2 - 0.12, (f.foot + f.head) / 2]} rotation={[-ang, 0, 0]} material={mats.lacq} castShadow>
+            <boxGeometry args={[0.1, 0.42, len + 0.3]} />
           </mesh>
-          {[-0.4, 0.05].map((dz, k) => (
-            <mesh key={k} material={mats.wood} position={[0, 0.06, -1.1 + dz]} rotation={[-Math.PI / 2, 0, 0]}>
-              <torusGeometry args={[1.25 - k * 0.12, 0.055, 6, 24, Math.PI * 0.62]} />
+        );
+      })}
+      <Balustrade segs={segs} mat={mats.lacq} />
+      {/* door frames: gilt posts and a lantern over each cabin door */}
+      {[
+        { z: L.fore.edge, y: 0, half: L.door, out: 1 },
+        { z: L.quarter.edge, y: 0, half: L.door, out: -1 },
+        { z: L.poop.edge, y: L.quarter.y, half: L.captainDoor, out: -1 },
+      ].map((d, i) => (
+        <group key={i}>
+          {[-1, 1].map((s) => (
+            <mesh key={s} position={[s * (d.half + 0.06), d.y + 1.25, d.z + d.out * 0.02]} material={mats.gold} castShadow>
+              <boxGeometry args={[0.12, 2.5, 0.36]} />
             </mesh>
           ))}
-          <mesh material={mats.iron} position={[0, 0.2, -0.3]} rotation={[Math.PI / 2, 0, 0]}>
-            <cylinderGeometry args={[0.04, 0.04, 2.6, 6]} />
-          </mesh>
-          <mesh material={mats.iron} position={[0, 0.2, -1.7]} rotation={[-Math.PI / 2, 0, 0]}>
-            <coneGeometry args={[0.1, 0.35, 6]} />
-          </mesh>
+          <ShipLantern position={[d.half + 0.75, d.y + 2.75, d.z + d.out * 0.4]} seed={i * 2} />
+          <ShipLantern position={[-d.half - 0.75, d.y + 2.75, d.z + d.out * 0.4]} seed={i * 2 + 1} />
         </group>
+      ))}
+      {/* ---- the forecastle cabin: crew quarters and armoury ---- */}
+      <mesh position={[0, 1.6, -19.65]} material={mats.inner}>
+        <boxGeometry args={[(hullW(-19.65) - SHIP.wall) * 2, 3.2, 0.2]} />
+      </mesh>
+      <group position={[0, 0, -19.45]}>
+        {[-3.2, -2.4, -1.6, 1.6, 2.4, 3.2].map((x) => (
+          <group key={x} position={[x, 0, 0]}>
+            <mesh position={[0, 1.15, 0]} material={mats.wood} castShadow>
+              <cylinderGeometry args={[0.03, 0.03, 2.3, 5]} />
+            </mesh>
+            <mesh position={[0, 2.38, 0]} material={mats.iron}>
+              <coneGeometry args={[0.06, 0.32, 5]} />
+            </mesh>
+          </group>
+        ))}
+        <mesh position={[0, 1.5, 0.05]} material={mats.lacq}>
+          <boxGeometry args={[7.4, 0.1, 0.1]} />
+        </mesh>
       </group>
-      {/* windlass with its anchor cable */}
-      <group position={[0, y, -20.4]}>
+      <ShipLantern position={[-3.5, L.fore.y - L.slab - 0.05, -16.0]} seed={11} />
+      <ShipLantern position={[3.5, L.fore.y - L.slab - 0.05, -17.4]} seed={12} />
+      <pointLight position={[0, 2.4, -16.2]} color="#ffa458" intensity={9} distance={10} decay={1.4} />
+      {/* ---- the great cabin under the quarterdeck: stern windows, carpet, the chart table ---- */}
+      <mesh position={[0, 1.55, 19.65]} material={useMemo(() => sternWindows(12, 3.1), [])}>
+        <planeGeometry args={[(hullW(19.65) - SHIP.wall) * 2, 3.1]} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 15.6]} material={mats.carpet} receiveShadow>
+        <planeGeometry args={[6, 5.6]} />
+      </mesh>
+      <group position={[4.2, 0, 15.2]}>
+        <mesh position={[0, 0.8, 0]} material={mats.wood} castShadow receiveShadow>
+          <cylinderGeometry args={[0.85, 0.85, 0.1, 16]} />
+        </mesh>
+        <mesh position={[0, 0.4, 0]} material={mats.lacq}>
+          <cylinderGeometry args={[0.16, 0.26, 0.8, 8]} />
+        </mesh>
+        <mesh position={[0.1, 0.86, 0.05]} rotation={[-Math.PI / 2, 0, 0.3]}>
+          <planeGeometry args={[0.9, 0.6]} />
+          <meshStandardMaterial color="#d8c8a0" roughness={1} />
+        </mesh>
+      </group>
+      <ShipLantern position={[-2.5, L.quarter.y - L.slab - 0.05, 15.0]} seed={13} />
+      <ShipLantern position={[2.5, L.quarter.y - L.slab - 0.05, 17.6]} seed={14} />
+      <pointLight position={[0, 2.4, 15.6]} color="#ffa458" intensity={10} distance={11} decay={1.4} />
+      {/* ---- the captain's cabin under the poop deck ---- */}
+      <mesh position={[0, L.quarter.y + 1.45, 19.64]} material={useMemo(() => sternWindows(11.6, 2.9), [])}>
+        <planeGeometry args={[L.captainHalf * 2, 2.9]} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.quarter.y + 0.012, 18.0]} material={mats.carpet}>
+        <planeGeometry args={[4, 2.6]} />
+      </mesh>
+      <ShipLantern position={[0, L.poop.y - L.slab - 0.05, 18.2]} seed={15} />
+      <pointLight position={[0, L.quarter.y + 2.2, 17.9]} color="#ffb060" intensity={7} distance={8} decay={1.4} />
+      {/* windlass and the anchor out at the bow */}
+      <group position={[0, L.fore.y, -21.0]}>
         {[-1.4, 1.4].map((x) => (
           <mesh key={x} position={[x, 0.45, 0]} material={mats.wood} castShadow>
             <boxGeometry args={[0.26, 0.9, 0.5]} />
@@ -851,8 +985,7 @@ export function Forecastle({ deckMap, decks }: { deckMap: THREE.Texture; decks: 
           <cylinderGeometry args={[0.32, 0.32, 1.2, 12]} />
         </mesh>
       </group>
-      {/* anchor hung at the cathead, outside the hull */}
-      <group position={[hullW(-24.8) + 0.4, 3.2, -24.8]} rotation={[0, 0.5, 0.06]}>
+      <group position={[hullW(-24.8) + 0.4, 4.4, -24.8]} rotation={[0, 0.5, 0.06]}>
         <mesh material={mats.iron} position={[0, -0.8, 0]}>
           <cylinderGeometry args={[0.08, 0.08, 2.2, 6]} />
         </mesh>
@@ -861,11 +994,7 @@ export function Forecastle({ deckMap, decks }: { deckMap: THREE.Texture; decks: 
             <coneGeometry args={[0.08, 0.9, 5]} />
           </mesh>
         ))}
-        <mesh material={mats.iron} position={[0, 0.35, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.16, 0.04, 6, 12]} />
-        </mesh>
       </group>
-      {/* bowsprit */}
       <mesh position={[0, sheer(SHIP.bow) + 0.4, SHIP.bow - 1.4]} rotation={[-1.15, 0, 0]} material={mats.wood} castShadow>
         <cylinderGeometry args={[0.12, 0.24, 5.5, 8]} />
       </mesh>
@@ -873,59 +1002,198 @@ export function Forecastle({ deckMap, decks }: { deckMap: THREE.Texture; decks: 
   );
 }
 
-/** the stern decks: a quarterdeck with its cabin under it, a poop deck above with the captain's cabin, and the stairs between */
-export function AfterDecks({ deckMap, d }: {
-  deckMap: THREE.Texture;
-  d: { quarter: { edge: number; y: number }; quarterStairs: { z0: number; z1: number; half: number; n: number }; poop: { edge: number; y: number }; poopStairs: { z0: number; z1: number; x0: number; n: number } };
-}) {
-  const { quarter: Q, quarterStairs: QS, poop: P, poopStairs: PS } = d;
-  const { qTop, pTop, mats } = useMemo(() => ({ qTop: deckTop(Q.edge, P.edge, Q.y), pTop: deckTop(P.edge, 20.2, P.y), mats: deckMats(deckMap) }), [deckMap, Q, P]);
-  const wQ = hullW(Q.edge) - SHIP.wall;
-  const wS = hullW(15) - SHIP.wall;
-  const segs = useMemo<Seg[]>(
-    () => [
-      // quarterdeck edge, either side of its stairs
-      [[QS.half + 0.05, Q.y, Q.edge + 0.05], [wQ, Q.y, Q.edge + 0.05]],
-      [[-wQ, Q.y, Q.edge + 0.05], [-QS.half - 0.05, Q.y, Q.edge + 0.05]],
-      [[QS.half + 0.05, 0, QS.z0], [QS.half + 0.05, Q.y, QS.z1]],
-      [[-QS.half - 0.05, 0, QS.z0], [-QS.half - 0.05, Q.y, QS.z1]],
-      // poop deck edge between its two flights, and the inner handrail of each flight
-      [[-PS.x0 + 0.05, P.y, P.edge + 0.05], [PS.x0 - 0.05, P.y, P.edge + 0.05]],
-      [[PS.x0 - 0.05, Q.y, PS.z0], [PS.x0 - 0.05, P.y, PS.z1]],
-      [[-PS.x0 + 0.05, Q.y, PS.z0], [-PS.x0 + 0.05, P.y, PS.z1]],
-    ],
-    [Q, QS, P, PS, wQ],
+/**
+ * 床弩: a mounted crossbow on a swivel post. Reads its aim, reload and recoil from mapRuntime every frame:
+ * the limbs flex as the winch draws the string back, the bolt glows when it's loaded, and it bucks on release.
+ */
+export function Ballista({ k, at, rt }: { k: number; at: { x: number; y: number; z: number; yaw: number }; rt: { ballistae: { yaw: number; user: number; load: number; kick: number }[] } }) {
+  const turret = useRef<THREE.Group>(null);
+  const limbs = useRef<(THREE.Group | null)[]>([]);
+  const nut = useRef<THREE.Group>(null);
+  const bolt = useRef<THREE.Group>(null);
+  const wheel = useRef<THREE.Mesh>(null);
+  const strL = useRef<THREE.Mesh>(null);
+  const strR = useRef<THREE.Mesh>(null);
+  const glow = useRef<THREE.Sprite>(null);
+  const mats = useMemo(
+    () => ({
+      wood: new THREE.MeshStandardMaterial({ color: '#5a3820', roughness: 0.7 }),
+      dark: new THREE.MeshStandardMaterial({ color: '#2a1a10', roughness: 0.8 }),
+      lacq: new THREE.MeshStandardMaterial({ color: '#7a1e14', roughness: 0.45 }),
+      bronze: new THREE.MeshStandardMaterial({ color: '#9a7a38', roughness: 0.35, metalness: 0.85 }),
+      string: new THREE.MeshBasicMaterial({ color: '#e8dcc0' }),
+      head: new THREE.MeshStandardMaterial({ color: '#c8d8e0', roughness: 0.25, metalness: 0.9, emissive: new THREE.Color('#1aa6c4'), emissiveIntensity: 0.6 }),
+      glow: new THREE.SpriteMaterial({ map: glowTexture(), color: '#67e8f9', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+    }),
+    [],
   );
+  const limbGeo = useMemo(() => {
+    // a recurved limb: a tapered curve from the stock out to the tip
+    const pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.5, 0, 0.12), new THREE.Vector3(1.0, 0, 0.1), new THREE.Vector3(1.35, 0, -0.12)];
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.06, 6, false);
+  }, []);
+  useFrame((_, dt) => {
+    const st = rt.ballistae[k] ?? { yaw: at.yaw, user: -1, load: 1, kick: 0 };
+    const draw = st.load >= 1 ? 1 : st.load * 0.9; // the winch winds the string back as it reloads
+    if (turret.current) {
+      turret.current.rotation.y = st.yaw;
+      turret.current.position.z = 0;
+      turret.current.children[0].position.z = st.kick * 0.28;
+      turret.current.children[0].rotation.x = st.kick * 0.12;
+    }
+    const flex = 0.05 + draw * 0.32 - st.kick * 0.15;
+    limbs.current.forEach((l, i) => {
+      if (l) l.rotation.y = (i ? -1 : 1) * flex;
+    });
+    const nz = -0.55 + draw * 0.95;
+    if (nut.current) nut.current.position.z = nz;
+    // the string runs from each limb tip to the nut
+    for (const [ref, s] of [[strL, -1], [strR, 1]] as const) {
+      const m = ref.current;
+      if (!m) continue;
+      const a = s * flex;
+      const tip = new THREE.Vector3(s * 1.35, 0.12, -0.75 - 0.12).sub(new THREE.Vector3(0, 0.12, -0.75)).applyAxisAngle(new THREE.Vector3(0, 1, 0), -a).add(new THREE.Vector3(0, 0.12, -0.75));
+      const end = new THREE.Vector3(0, 0.12, nz);
+      m.position.copy(tip).add(end).multiplyScalar(0.5);
+      m.scale.set(1, tip.distanceTo(end), 1);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(tip).normalize());
+    }
+    if (bolt.current) {
+      bolt.current.visible = st.load >= 1;
+      bolt.current.position.z = nz - 1.0;
+    }
+    if (glow.current) {
+      const t = performance.now() / 1000;
+      (glow.current.material as THREE.SpriteMaterial).opacity = st.load >= 1 ? 0.55 + Math.sin(t * 6) * 0.2 : 0;
+      glow.current.position.z = nz - 2.05;
+    }
+    if (wheel.current && st.load < 1) wheel.current.rotation.x += dt * 9;
+  });
+  return (
+    <group position={[at.x, at.y, at.z]}>
+      {/* swivel post */}
+      <mesh position={[0, 0.42, 0]} material={mats.dark} castShadow>
+        <cylinderGeometry args={[0.32, 0.46, 0.84, 8]} />
+      </mesh>
+      <mesh position={[0, 0.86, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.36, 0.36, 0.06, 12]} />
+      </mesh>
+      <group ref={turret} position={[0, 0.95, 0]}>
+        <group>
+          {/* stock along -z (forward), trigger frame and winch at the back */}
+          <mesh position={[0, 0.06, -0.4]} material={mats.wood} castShadow>
+            <boxGeometry args={[0.3, 0.16, 2.4]} />
+          </mesh>
+          <mesh position={[0, -0.12, 0.3]} material={mats.lacq} castShadow>
+            <boxGeometry args={[0.5, 0.22, 0.5]} />
+          </mesh>
+          <mesh ref={wheel} position={[0, 0.0, 0.75]} rotation={[0, 0, Math.PI / 2]} material={mats.dark}>
+            <cylinderGeometry args={[0.2, 0.2, 0.55, 8]} />
+          </mesh>
+          {[-1, 1].map((s) => (
+            <mesh key={s} position={[s * 0.42, 0, 0.75]} rotation={[0, 0, Math.PI / 2]} material={mats.bronze}>
+              <torusGeometry args={[0.18, 0.025, 4, 10]} />
+            </mesh>
+          ))}
+          {/* the bow: two limbs from a bronze-bound bowhead, double-stacked like a 三弓床弩 */}
+          <mesh position={[0, 0.12, -0.75]} material={mats.bronze} castShadow>
+            <boxGeometry args={[0.42, 0.3, 0.3]} />
+          </mesh>
+          {[-1, 1].map((s, i) => (
+            <group key={s} ref={(g) => (limbs.current[i] = g)} position={[0, 0.12, -0.75]}>
+              <mesh geometry={limbGeo} material={mats.lacq} scale={[s, 1, 1]} castShadow />
+              <mesh geometry={limbGeo} material={mats.wood} scale={[s * 0.82, 1, 0.9]} position={[0, -0.12, 0.12]} />
+            </group>
+          ))}
+          <mesh ref={strL} material={mats.string}>
+            <cylinderGeometry args={[0.012, 0.012, 1, 4]} />
+          </mesh>
+          <mesh ref={strR} material={mats.string}>
+            <cylinderGeometry args={[0.012, 0.012, 1, 4]} />
+          </mesh>
+          <group ref={nut}>
+            <mesh position={[0, 0.12, 0]} material={mats.bronze}>
+              <boxGeometry args={[0.16, 0.1, 0.12]} />
+            </mesh>
+          </group>
+          {/* the loaded bolt: a spear-sized shaft with a glowing iron head */}
+          <group ref={bolt} position={[0, 0.2, 0]}>
+            <mesh rotation={[Math.PI / 2, 0, 0]} material={mats.wood}>
+              <cylinderGeometry args={[0.035, 0.035, 2.0, 6]} />
+            </mesh>
+            <mesh position={[0, 0, -1.08]} rotation={[-Math.PI / 2, 0, 0]} material={mats.head}>
+              <coneGeometry args={[0.08, 0.32, 6]} />
+            </mesh>
+            {[0, 1].map((r) => (
+              <mesh key={r} position={[0, 0, 0.85]} rotation={[0, 0, (r * Math.PI) / 2]} material={mats.lacq}>
+                <boxGeometry args={[0.24, 0.01, 0.3]} />
+              </mesh>
+            ))}
+          </group>
+          <sprite ref={glow} material={mats.glow} position={[0, 0.2, -1.6]} scale={[0.9, 0.9, 1]} />
+        </group>
+      </group>
+    </group>
+  );
+}
+
+/** the bolts in flight (a streak of cyan light behind them) and the ones quivering in the planks */
+export function Bolts({ rt }: { rt: { bolts: { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; stuck: boolean }[] } }) {
+  const N = 8;
+  const refs = useRef<(THREE.Group | null)[]>([]);
+  const mats = useMemo(
+    () => ({
+      shaft: new THREE.MeshStandardMaterial({ color: '#5a3820', roughness: 0.7 }),
+      head: new THREE.MeshStandardMaterial({ color: '#c8d8e0', roughness: 0.25, metalness: 0.9, emissive: new THREE.Color('#1aa6c4'), emissiveIntensity: 0.8 }),
+      fletch: new THREE.MeshStandardMaterial({ color: '#7a1e14', roughness: 0.6, side: THREE.DoubleSide }),
+      streak: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.5, 1.6, 2.0), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }),
+    }),
+    [],
+  );
+  const fwd = new THREE.Vector3();
+  useFrame(() => {
+    const t = performance.now() / 1000;
+    for (let i = 0; i < N; i++) {
+      const g = refs.current[i];
+      if (!g) continue;
+      const b = rt.bolts[i];
+      if (!b) {
+        g.visible = false;
+        continue;
+      }
+      g.visible = true;
+      g.position.set(b.x, b.y, b.z);
+      fwd.set(b.vx, b.vy, b.vz);
+      if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+      fwd.normalize();
+      g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), fwd);
+      if (b.stuck) {
+        // quiver as it settles into the wood
+        const w = Math.max(0, b.t - 1.8) * 0.06;
+        g.rotateX(Math.sin(t * 40) * w);
+      }
+      const streak = g.children[3];
+      if (streak) streak.visible = !b.stuck;
+    }
+  });
   return (
     <group>
-      <mesh geometry={qTop} material={mats.deck} receiveShadow />
-      <mesh geometry={pTop} material={mats.deck} receiveShadow />
-      {/* the cabin under the quarterdeck: fronts either side of the stairs */}
-      {[-1, 1].map((s) => (
-        <group key={s}>
-          <mesh position={[s * (QS.half + wQ) / 2, Q.y / 2, Q.edge + 0.2]} material={mats.lacq}>
-            <boxGeometry args={[wQ - QS.half, Q.y, 0.4]} />
+      {Array.from({ length: N }, (_, i) => (
+        <group key={i} ref={(g) => (refs.current[i] = g)} visible={false}>
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.6]} material={mats.shaft}>
+            <cylinderGeometry args={[0.04, 0.04, 2.0, 6]} />
           </mesh>
-          <CabinFront x0={s > 0 ? QS.half + 0.05 : -wQ} x1={s > 0 ? wQ : -QS.half - 0.05} y0={0} h={Q.y - 0.05} z={Q.edge} facing={-1} />
+          <mesh position={[0, 0, -0.5]} rotation={[-Math.PI / 2, 0, 0]} material={mats.head}>
+            <coneGeometry args={[0.09, 0.36, 6]} />
+          </mesh>
+          <mesh position={[0, 0, 1.45]} material={mats.fletch}>
+            <boxGeometry args={[0.26, 0.01, 0.3]} />
+          </mesh>
+          <mesh position={[0, 0, 3.0]} rotation={[Math.PI / 2, 0, 0]} material={mats.streak}>
+            <cylinderGeometry args={[0.09, 0.0, 4.0, 6, 1, true]} />
+          </mesh>
         </group>
       ))}
-      <Stairs cx={0} half={QS.half} zFoot={QS.z0} zHead={QS.z1} y0={0} rise={Q.y} n={QS.n} mat={mats.tread} />
-      {/* the captain's cabin under the poop deck */}
-      <mesh position={[0, (Q.y + P.y) / 2, P.edge + 0.2]} material={mats.lacq}>
-        <boxGeometry args={[PS.x0 * 2, P.y - Q.y, 0.4]} />
-      </mesh>
-      <CabinFront x0={-PS.x0} x1={PS.x0} y0={Q.y} h={P.y - Q.y - 0.05} z={P.edge} facing={-1} glow={2.0} />
-      {[-1, 1].map((s) => (
-        <group key={s}>
-          <Stairs cx={s * (PS.x0 + wS) / 2} half={(wS - PS.x0) / 2} zFoot={PS.z0} zHead={PS.z1} y0={Q.y} rise={P.y - Q.y} n={PS.n} mat={mats.tread} />
-        </group>
-      ))}
-      <Balustrade segs={segs} mat={mats.lacq} />
-      {/* lanterns at the cabin doors */}
-      <ShipLantern position={[QS.half + 1.2, Q.y - 0.1, Q.edge - 0.35]} seed={4} />
-      <ShipLantern position={[-QS.half - 1.2, Q.y - 0.1, Q.edge - 0.35]} seed={5} />
-      <ShipLantern position={[2.2, P.y - 0.1, P.edge - 0.35]} seed={6} />
-      <ShipLantern position={[-2.2, P.y - 0.1, P.edge - 0.35]} seed={7} />
     </group>
   );
 }
@@ -1110,7 +1378,7 @@ export function ShipLantern({ position, glow = 1, seed = 0 }: { position: [numbe
 export function RailLanterns() {
   const list = useMemo(() => {
     const out: { x: number; z: number; s: number }[] = [];
-    for (const z of [-17.5, -10.8, -4, 1, 8.6, 14.2, 18.4]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
+    for (const z of [-17.5, -4.5, 0, 3.6, 14.2, 18.2]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
     return out;
   }, []);
   return (

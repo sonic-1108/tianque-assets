@@ -7,6 +7,10 @@ export class CameraController {
   distance = 4.6;
   /** terrain height under a point, so the camera never sinks into a slope */
   groundAt: ((x: number, z: number) => number) | null = null;
+  /** underside of a ceiling over a point (cabins), so the camera stays in the room */
+  ceilAt: ((x: number, z: number) => number) | null = null;
+  /** solid geometry (walls): the boom is pulled in in front of it */
+  solidAt: ((x: number, y: number, z: number) => boolean) | null = null;
   pendingDX = 0;
   pendingDY = 0;
   private sensitivity = 0.0025;
@@ -74,20 +78,22 @@ export class CameraController {
     this.smoothPos.lerp(desired, 1 - Math.exp(-22 * dt));
     if (this.groundAt) {
       // walk the boom from the player outward: if a slope is in the way, pull the camera in front of it
-      const n = 8;
+      const n = this.solidAt ? 20 : 8;
       for (let i = 1; i <= n; i++) {
         const t = i / n;
         const x = target.x + (this.smoothPos.x - target.x) * t;
         const z = target.z + (this.smoothPos.z - target.z) * t;
         const y = target.y + (this.smoothPos.y - target.y) * t;
         const g = this.groundAt(x, z) + 0.45;
-        if (y < g) {
+        if (y < g || (this.solidAt && this.solidAt(x, y, z))) {
           const keep = Math.max(0.35, (i - 1) / n);
           this.smoothPos.set(target.x + (this.smoothPos.x - target.x) * keep, Math.max(g, target.y + (this.smoothPos.y - target.y) * keep), target.z + (this.smoothPos.z - target.z) * keep);
           break;
         }
       }
       this.smoothPos.y = Math.max(this.smoothPos.y, this.groundAt(this.smoothPos.x, this.smoothPos.z) + 0.45);
+      // in a cabin: keep under the ceiling
+      if (this.ceilAt) this.smoothPos.y = Math.min(this.smoothPos.y, this.ceilAt(this.smoothPos.x, this.smoothPos.z) - 0.25);
     }
 
     // Calculate Trauma Shake offset

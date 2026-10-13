@@ -422,7 +422,7 @@ export const MAPS = {
     name: '怒海战船',
     subtitle: '风暴夜里，大海上的古战船甲板',
     icon: '🌊',
-    mechanics: ['四层甲板：主甲板、船头楼、船尾的后甲板和最高的艉楼，走楼梯上去，或者冲向墙边一跃而上', '巨浪会从一侧拍上主甲板，把人冲向另一边；站在高层甲板上不会被冲走', '被冲到船舷上会撞伤眩晕，格挡可以站稳'],
+    mechanics: ['船头楼、后甲板、艉楼三层高台，两舷有楼梯，也可以冲向墙边一跃而上；船头、船尾和艉楼下都有能进去的船舱', '船头和艉楼各架一台床弩，按 F 抢占，左右 60° 转向射击，箭能把人钉住', '巨浪会拍上主甲板把人冲走；躲进船舱或站上高台就不怕'],
     homeClass: 'LightHealer',
     homeClassName: '灵雀',
     homeBonus: '移速 +10%（职业开发中）',
@@ -430,8 +430,8 @@ export const MAPS = {
     radius: 21,
     rect: { hx: 7.8, hz: 19 },
     terrain: true,
-    spawnPlayer: [0, 7.5],
-    spawnEnemy: [0, -8.5],
+    spawnPlayer: [0, 3],
+    spawnEnemy: [0, -4],
     background: '#1b2530',
     fog: [40, 240],
     hemi: ['#8fb3d9', '#10202c', 0.85],
@@ -444,15 +444,21 @@ export const MAPS = {
       { x: 0, z: -7, r: 0.55 },
       { x: 0, z: 5, r: 0.55 },
       // cargo on the main deck: single crates (1.1 m) and two stacks (2.2 m) to climb on
-      { x: 4.8, z: -3.5, r: 0.75, h: 1.1 },
-      { x: -4.9, z: 1.8, r: 0.75, h: 1.1 },
-      { x: -4.6, z: -9.2, r: 0.9, h: 2.2 },
-      { x: 4.7, z: 8.4, r: 0.9, h: 2.2 },
-      // up on the forecastle, the quarterdeck and the poop deck (h is the top, measured from the main deck)
-      { x: 4.6, z: -16.8, r: 0.8, h: 3.5 },
-      { x: -2.8, z: -17.6, r: 0.7, h: 3.5 },
-      { x: -5.6, z: 14.4, r: 0.75, h: 3.7 },
-      { x: 2.6, z: 18.2, r: 0.7, h: 6.1 },
+      { x: 4.4, z: -3.2, r: 0.75, h: 1.1 },
+      { x: -4.5, z: 2.2, r: 0.75, h: 1.1 },
+      { x: -3.6, z: -10.4, r: 0.85, h: 2.2 },
+      { x: 3.6, z: 9.6, r: 0.85, h: 2.2 },
+      // in the cabins (h is the top, measured from the main deck)
+      { x: -5.4, z: -17.0, r: 0.75, h: 1.1 },
+      { x: 5.6, z: -15.0, r: 0.7, h: 1.1 },
+      { x: -5.8, z: 17.4, r: 0.7, h: 1.1 },
+      { x: 4.2, z: 15.2, r: 0.8, h: 0.85 }, // the chart table in the great cabin
+      // up on the forecastle, the quarterdeck and the poop deck
+      { x: 4.6, z: -17.6, r: 0.7, h: 4.5 },
+      { x: -3.6, z: 14.2, r: 0.65, h: 4.5 },
+      // the two mounted crossbows
+      { x: 0, z: -15.3, r: 0.5, h: 4.5 },
+      { x: 0, z: 17.1, r: 0.45, h: 7.7 },
     ],
   },
   glacier: {
@@ -641,6 +647,10 @@ export const mapRuntime = {
   shadeSpot: 0,
   /** candles and shades put down somewhere (on the ground or hung on a lookout tree) */
   items: [] as PlacedItem[],
+  /** 怒海战船 mounted crossbows: aim, who is on it (-1 nobody), reload 0..1, recoil kick */
+  ballistae: [] as { yaw: number; user: number; load: number; kick: number }[],
+  /** crossbow bolts in flight or stuck in the planks (t: seconds left; stuck: embedded) */
+  bolts: [] as { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; stuck: boolean; slot: number }[],
   /** where the local player is (scenery uses it to show F markers near things you can use) */
   viewX: 0,
   viewY: 0,
@@ -901,7 +911,7 @@ export function roofHeight(x: number, z: number) {
 
 /** Floor height for maps with a height field (0 for flat maps) */
 export function terrainHeight(id: MapId, x: number, z: number) {
-  if (id === 'sea') return shipFloor(x, z);
+  if (id === 'sea') return shipFloorAt(x, z, 99);
   if (id === 'glacier') return glacierHeight(x, z);
   if (id === 'forest') return forestHeight(x, z);
   if (id === 'rooftop') return roofHeight(x, z);
@@ -925,37 +935,116 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
 }
 
 // ----------------------------------------------------------------------
-// 怒海战船: a war junk with four walkable levels. Main deck at 0; a forecastle at the bow;
-// a quarterdeck and above it a poop deck at the stern, each reached by stairs.
+// 怒海战船: a war junk with walk-in cabins. The ship is a set of solid boxes
+// (deck slabs, cabin walls, stair treads); the main deck is the floor at 0.
+// Fore: a forecastle deck over a cabin. Aft: a quarterdeck over the great cabin,
+// and on the quarterdeck the captain's cabin under the poop deck.
+// Stairs run fore-and-aft along both bulwarks.
 // ----------------------------------------------------------------------
-export const SHIP_DECKS = {
-  fore: { edge: -13.2, y: 2.4 }, // z < edge
-  foreStairs: { z0: -10.4, z1: -13.2, half: 2.0, n: 8 }, // climbing toward -z
-  quarter: { edge: 12.6, y: 2.6 }, // z > edge
-  quarterStairs: { z0: 9.8, z1: 12.6, half: 2.0, n: 8 },
-  poop: { edge: 16.2, y: 5.0 },
-  poopStairs: { z0: 12.9, z1: 16.2, x0: 4.9, n: 8 }, // one flight along each side, climbing toward +z
+export interface ShipBox { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: 'slab' | 'wall' | 'tread' | 'block' }
+export const SHIP_LAYOUT = {
+  W: 8.3, // boxes run out to here (inside the hull, past the play area)
+  slab: 0.3,
+  fore: { edge: -12.8, y: 3.4 },
+  quarter: { edge: 12.0, y: 3.4 },
+  poop: { edge: 16.2, y: 6.6 },
+  wallT: 0.3,
+  door: 1.3, // half width of the cabin doors
+  captainDoor: 1.1,
+  captainHalf: 5.8,
+  stairX: 5.9, // stairs fill |x| from here out to the bulwark
+  foreStairs: { foot: -7.4, head: -12.8, n: 13 },
+  quarterStairs: { foot: 6.6, head: 12.0, n: 13 },
+  poopStairs: { foot: 12.4, head: 16.2, n: 11 },
+  lintel: 2.5, // doorways are this tall
+  /** mounted crossbows: where they stand, which way they face by default (yaw), and where the gunner stands */
+  ballistae: [
+    { x: 0, z: -15.3, y: 3.4, yaw: Math.PI },
+    { x: 0, z: 17.1, y: 6.6, yaw: 0 },
+  ],
+  ballistaArc: Math.PI / 3, // ±60°
 };
-/** height of a stair tread at fraction t (0 at the foot, 1 at the head) of a flight of n treads */
-export function stairTread(t: number, n: number, rise: number) {
-  const k = Math.min(n - 1, Math.max(0, Math.floor(t * n)));
-  return ((k + 1) / n) * rise;
+function buildShipBoxes() {
+  const L = SHIP_LAYOUT;
+  const W = L.W;
+  const out: ShipBox[] = [];
+  const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, kind: ShipBox['kind']) => out.push({ x0, x1, y0, y1, z0, z1, kind });
+  // forecastle deck and the cabin's front wall with its door
+  box(-W, W, L.fore.y - L.slab, L.fore.y, -22, L.fore.edge, 'slab');
+  const fz0 = L.fore.edge - L.wallT;
+  box(-W, -L.door, 0, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
+  box(L.door, W, 0, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
+  box(-L.door, L.door, L.lintel, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
+  // quarterdeck over the great cabin
+  box(-W, W, L.quarter.y - L.slab, L.quarter.y, L.quarter.edge, 24, 'slab');
+  const qz1 = L.quarter.edge + L.wallT;
+  box(-W, -L.door, 0, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
+  box(L.door, W, 0, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
+  box(-L.door, L.door, L.lintel, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
+  // poop deck over the captain's cabin (on the quarterdeck); solid either side of the cabin
+  box(-W, W, L.poop.y - L.slab, L.poop.y, L.poop.edge, 24, 'slab');
+  const pz1 = L.poop.edge + L.wallT;
+  const cy0 = L.quarter.y;
+  const cy1 = L.poop.y - L.slab;
+  box(-L.captainHalf, -L.captainDoor, cy0, cy1, L.poop.edge, pz1, 'wall');
+  box(L.captainDoor, L.captainHalf, cy0, cy1, L.poop.edge, pz1, 'wall');
+  box(-L.captainDoor, L.captainDoor, cy0 + L.lintel - 0.2, cy1, L.poop.edge, pz1, 'wall');
+  box(-W, -L.captainHalf, cy0, cy1, L.poop.edge, 24, 'block');
+  box(L.captainHalf, W, cy0, cy1, L.poop.edge, 24, 'block');
+  // stairs: one flight along each bulwark
+  const flight = (foot: number, head: number, n: number, y0: number, rise: number) => {
+    for (const s of [-1, 1])
+      for (let k = 0; k < n; k++) {
+        const za = foot + ((head - foot) * k) / n;
+        const zb = foot + ((head - foot) * (k + 1)) / n;
+        const x0 = s > 0 ? L.stairX : -W;
+        const x1 = s > 0 ? W : -L.stairX;
+        box(x0, x1, y0, y0 + (rise * (k + 1)) / n, Math.min(za, zb), Math.max(za, zb), 'tread');
+      }
+  };
+  flight(L.foreStairs.foot, L.foreStairs.head, L.foreStairs.n, 0, L.fore.y);
+  flight(L.quarterStairs.foot, L.quarterStairs.head, L.quarterStairs.n, 0, L.quarter.y);
+  flight(L.poopStairs.foot, L.poopStairs.head, L.poopStairs.n, L.quarter.y, L.poop.y - L.quarter.y);
+  return out;
 }
-export function shipFloor(x: number, z: number) {
-  const D = SHIP_DECKS;
-  const ax = Math.abs(x);
-  if (z <= D.fore.edge) return D.fore.y;
-  const fs = D.foreStairs;
-  if (z < fs.z0 && ax < fs.half) return stairTread((fs.z0 - z) / (fs.z0 - fs.z1), fs.n, D.fore.y);
-  if (z >= D.poop.edge) return D.poop.y;
-  const ps = D.poopStairs;
-  if (z > ps.z0 && ax > ps.x0) return D.quarter.y + stairTread((z - ps.z0) / (ps.z1 - ps.z0), ps.n, D.poop.y - D.quarter.y);
-  if (z >= D.quarter.edge) return D.quarter.y;
-  const qs = D.quarterStairs;
-  if (z > qs.z0 && ax < qs.half) return stairTread((z - qs.z0) / (qs.z1 - qs.z0), qs.n, D.quarter.y);
-  return 0;
+export const SHIP_BOXES = buildShipBoxes();
+const inXZ = (b: ShipBox, x: number, z: number, r = 0) => x > b.x0 - r && x < b.x1 + r && z > b.z0 - r && z < b.z1 + r;
+/** the highest surface under (x, z) that a fighter whose feet are at y stands on (steps up to 0.6 m count) */
+export function shipFloorAt(x: number, z: number, y: number) {
+  let g = 0;
+  for (const b of SHIP_BOXES) if (b.y1 <= y + 0.6 && b.y1 > g && inXZ(b, x, z)) g = b.y1;
+  return g;
 }
-
+/** the underside of whatever is overhead (a deck above a cabin); Infinity in the open */
+export function shipCeilAt(x: number, z: number, y: number) {
+  let c = Infinity;
+  for (const b of SHIP_BOXES) if (b.y0 >= y + 0.3 && b.y0 < c && inXZ(b, x, z)) c = b.y0;
+  return c;
+}
+/** would a fighter (radius r) with feet at y overlap something solid here? Low steps don't count */
+export function shipBlocked(x: number, z: number, y: number, r = 0.25) {
+  for (const b of SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.7 && inXZ(b, x, z, r)) return true;
+  return false;
+}
+/** is the point inside a solid (camera, projectiles) */
+export function shipSolidAt(x: number, y: number, z: number, r = 0) {
+  for (const b of SHIP_BOXES) if (y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
+  return false;
+}
+/** which room or deck a point is on (for the AI's routing) */
+export type ShipRegion = 'deck' | 'foreCabin' | 'fore' | 'greatCabin' | 'quarter' | 'captain' | 'poop';
+export function shipRegion(x: number, y: number, z: number): ShipRegion {
+  const L = SHIP_LAYOUT;
+  if (y >= L.poop.y - 0.8) return 'poop';
+  if (y < 2.4) {
+    if (z < L.fore.edge - L.wallT + 0.05) return 'foreCabin';
+    if (z > L.quarter.edge + L.wallT - 0.05) return 'greatCabin';
+    return 'deck';
+  }
+  if (z < 0) return 'fore';
+  if (z > L.poop.edge + L.wallT - 0.05 && Math.abs(x) < L.captainHalf) return 'captain';
+  return 'quarter';
+}
 // ----------------------------------------------------------------------
 // 天阙之巅: three concentric jade rings that break away during the round.
 // ----------------------------------------------------------------------

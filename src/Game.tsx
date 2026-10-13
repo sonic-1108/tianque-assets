@@ -13,7 +13,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE } from './maps';
+import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -288,6 +288,8 @@ function GameImpl({
   const slipPrevRef = useRef([[0, 0], [0, 0]]);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
+  /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
+  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0 });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0]);
@@ -471,7 +473,7 @@ function GameImpl({
       if ((c.burrowT ?? 0) > 0) {
         c.burrowT = (c.burrowT ?? 0) - dt;
         c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.1);
-        if (Math.random() < dt * 14) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 3, 0.35, 1.2, 0.55, '#6b5a40');
+        if (Math.random() < dt * 14) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 3, 0.35, 1.2, 0.55, '#6b5a40');
         if ((c.burrowT ?? 0) <= 0 || c.hp <= 0) burstOut(fighters.indexOf(c), c, fighters[1 - fighters.indexOf(c)]);
       }
       // 锁链钩: being dragged in
@@ -580,12 +582,18 @@ function GameImpl({
       runAI(en, p1, enemyIntent, dt);
       if (map.id === 'glacier') routeUpMountain(en, p1, enemyIntent);
       if (map.id === 'forest') leaveLookout(en, p1, enemyIntent);
+      if (map.id === 'sea') routeOnShip(en, p1, enemyIntent);
     }
     else if (!aiOn) {
       enemyIntent.faceYaw = en.targetRotY;
     }
 
     // ================= ACTIONS =================
+    if (map.id === 'sea') {
+      if (manBallista(0, p1, en, playerIntent)) input.consumeBuffer();
+      manBallista(1, en, p1, enemyIntent);
+      updateBolts(dt);
+    }
     const p1Ok = executeIntent(0, p1, en, playerIntent);
     if (p1Ok && playerIntent.request) input.consumeBuffer();
     const enOk = executeIntent(1, en, p1, enemyIntent);
@@ -612,16 +620,16 @@ function GameImpl({
       if (c.actionState === 'buried') {
         c.vel[0] = 0;
         c.vel[2] = 0;
-        c.pos[1] = THREE.MathUtils.damp(c.pos[1], fy(c.pos[0], c.pos[2]) - 0.75, 25, cdt);
+        c.pos[1] = THREE.MathUtils.damp(c.pos[1], fy(c.pos[0], c.pos[2], c.pos[1]) - 0.75, 25, cdt);
         if (c.stateTimer >= c.stateDuration && c.hp > 0) {
-          c.pos[1] = fy(c.pos[0], c.pos[2]);
+          c.pos[1] = fy(c.pos[0], c.pos[2], c.pos[1]);
           c.vel[1] = 8.5;
           c.isGrounded = false;
           c.actionState = 'launched';
           c.stateTimer = 0;
           c.stateDuration = 0.9;
           c.juggleCount = 0;
-          vfx.rocks(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 6, 0.1);
+          vfx.rocks(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 10, 6, 0.1);
           vfx.dustPuff(vB, 16, 0.6, 3, 0.7);
           vfx.ring(vB, 1.8, '#d6c2a8', 0.35, 0.14, 0.3);
           gameAudio.playSlam();
@@ -641,6 +649,14 @@ function GameImpl({
         const y0 = c.pos[1];
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
+        if (map.id === 'sea' && c.vel[1] > 0) {
+          // a cabin's ceiling stops a jump
+          const ceil = shipCeilAt(c.pos[0], c.pos[2], y0);
+          if (c.pos[1] + 1.85 > ceil) {
+            c.pos[1] = Math.max(y0, ceil - 1.85);
+            c.vel[1] = 0;
+          }
+        }
         const gh = groundHeight(c);
         // land if we crossed the floor this frame (a fast fall on a laggy frame can move > 0.6 m),
         // or if we somehow ended up under a floor that exists here
@@ -659,7 +675,7 @@ function GameImpl({
             c.stateTimer = 0;
             c.stateDuration = c.hp > 0 ? 0.8 : 99;
           }
-          if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
+          if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
           // a hard landing on a slick floor costs balance
           if (map.id === 'forest' && impact > 7 && (c.grip ?? 1) < SLIP_T) c.slip = (c.slip ?? 0) + (impact - 7) * 0.05 * (SLIP_T - (c.grip ?? 1)) * 6;
         }
@@ -712,7 +728,7 @@ function GameImpl({
         footTimers.current[i] += dt;
         if (footTimers.current[i] > 0.28) {
           footTimers.current[i] = 0;
-          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2, 0.15, 0.6, 0.35, '#7d7166');
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2, 0.15, 0.6, 0.35, '#7d7166');
           if (i === 0) gameAudio.playStep();
         }
       }
@@ -785,7 +801,18 @@ function GameImpl({
       L[i] = THREE.MathUtils.damp(L[i], target, 16, rawDt);
       return L[i];
     }
-    if (controller) controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), p1.pos[1] - 2.5) : null;
+    if (controller) {
+      if (map.id === 'sea') {
+        // the camera stays in the room the player is in: under the cabin ceiling, and never behind a wall
+        controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, p1.pos[1] + 0.8);
+        controller.ceilAt = (x: number, z: number) => shipCeilAt(x, z, p1.pos[1] + 0.5);
+        controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18);
+      } else {
+        controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), p1.pos[1] - 2.5) : null;
+        controller.ceilAt = null;
+        controller.solidAt = null;
+      }
+    }
     controller?.update(playerVec, rawDt);
 
     if (keyLightRef.current) {
@@ -913,7 +940,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), branches: mapRuntime.branches.map((b) => ({ ...b })) },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })) },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -1249,7 +1276,7 @@ function GameImpl({
         if (dir.lengthSq() < 0.0001) dir.copy(fwdOf(c.rotY)).multiplyScalar(-1);
         dir.normalize();
         if (cur === 'buried') {
-          c.pos[1] = fy(c.pos[0], c.pos[2]);
+          c.pos[1] = fy(c.pos[0], c.pos[2], c.pos[1]);
           c.isGrounded = true;
         }
         c.actionState = 'dodge';
@@ -1323,7 +1350,7 @@ function GameImpl({
             c.isGrounded = false;
             c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, 0.4);
             c.perfectDodgeUsed = true;
-            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 0.4, 2, 0.5);
+            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 10, 0.4, 2, 0.5);
             gameAudio.playDodge();
             return true;
           }
@@ -1331,7 +1358,7 @@ function GameImpl({
             if (!paySkill(3, 'skill4', '4')) return false;
             start('skill_4');
             c.poisonBuff = 3;
-            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
+            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
             vfx.embers(vC.set(c.pos[0], 0.4, c.pos[2]), 30, '#4ade80', 0.6, 2.5, 0.07);
             gameAudio.playPowerupChime();
             return true;
@@ -1346,7 +1373,7 @@ function GameImpl({
             c.volleyShots = 0;
             const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
             c.rainCenter = foe.hp > 0 && fd < 14 ? [foe.pos[0], foe.pos[2]] : [c.pos[0] + f.x * 7, c.pos[2] + f.z * 7];
-            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
+            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
             vfx.embers(vC.set(c.pos[0], 0.3, c.pos[2]), 30, color, 0.6, 4, 0.08);
             gameAudio.playVictoryFanfare();
             return true;
@@ -1390,7 +1417,7 @@ function GameImpl({
           c.dodgeIframeTimer = shadowC ? 0.5 : ranger ? 0.42 : 0.35;
           c.dodgeCooldownTimer = shadowC ? 0.15 : ranger ? 0.3 : 0.45; // stamina is the real limit now
           c.perfectDodgeUsed = false;
-          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 10, 0.4, 2, 0.55);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 10, 0.4, 2, 0.55);
           gameAudio.playDodge();
           report('闪避', '成功施放 (Cast)');
           return true;
@@ -1423,7 +1450,7 @@ function GameImpl({
           c.isGrounded = false;
           c.actionState = 'jump';
           c.stateDuration = 0;
-          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 6, 0.3, 1.2, 0.45);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 6, 0.3, 1.2, 0.45);
           gameAudio.playJump();
           report('跳跃', '成功起跳');
           return true;
@@ -1443,7 +1470,7 @@ function GameImpl({
           if (c.isGrounded && ((cur === 'dodge' && c.stateTimer > 0.18) || (free && gt - (c.dodgeEndAt ?? -9) < 0.3))) {
             start('attack_2', 13);
             c.dodgeSlash = true;
-            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 8, 0.3, 2, 0.5);
+            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 8, 0.3, 2, 0.5);
             gameAudio.playSwingHeavy();
             report('普攻', '回身斩');
             return true;
@@ -1481,14 +1508,14 @@ function GameImpl({
           if (!paySkill(1, 'skill2', '2')) return false;
           start('skill_2', 0);
           vfx.setVortex(true, phasesFor(c).skill_2!.totalDuration, slot);
-          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 18, 1, 3, 0.7);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 18, 1, 3, 0.7);
           gameAudio.playWhirl();
           return true;
         }
         case 'skill3': {
           if (!paySkill(2, 'skill3', '3')) return false;
           start('skill_3', phasesFor(c).skill_3!.forwardMomentum);
-          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 14, 0.5, 2.5, 0.6);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 14, 0.5, 2.5, 0.6);
           gameAudio.playCharge();
           return true;
         }
@@ -1501,7 +1528,7 @@ function GameImpl({
           c.buffs = c.buffs.filter((b) => b.type !== 'blood_rage');
           c.buffs.push({ id: `rage_${slot}_${Date.now()}`, type: 'blood_rage', duration: 8, value: 0.35 });
           vfx.pillarAt(1.1, isPlayer ? '#ff1f1f' : '#1f6bff', slot);
-          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2.6, isPlayer ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2.6, isPlayer ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
           vfx.embers(vC.set(c.pos[0], 0.2, c.pos[2]), 45, isPlayer ? '#ff3b2a' : '#3b8bff', 0.7, 3.5, 0.08);
           if (isPlayer) {
             controller?.addShake(0.25);
@@ -1517,7 +1544,7 @@ function GameImpl({
           c.vel[1] = 13;
           c.isGrounded = false;
           c.ultSlamStarted = false;
-          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2.2, color, 0.5, 0.12, 0.4);
           vfx.dustPuff(vB, 20, 0.8, 3.5, 0.8);
           gameAudio.playUltRise();
           return true;
@@ -1844,7 +1871,7 @@ function GameImpl({
           def.perfectDodgeUsed = true;
           def.counterTimer = 1.6;
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.45);
-          vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 2.4, '#7dd3fc', 0.5, 0.1, 0.3);
+          vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]) + 0.05, def.pos[2]), 2.4, '#7dd3fc', 0.5, 0.1, 0.3);
           vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '极限闪避', true, '#a5f3fc');
           if (slot === 1) onRoundEvent?.({ type: 'screenFlash', color: 'rgba(125,211,252,0.35)' });
         } else {
@@ -1932,7 +1959,7 @@ function GameImpl({
         slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.25);
         vfx.sparkBurst(chest, 40, '#ffffff', 10, 0.1, vA.copy(hitDir).multiplyScalar(-1), 1.6);
         vfx.slashMark(chest, '#e0f2fe', 1.3);
-        vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 2.0, '#e0f2fe', 0.35, 0.16, 0.4);
+        vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]) + 0.05, def.pos[2]), 2.0, '#e0f2fe', 0.35, 0.16, 0.4);
         vfx.flash(chest, '#ffffff', 30, 0.15, 6);
         vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.1, def.pos[2]), '完美格挡', true, '#e0f2fe');
         controller?.kick(-3);
@@ -2075,8 +2102,8 @@ function GameImpl({
             if (foe.actionState === 'buried') {
               foe.isGrounded = true;
               foe.vel[1] = 0;
-              foe.pos[1] = Math.min(foe.pos[1], fy(foe.pos[0], foe.pos[2]));
-              vfx.decal(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2]), foe.pos[2]), 2.2, 1.5);
+              foe.pos[1] = Math.min(foe.pos[1], fy(foe.pos[0], foe.pos[2], foe.pos[1]));
+              vfx.decal(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2], foe.pos[1]), foe.pos[2]), 2.2, 1.5);
               vfx.damageNumber(vA.set(foe.pos[0], 2.4, foe.pos[2]), '钉地!', true, '#fde68a');
             }
           }
@@ -2103,7 +2130,7 @@ function GameImpl({
       }
       // 回身斩: dash slash out of a dodge
       if (c.actionState === 'attack_2' && c.dodgeSlash) {
-        if (c.stateTimer < 0.25) vfx.chargeWave(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), fwd, color);
+        if (c.stateTimer < 0.25) vfx.chargeWave(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), fwd, color);
         if (active && !c.hasHitCurrentMove && dist < 2.8 && inFront) {
           c.hasHitCurrentMove = true;
           applyHit(slot, c, foe, 110, { heavy: true, crit: true, knock: 7, dur: 0.55 });
@@ -2140,7 +2167,7 @@ function GameImpl({
       }
 
       if (c.actionState === 'skill_2') {
-        if (Math.random() < 0.2) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 1, 1, 2.5, 0.45);
+        if (Math.random() < 0.2) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 1, 1, 2.5, 0.45);
         vfx.spiral(vB.set(c.pos[0], c.pos[1], c.pos[2]), 1.3, gt * 15, color);
         if (rage && dist < 4.5 && dist > 1.2 && foe.hp > 0) {
           // Blood rage: the vortex drags the opponent in
@@ -2150,7 +2177,7 @@ function GameImpl({
         const t = performance.now();
         if (t - c.lastHitTick > 200) {
           c.lastHitTick = t;
-          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]) + 0.05, c.pos[2]), 1.9, color, 0.25, 0.1);
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 1.9, color, 0.25, 0.1);
           if (dist < 2.9) applyHit(slot, c, foe, 40, { knock: 1.5, dur: 0.25 });
         }
       }
@@ -2160,8 +2187,8 @@ function GameImpl({
         if (go) {
           c.vel[0] = fwd.x * 20;
           c.vel[2] = fwd.z * 20;
-          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 2, 0.3, 1.5, 0.55);
-          vfx.chargeWave(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), fwd, color);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2, 0.3, 1.5, 0.55);
+          vfx.chargeWave(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), fwd, color);
         } else {
           c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 9, dt);
           c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 9, dt);
@@ -2172,7 +2199,7 @@ function GameImpl({
           // Charge connects: jump straight to recovery so a skill can be chained immediately
           const c3 = phasesFor(c).skill_3!;
           c.stateTimer = Math.max(c.stateTimer, c3.startup + c3.active);
-          vfx.ring(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2]), foe.pos[2]), 2.2, color, 0.4, 0.14, 0.4);
+          vfx.ring(vB.set(foe.pos[0], fy(foe.pos[0], foe.pos[2], foe.pos[1]), foe.pos[2]), 2.2, color, 0.4, 0.14, 0.4);
           c.vel[0] *= 0.2;
           c.vel[2] *= 0.2;
         }
@@ -2308,7 +2335,7 @@ function GameImpl({
     /** 遁地 ends: burst out of the ground, flinging anyone close into the air */
     function burstOut(slot: number, c: CombatantState, foe: CombatantState) {
       c.burrowT = 0;
-      const gy = fy(c.pos[0], c.pos[2]);
+      const gy = fy(c.pos[0], c.pos[2], c.pos[1]);
       c.pos[1] = Math.max(c.pos[1], gy);
       c.isGrounded = false;
       c.vel = [0, 9, 0];
@@ -2420,7 +2447,7 @@ function GameImpl({
           c.burrowT = 2.2;
           c.dodgeIframeTimer = 0.3;
           if (slot === 1 && targeting.lockedEnemyId) targeting.lockedEnemyId = null;
-          const gy = fy(c.pos[0], c.pos[2]);
+          const gy = fy(c.pos[0], c.pos[2], c.pos[1]);
           vfx.dustPuff(vB.set(c.pos[0], gy + 0.1, c.pos[2]), 18, 0.7, 2.5, 0.8, '#6b5a40');
           vfx.rocks(vB.set(c.pos[0], gy, c.pos[2]), 6, 4, 0.1);
           vfx.ring(vB.set(c.pos[0], gy + 0.05, c.pos[2]), 1.4, color, 0.4, 0.1, 0.2);
@@ -2542,7 +2569,7 @@ function GameImpl({
       const st = c.actionState;
       const t = c.stateTimer;
       const color = colorFor(slot, c);
-      const gy = fy(c.pos[0], c.pos[2]);
+      const gy = fy(c.pos[0], c.pos[2], c.pos[1]);
       const chest = () => vB.set(c.pos[0] + fwd.x * 0.5, c.pos[1] + 1.2, c.pos[2] + fwd.z * 0.5);
 
       if ((st === 'attack_1' || st === 'attack_2') && active && !c.hasHitCurrentMove && dist < 2.5 && inFront) {
@@ -2802,7 +2829,7 @@ function GameImpl({
           c.vel[0] = -fwd.x * 13;
           c.vel[2] = -fwd.z * 13;
         }
-        vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2]), c.pos[2]), 8, 0.3, 2, 0.45);
+        vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 8, 0.3, 2, 0.45);
       }
       if (st === 'skill_1' && ready) {
         c.volleyShots = 1;
@@ -2908,7 +2935,7 @@ function GameImpl({
           if (def.hp < before && def.hp > 0) {
             def.silenceTimer = 2.2;
             vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.6, def.pos[2]), '封印', true, '#fbbf24');
-            vfx.ring(vB.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 1.6, '#fbbf24', 0.5, 0.14, 0.4);
+            vfx.ring(vB.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]) + 0.05, def.pos[2]), 1.6, '#fbbf24', 0.5, 0.14, 0.4);
           }
           vfx.flash(vB.copy(tgt), '#ffd36a', 50, 0.2, 9);
           vfx.sparkBurst(vB.copy(tgt), 30, '#ffe9a8', 9, 0.08, UP, 1.4);
@@ -2942,8 +2969,8 @@ function GameImpl({
           p.obj.position.copy(p.pos);
           p.obj.rotateX(step * 22);
           p.obj.rotateY(step * 9);
-          if (p.pos.y < fy(p.pos.x, p.pos.z) + 0.04) {
-            p.pos.y = fy(p.pos.x, p.pos.z) + 0.04;
+          if (p.pos.y < fy(p.pos.x, p.pos.z, p.pos.y) + 0.04) {
+            p.pos.y = fy(p.pos.x, p.pos.z, p.pos.y) + 0.04;
             p.obj.position.copy(p.pos);
             p.obj.rotation.set(0, Math.random() * 6, 0); // lies flat where it dropped
             p.stuck = 1.6;
@@ -2994,13 +3021,13 @@ function GameImpl({
           }
           p.traveled += (p.vel.length() * step) / 2;
           if (p.kind !== 'boomerang') {
-            if (p.pos.y < fy(p.pos.x, p.pos.z) + 0.02) {
-              p.pos.y = fy(p.pos.x, p.pos.z) + 0.02;
+            if (p.pos.y < fy(p.pos.x, p.pos.z, p.pos.y) + 0.02) {
+              p.pos.y = fy(p.pos.x, p.pos.z, p.pos.y) + 0.02;
               embed(p, p.noStop ? 1.0 : 2.5);
               vfx.dustPuff(vB.copy(p.pos), 2, 0.1, 0.8, 0.25);
               break;
             }
-            let wall = false;
+            let wall = map.id === 'sea' && shipSolidAt(p.pos.x, p.pos.y, p.pos.z);
             for (const pl of pillars) {
               if (p.pos.y < (pl.deck ? 99 : pl.h ?? 99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
                 wall = true;
@@ -3044,7 +3071,7 @@ function GameImpl({
               }
               if (p.root > 0 && def.hp > 0) {
                 def.rootTimer = p.root;
-                vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]) + 0.05, def.pos[2]), 1.3, '#5eead4', 0.5, 0.12, 0.4);
+                vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]) + 0.05, def.pos[2]), 1.3, '#5eead4', 0.5, 0.12, 0.4);
                 vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.4, def.pos[2]), '定身', true, '#5eead4');
               }
             }
@@ -3263,6 +3290,9 @@ function GameImpl({
       mapRuntime.storm = 0;
       mapRuntime.strikeWarn = 0;
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
+      mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
+      mapRuntime.bolts = [];
+      shipAiRef.current = { goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -3284,7 +3314,8 @@ function GameImpl({
 
     /** Height of whatever is under the fighter: arena floor or the top of a pillar / crate */
     /** floor height under (x, z): flat everywhere except the glacier valley */
-    function fy(x: number, z: number) {
+    function fy(x: number, z: number, y = 0.2) {
+      if (map.id === 'sea') return shipFloorAt(x, z, y + 0.3);
       return map.terrain ? terrainHeight(map.id, x, z) : 0;
     }
 
@@ -3295,7 +3326,7 @@ function GameImpl({
 
     /** What a fighter at height y would stand on at (x, z): terrain (or the swimming level in deep water) and pillar tops */
     function groundAt(x: number, z: number, y: number, base?: number) {
-      let g = base ?? (map.terrain ? terrainHeight(map.id, x, z) : 0);
+      let g = base ?? (map.id === 'sea' ? shipFloorAt(x, z, y) : map.terrain ? terrainHeight(map.id, x, z) : 0);
       if (map.id === 'forest') g = Math.max(g, FOREST.swimY); // deep water: you float
       for (const pl of map.pillars || []) {
         if (pl.h === undefined || y < pl.h - 0.45) continue;
@@ -3354,32 +3385,50 @@ function GameImpl({
       }
     }
 
+    /**
+     * 怒海战船: the cabins' walls, the deck slabs and the stair treads are solid. Stairs climb a tread at a time;
+     * running at a raised deck's edge from the open is a 轻功 leap up onto it (never through a cabin ceiling).
+     */
+    function shipWall(c: CombatantState, px0: number, pz0: number) {
+      if (c.actionState === 'buried' || (c.pos[0] === px0 && c.pos[2] === pz0)) return;
+      const y = c.pos[1];
+      if (!shipBlocked(c.pos[0], c.pos[2], y)) return;
+      if (c.isGrounded && (c.actionState === 'idle' || c.actionState === 'run')) {
+        const top = shipFloorAt(c.pos[0], c.pos[2], y + 3.1);
+        const rise = top - y;
+        if (rise > 0.55 && rise < 3.7 && shipCeilAt(px0, pz0, y) > top + 1.8 && shipCeilAt(c.pos[0], c.pos[2], top) > top + 1.8) {
+          c.pos[0] = px0;
+          c.pos[2] = pz0;
+          c.vel[1] = Math.sqrt(2 * gravity * (rise + 0.4));
+          c.isGrounded = false;
+          c.actionState = 'jump';
+          vfx.dustPuff(vB.set(px0, y, pz0), 6, 0.3, 1.5, 0.5, '#b8a890');
+          return;
+        }
+      }
+      // slide along the wall if one axis is free, otherwise stop
+      if (!shipBlocked(c.pos[0], pz0, y)) {
+        c.pos[2] = pz0;
+        c.vel[2] = 0;
+      } else if (!shipBlocked(px0, c.pos[2], y)) {
+        c.pos[0] = px0;
+        c.vel[0] = 0;
+      } else {
+        c.pos[0] = px0;
+        c.pos[2] = pz0;
+        c.vel[0] = c.vel[2] = 0;
+      }
+    }
+
     /** 青冥古林: a walking fighter climbs stairs; a waist-high ledge (the temple podium's sides) gets a small hop, higher ones block */
     function stepWall(c: CombatantState, px0: number, pz0: number) {
-      if (map.id === 'sea' && !c.isGrounded && (c.pos[0] !== px0 || c.pos[2] !== pz0)) {
-        // in the air the raised decks' fronts are solid walls: rise clear of the edge before moving over it
-        const inWall = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.05;
-        if (!inWall(c.pos[0], c.pos[2])) return;
-        if (!inWall(c.pos[0], pz0)) {
-          c.pos[2] = pz0;
-          c.vel[2] = 0;
-        } else if (!inWall(px0, c.pos[2])) {
-          c.pos[0] = px0;
-          c.vel[0] = 0;
-        } else {
-          c.pos[0] = px0;
-          c.pos[2] = pz0;
-          c.vel[0] = c.vel[2] = 0;
-        }
-        return;
-      }
-      if ((map.id !== 'forest' && map.id !== 'sea') || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
+      if (map.id === 'sea') return shipWall(c, px0, pz0);
+      if (map.id !== 'forest' || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
       const tooHigh = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.55;
       if (!tooHigh(c.pos[0], c.pos[2])) return;
       const rise = terrainHeight(map.id, c.pos[0], c.pos[2]) - c.pos[1];
-      // on the ship a raised deck's edge is a light-footed leap (轻功); in the forest only a waist-high ledge
-      if (rise < (map.id === 'sea' ? 2.9 : 1.3) && (c.actionState === 'idle' || c.actionState === 'run')) {
+      if (rise < 1.3 && (c.actionState === 'idle' || c.actionState === 'run')) {
         // a light hop up onto it instead of popping through the stone
         c.pos[0] = px0;
         c.pos[2] = pz0;
@@ -3473,7 +3522,7 @@ function GameImpl({
         def.vel[1] = 6;
         def.isGrounded = false;
       }
-      vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
+      vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       onRoundEvent?.({ type: 'ko', winner: defSlot === 1 ? 'player' : 'enemy' });
     }
@@ -4365,7 +4414,7 @@ function GameImpl({
         fighters.forEach((c, i) => {
           if (A.hit[i] || c.hp <= 0) return;
           if (c.pos[0] < x0 - 0.5 || c.pos[0] > x1 + 0.5 || Math.abs(c.pos[2] - A.z) > 1.4) return;
-          if (c.pos[1] > fy(c.pos[0], c.pos[2]) + 1.6) return; // jumped over it
+          if (c.pos[1] > fy(c.pos[0], c.pos[2], c.pos[1]) + 1.6) return; // jumped over it
           A.hit[i] = true;
           if (c.dodgeIframeTimer > 0) return;
           c.hp = Math.max(0, c.hp - 110);
@@ -4412,13 +4461,327 @@ function GameImpl({
       }
     }
 
+    // ------------------------------------------------------
+    // 怒海战船 crossbows (床弩): F to man one, aim within ±60°, left click to loose a bolt that pins
+    // whoever it hits. First come, first served; any hit, jump or dodge throws you off it.
+    // ------------------------------------------------------
+    function wrapA(a: number) {
+      return Math.atan2(Math.sin(a), Math.cos(a));
+    }
+    function ballistaSeat(k: number, yaw: number): [number, number, number] {
+      const d = SHIP_LAYOUT.ballistae[k];
+      return [d.x + Math.sin(yaw) * 1.05, d.y, d.z + Math.cos(yaw) * 1.05];
+    }
+    function leaveBallista(i: number, c: CombatantState) {
+      const k = c.ballista;
+      c.ballista = undefined;
+      if (k !== undefined && mapRuntime.ballistae[k]?.user === i) mapRuntime.ballistae[k].user = -1;
+    }
+    /** returns true when it used up the fighter's button press */
+    function manBallista(i: number, c: CombatantState, foe: CombatantState, intent: Intent): boolean {
+      const B = mapRuntime.ballistae;
+      if (!B.length) return false;
+      const pressed = !!intent.interact && !c.intPrev;
+      c.intPrev = !!intent.interact;
+      c.interactHint = '';
+      if (c.ballista !== undefined && B[c.ballista]?.user !== i) c.ballista = undefined;
+      if (c.ballista !== undefined) {
+        const k = c.ballista;
+        const b = B[k];
+        const d = SHIP_LAYOUT.ballistae[k];
+        const hurt = c.hp <= 0 || c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown' || !c.isGrounded;
+        if (pressed || hurt || round.over || intent.request === 'jump' || intent.request === 'dodge') {
+          leaveBallista(i, c);
+          return false; // a jump or dodge still happens
+        }
+        // swing the bow toward where you're looking, within its arc
+        const want = d.yaw + THREE.MathUtils.clamp(wrapA(intent.faceYaw - d.yaw), -SHIP_LAYOUT.ballistaArc, SHIP_LAYOUT.ballistaArc);
+        const diff = wrapA(want - b.yaw);
+        b.yaw = wrapA(b.yaw + THREE.MathUtils.clamp(diff, -2.6 * dt, 2.6 * dt));
+        c.pos = ballistaSeat(k, b.yaw);
+        c.vel = [0, 0, 0];
+        c.rotY = c.targetRotY = b.yaw;
+        if (c.actionState === 'run') c.actionState = 'idle';
+        intent.faceYaw = b.yaw;
+        intent.move.set(0, 0, 0);
+        intent.block = false;
+        const req = intent.request;
+        if (req === 'attack' && b.load >= 1) looseBolt(i, k, c, foe);
+        intent.request = null;
+        c.interactHint = b.load >= 1 ? '床弩 · 左键发射 · F 离开' : '床弩上弦中… · F 离开';
+        return !!req;
+      }
+      if (c.hp <= 0 || !c.isGrounded || !isFree(c)) return false;
+      for (let k = 0; k < B.length; k++) {
+        const d = SHIP_LAYOUT.ballistae[k];
+        if (B[k].user >= 0 || Math.abs(c.pos[1] - d.y) > 0.5) continue;
+        const near = Math.hypot(c.pos[0] - d.x, c.pos[2] - d.z) < 2.0;
+        if (!near) continue;
+        c.interactHint = 'F 操纵床弩';
+        if (pressed) {
+          c.ballista = k;
+          B[k].user = i;
+          c.actionState = 'idle';
+          c.stateDuration = 0;
+          c.isBlocking = false;
+          vfx.dustPuff(vB.set(d.x, d.y + 0.2, d.z), 5, 0.4, 1.2, 0.4, '#b8a890');
+          if (i === 0) onRoundEvent?.({ type: 'toast', text: '抢到床弩！转动视角瞄准（左右 60°），左键发射' });
+        }
+        break;
+      }
+      return false;
+    }
+    function looseBolt(i: number, k: number, c: CombatantState, foe: CombatantState) {
+      const b = mapRuntime.ballistae[k];
+      const d = SHIP_LAYOUT.ballistae[k];
+      b.load = 0;
+      b.kick = 1;
+      const f = fwdOf(b.yaw).clone();
+      const from = vA.set(d.x + f.x * 1.4, d.y + 1.15, d.z + f.z * 1.4).clone();
+      // aim the elevation at the target if it's roughly where the bow points
+      let pitch = 0;
+      const tx = foe.pos[0] - from.x;
+      const tz = foe.pos[2] - from.z;
+      const horiz = Math.hypot(tx, tz);
+      if (Math.abs(wrapA(yawTo(c.pos, foe.pos) - b.yaw)) < 0.5) pitch = THREE.MathUtils.clamp(Math.atan2(foe.pos[1] + 1.0 - from.y, horiz), -0.6, 0.35);
+      const sp = 46;
+      mapRuntime.bolts.push({ x: from.x, y: from.y, z: from.z, vx: f.x * Math.cos(pitch) * sp, vy: Math.sin(pitch) * sp, vz: f.z * Math.cos(pitch) * sp, t: 1.4, stuck: false, slot: i });
+      if (mapRuntime.bolts.length > 8) mapRuntime.bolts.shift();
+      vfx.sparkBurst(from, 14, '#fde68a', 9, 0.08, f, 0.5);
+      vfx.dustPuff(vB.set(d.x, d.y + 0.3, d.z), 8, 0.6, 2.2, 0.5, '#cbb89a');
+      vfx.ring(vB.set(d.x, d.y + 0.06, d.z), 2.2, '#fbbf24', 0.35, 0.12);
+      vfx.flash(from, '#ffd27a', 10, 0.12, 6);
+      gameAudio.playThrowHeavy();
+      if (i === 0) controller?.addShake(0.18);
+    }
+    function updateBolts(step: number) {
+      for (const b of mapRuntime.ballistae) {
+        if (b.load < 1) b.load = Math.min(1, b.load + step / 1.7); // winding the string back takes 1.7 s
+        b.kick = Math.max(0, b.kick - step * 3.5);
+      }
+      const bolts = mapRuntime.bolts;
+      for (let n = bolts.length - 1; n >= 0; n--) {
+        const bo = bolts[n];
+        bo.t -= step;
+        if (bo.t <= 0) {
+          bolts.splice(n, 1);
+          continue;
+        }
+        if (bo.stuck) continue;
+        const owner = fighters[bo.slot];
+        const def = fighters[1 - bo.slot];
+        for (let s = 0; s < 4; s++) {
+          const h = step / 4;
+          bo.vy -= 2.5 * h;
+          bo.x += bo.vx * h;
+          bo.y += bo.vy * h;
+          bo.z += bo.vz * h;
+          if (def.hp > 0 && Math.hypot(bo.x - def.pos[0], bo.z - def.pos[2]) < 0.62 && bo.y > def.pos[1] - 0.1 && bo.y < def.pos[1] + 1.95) {
+            boltHit(bo, owner, def);
+            break;
+          }
+          let wall = shipSolidAt(bo.x, bo.y, bo.z) || bo.y < shipFloorAt(bo.x, bo.z, bo.y) + 0.02;
+          if (!wall)
+            for (const pl of map.pillars || []) if (bo.y < (pl.h ?? 99) && Math.hypot(bo.x - pl.x, bo.z - pl.z) < pl.r) wall = true;
+          if (wall) {
+            bo.stuck = true;
+            bo.t = 3;
+            vfx.sparkBurst(vB.set(bo.x, bo.y, bo.z), 10, '#fde68a', 5, 0.06);
+            vfx.dustPuff(vB, 4, 0.2, 1.2, 0.35, '#b8a890');
+            gameAudio.playDartStick();
+            break;
+          }
+          if (Math.abs(bo.x) > 9.5 || bo.y < -3) {
+            // over the side into the sea
+            if (bo.y < -3) vfx.sparkBurst(vB.set(bo.x, -3.2, bo.z), 8, '#cfe8ff', 4, 0.08, UP, 0.4);
+            bo.t = Math.min(bo.t, 0.4);
+          }
+        }
+      }
+    }
+    /** a crossbow bolt strikes: light damage, but it drives the target back and pins them to the deck with a spirit chain */
+    function boltHit(bo: (typeof mapRuntime.bolts)[number], owner: CombatantState, def: CombatantState) {
+      const before = def.hp;
+      const guarding = def.isBlocking;
+      applyHit(bo.slot, owner, def, 38, { knock: 3.2, dur: 0.45, heavy: true, ranged: true, noMark: true });
+      const sp = Math.hypot(bo.vx, bo.vz) || 1;
+      const dx = bo.vx / sp;
+      const dz = bo.vz / sp;
+      const chest = vA.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]).clone();
+      // the bolt carries on and buries itself in the planks behind them
+      let px = def.pos[0];
+      let pz = def.pos[2];
+      for (const back of [1.9, 1.3, 0.8, 0.4]) {
+        const x = def.pos[0] + dx * back;
+        const z = def.pos[2] + dz * back;
+        if (Math.abs(fy(x, z, def.pos[1]) - def.pos[1]) < 0.4 && !shipBlocked(x, z, def.pos[1], 0.05)) {
+          px = x;
+          pz = z;
+          break;
+        }
+      }
+      const py = fy(px, pz, def.pos[1]);
+      bo.x = px;
+      bo.y = py + 0.35;
+      bo.z = pz;
+      bo.vy = -Math.abs(bo.vy) - 8;
+      bo.stuck = true;
+      bo.t = 2.6;
+      if (def.hp < before && !guarding && def.hp > 0) {
+        def.rootTimer = 0.7;
+        vfx.chain(chest, vB.set(px, py + 0.3, pz), 0.75);
+        vfx.ring(vC.set(def.pos[0], def.pos[1] + 0.05, def.pos[2]), 1.6, '#67e8f9', 0.6, 0.16, 0.25);
+        vfx.ring(vC, 0.9, '#fbbf24', 0.45, 0.1);
+        vfx.sparkBurst(chest, 22, '#a5f3fc', 8, 0.08, vC.set(dx, 0.4, dz), 0.7);
+        vfx.flash(chest, '#9be7ff', 14, 0.16, 7);
+        vfx.damageNumber(vC.set(def.pos[0], def.pos[1] + 2.5, def.pos[2]), '钉身!', true, '#67e8f9');
+        if (bo.slot === 0 || 1 - bo.slot === 0) controller?.addShake(0.22);
+      } else {
+        vfx.sparkBurst(chest, 12, '#fff7d6', 6, 0.06);
+      }
+    }
+
+    /**
+     * 怒海战船 AI: get into (and out of) the cabins through their doors, leap up onto the raised decks,
+     * and now and then go and man a crossbow when the player is far away.
+     */
+    function routeOnShip(me: CombatantState, foe: CombatantState, out: Intent) {
+      const S = shipAiRef.current;
+      const B = mapRuntime.ballistae;
+      S.cool -= dt;
+      out.interact = false;
+      const dist = Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]);
+      if (me.ballista !== undefined) {
+        const k = me.ballista;
+        const d = SHIP_LAYOUT.ballistae[k];
+        S.mountedT += dt;
+        const aim = yawTo(me.pos, foe.pos);
+        out.faceYaw = aim;
+        const inArc = Math.abs(wrapA(aim - d.yaw)) < SHIP_LAYOUT.ballistaArc + 0.05;
+        // can the bow actually see them (not hiding in a cabin or below the edge of its own deck)?
+        let clear = true;
+        for (let t = 0.12; t < 0.95; t += 0.06) {
+          const x = d.x + (foe.pos[0] - d.x) * t;
+          const y = d.y + 1.15 + (foe.pos[1] + 1.0 - d.y - 1.15) * t;
+          const z = d.z + (foe.pos[2] - d.z) * t;
+          if (shipSolidAt(x, y, z)) {
+            clear = false;
+            break;
+          }
+        }
+        S.outT = !inArc || !clear || dist < 3.6 || S.mountedT > 10 ? S.outT + dt : 0;
+        out.move.set(0, 0, 0);
+        out.request = null;
+        if (S.outT > 1.0 || dist < 2.6) {
+          out.interact = !me.intPrev;
+          S.cool = 7;
+          S.goal = -1;
+        } else if (B[k].load >= 1 && Math.abs(wrapA(B[k].yaw - aim)) < 0.07 && Math.random() < dt * 4) out.request = 'attack';
+        return;
+      }
+      S.mountedT = 0;
+      S.outT = 0;
+      // go for a free crossbow on this level when the player is far off
+      if (S.goal < 0 && S.cool <= 0 && isFree(me) && me.isGrounded) {
+        S.cool = 2.5;
+        const mine = shipRegion(me.pos[0], me.pos[1], me.pos[2]);
+        if (dist > 7)
+          for (let k = 0; k < B.length; k++) {
+            const d = SHIP_LAYOUT.ballistae[k];
+            const reach = Math.hypot(d.x - me.pos[0], d.z - me.pos[2]);
+            const rd = shipRegion(d.x, d.y, d.z);
+            if (B[k].user < 0 && reach < 14 && (rd === mine || (mine === 'deck' && Math.random() < 0.5)) && Math.random() < 0.6) S.goal = k;
+          }
+      }
+      let tx = foe.pos[0];
+      let ty = foe.pos[1];
+      let tz = foe.pos[2];
+      if (S.goal >= 0) {
+        const d = SHIP_LAYOUT.ballistae[S.goal];
+        if (B[S.goal].user >= 0 || dist < 3.2) {
+          S.goal = -1;
+          S.cool = 5;
+        } else {
+          const seat = ballistaSeat(S.goal, d.yaw);
+          tx = seat[0];
+          ty = seat[1];
+          tz = seat[2];
+          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.2 && Math.abs(ty - me.pos[1]) < 0.5) {
+            out.interact = !me.intPrev;
+            out.move.set(0, 0, 0);
+            return;
+          }
+        }
+      }
+      const from = shipRegion(me.pos[0], me.pos[1], me.pos[2]);
+      const to = shipRegion(tx, ty, tz);
+      if (from === to) {
+        if (S.goal >= 0) {
+          out.move.set(tx - me.pos[0], 0, tz - me.pos[2]);
+          if (out.move.lengthSq() > 0.01) out.move.normalize();
+          out.request = null;
+        }
+        S.edge = '';
+        return;
+      }
+      // breadth-first over the rooms and decks
+      const adj: Record<ShipRegion, ShipRegion[]> = {
+        deck: ['foreCabin', 'fore', 'greatCabin', 'quarter'],
+        foreCabin: ['deck'],
+        fore: ['deck'],
+        greatCabin: ['deck'],
+        quarter: ['deck', 'captain', 'poop'],
+        captain: ['quarter'],
+        poop: ['quarter'],
+      };
+      const prev: Partial<Record<ShipRegion, ShipRegion>> = { [from]: from };
+      const q: ShipRegion[] = [from];
+      while (q.length) {
+        const r = q.shift()!;
+        if (r === to) break;
+        for (const n of adj[r]) if (!(n in prev)) { prev[n] = r; q.push(n); }
+      }
+      let next: ShipRegion = to;
+      while (prev[next] !== from && prev[next] !== undefined && prev[next] !== next) next = prev[next]!;
+      const L = SHIP_LAYOUT;
+      const sx = (me.pos[0] >= 0 ? 1 : -1) * 3.6;
+      const ways: Record<string, [number, number][]> = {
+        'deck>foreCabin': [[0, L.fore.edge + 1.0], [0, L.fore.edge - 1.4]],
+        'foreCabin>deck': [[0, L.fore.edge - 1.0], [0, L.fore.edge + 1.4]],
+        'deck>greatCabin': [[0, L.quarter.edge - 1.0], [0, L.quarter.edge + 1.4]],
+        'greatCabin>deck': [[0, L.quarter.edge + 1.0], [0, L.quarter.edge - 1.4]],
+        'quarter>captain': [[0, L.poop.edge - 0.9], [0, L.poop.edge + 1.2]],
+        'captain>quarter': [[0, L.poop.edge + 0.9], [0, L.poop.edge - 1.2]],
+        // up: leap at the edge away from the doors; down: walk off the edge
+        'deck>fore': [[sx, L.fore.edge + 1.2], [sx, L.fore.edge - 1.5]],
+        'fore>deck': [[me.pos[0], L.fore.edge - 0.5], [me.pos[0] * 0.8, L.fore.edge + 2.0]],
+        'deck>quarter': [[sx, L.quarter.edge - 1.2], [sx, L.quarter.edge + 1.5]],
+        'quarter>deck': [[THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.quarter.edge + 0.6], [THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.quarter.edge - 2.0]],
+        'quarter>poop': [[sx, L.poop.edge - 1.2], [sx, L.poop.edge + 1.2]],
+        'poop>quarter': [[THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.poop.edge + 0.4], [THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5), L.poop.edge - 1.6]],
+      };
+      const key = `${from}>${next}`;
+      const w = ways[key];
+      if (!w) return;
+      if (S.edge !== key) {
+        S.edge = key;
+        S.stage = 0;
+      }
+      if (S.stage === 0 && Math.hypot(w[0][0] - me.pos[0], w[0][1] - me.pos[2]) < 0.7) S.stage = 1;
+      const pt = w[S.stage];
+      out.move.set(pt[0] - me.pos[0], 0, pt[1] - me.pos[2]);
+      if (out.move.lengthSq() > 0.01) out.move.normalize();
+      // no skills while finding the way, but still swing if they're right there
+      if (dist > 2.5) out.request = null;
+    }
+
     function updateSea() {
       const w = waveRef.current;
       const lt = lightningRef.current;
       // the ship rolls on the swell (harder while the rogue wave rears up) and fighters slide with it
       // (roll and pitch come from the swell under the hull, computed by the sea itself)
       for (const c of fighters) {
-        if (!c.isGrounded || c.hp <= 0 || c.pos[1] > 0.3) continue;
+        if (!c.isGrounded || c.hp <= 0 || c.pos[1] > 0.3 || shipRegion(c.pos[0], c.pos[1], c.pos[2]) !== 'deck') continue;
         const k = c.isBlocking ? 0.3 : 1;
         c.pos[0] += Math.sin(mapRuntime.shipRoll) * 7 * k * dt;
       }
@@ -4462,7 +4825,7 @@ function GameImpl({
             vfx.dustPuff(vB, 2, 0.5, 6, 1.1, '#cfe3f5');
           }
           fighters.forEach((c) => {
-            if (c.hp <= 0 || c.pos[1] > 1.5) return;
+            if (c.hp <= 0 || c.pos[1] > 1.5 || shipRegion(c.pos[0], c.pos[1], c.pos[2]) !== 'deck' || c.ballista !== undefined) return;
             const push = c.isBlocking ? 5 : 21;
             c.vel[0] = -w.side * push;
             c.vel[2] *= 0.3;

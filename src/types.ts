@@ -187,6 +187,7 @@ export interface CombatantState {
   shadowHits?: number; // 千影杀: strikes landed so far
   ultTarget?: boolean; // 千影杀: a target was in reach when it began
   burrowT?: number; // 遁地: seconds left under the ground
+  ballista?: number; // 怒海战船: manning this mounted crossbow
   pull?: { x: number; z: number; t: number }; // 锁链钩: being dragged toward (x, z)
   mantraShots?: number; // 六字真言 syllables released so far
   zenField?: { x: number; z: number; t: number }; // 禅定结界 centre and seconds left

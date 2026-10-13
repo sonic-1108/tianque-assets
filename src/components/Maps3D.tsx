@@ -6,8 +6,8 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
-import { ShipHull, Forecastle, AfterDecks, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
-import { MAPS, MapId, mapRuntime, SHIP_DECKS, shipFloor, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
+import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
+import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, shipFloorAt, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -1052,7 +1052,8 @@ function plankTexture() {
   return t;
 }
 
-function Rain() {
+function Rain({ hideUnder }: { hideUnder?: (x: number, y: number, z: number) => boolean }) {
+  const lines = useRef<THREE.LineSegments>(null);
   const { geo, mat } = useMemo(() => {
     const n = 2600;
     const pos = new Float32Array(n * 6);
@@ -1084,8 +1085,10 @@ function Rain() {
   useFrame((st) => {
     mat.uniforms.uTime.value = st.clock.elapsedTime;
     mat.uniforms.uLightning.value = mapRuntime.lightning;
+    // no rain indoors: hidden while the camera is under a deck
+    if (lines.current && hideUnder) lines.current.visible = !hideUnder(st.camera.position.x, st.camera.position.y, st.camera.position.z);
   });
-  return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
+  return <lineSegments ref={lines} geometry={geo} material={mat} frustumCulled={false} />;
 }
 
 const SEA_Y = -3.4; // the sea surface sits well below the deck: a tall-sided war junk
@@ -1237,18 +1240,21 @@ function SeaMap() {
           <meshStandardMaterial ref={deckMat} map={planks} roughness={0.78} metalness={0.02} color="#8c7c6c" envMapIntensity={0.2} />
         </mesh>
         <ShipHull />
-        <Forecastle deckMap={planks} decks={{ ...SHIP_DECKS.fore, stairs: SHIP_DECKS.foreStairs }} />
-        <AfterDecks deckMap={planks} d={SHIP_DECKS} />
-        <SternCastle base={SHIP_DECKS.poop.y} />
-        <pointLight position={[0, 2.3, SHIP_DECKS.quarter.edge - 1.2]} color="#ffb060" intensity={9} distance={12} decay={1.5} />
+        <ShipStructure deckMap={planks} boxes={SHIP_BOXES} layout={SHIP_LAYOUT} />
+        {SHIP_LAYOUT.ballistae.map((b, k) => (
+          <Ballista key={k} k={k} at={b} rt={mapRuntime} />
+        ))}
+        <Bolts rt={mapRuntime} />
+        <SternCastle base={SHIP_LAYOUT.poop.y} />
+        <pointLight position={[0, 2.6, SHIP_LAYOUT.quarter.edge - 1.6]} color="#ffb060" intensity={8} distance={12} decay={1.5} />
         <RailLanterns />
         <HatchGrate position={[0, 0, -2.6]} w={2.4} d={2.8} />
         <HatchGrate position={[0, 0, 7.9]} w={2.0} d={2.0} />
-        <HatchGrate position={[-2.2, SHIP_DECKS.fore.y, -16.2]} w={1.6} d={1.6} />
+        <HatchGrate position={[-2.6, SHIP_LAYOUT.fore.y, -17.2]} w={1.6} d={1.6} />
         <RopeCoil position={[1.4, 0, -8.3]} />
         <RopeCoil position={[-1.4, 0, 6.3]} r={0.36} />
-        <RopeCoil position={[-2.4, SHIP_DECKS.poop.y, 17.8]} r={0.5} />
-        <RopeCoil position={[3.4, SHIP_DECKS.quarter.y, 14.0]} r={0.4} />
+        <RopeCoil position={[-2.6, SHIP_LAYOUT.poop.y, 18.0]} r={0.5} />
+        <RopeCoil position={[3.0, SHIP_LAYOUT.quarter.y, 14.4]} r={0.4} />
         {/* masts with battened junk sails high above the deck, a lantern hung on each, and pennants */}
         {def.pillars!.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
@@ -1263,9 +1269,9 @@ function SeaMap() {
           <lineBasicMaterial color="#1a120c" />
         </lineSegments>
         {/* cargo crates lashed with rope */}
-        {def.pillars!.slice(2).map((p, i) => (
-          <group key={i} position={[p.x, shipFloor(p.x, p.z), p.z]} rotation={[0, i * 0.7, 0]}>
-            {Array.from({ length: Math.max(1, Math.round(((p.h ?? 1.1) - shipFloor(p.x, p.z)) / 1.1)) }, (_, k) => (
+        {def.pillars!.slice(2).filter((p) => p.h !== 0.85 && !SHIP_LAYOUT.ballistae.some((b) => b.x === p.x && b.z === p.z)).map((p, i) => (
+          <group key={i} position={[p.x, shipFloorAt(p.x, p.z, (p.h ?? 1.1) - 1.0), p.z]} rotation={[0, i * 0.7, 0]}>
+            {Array.from({ length: Math.max(1, Math.round(((p.h ?? 1.1) - shipFloorAt(p.x, p.z, (p.h ?? 1.1) - 1.0)) / 1.1)) }, (_, k) => (
               <group key={k} position={[0, k * 1.1, 0]} rotation={[0, k * 0.35, 0]}>
                 <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
                   <boxGeometry args={[p.r * 1.7 - k * 0.08, 1.1, p.r * 1.7 - k * 0.08]} />
@@ -1282,7 +1288,7 @@ function SeaMap() {
           </group>
         ))}
       </group>
-      <Rain />
+      <Rain hideUnder={(x, y, z) => shipCeilAt(x, z, y - 1.2) < 99} />
     </group>
   );
 }
