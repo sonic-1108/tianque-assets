@@ -13,7 +13,7 @@ import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
-import { useSettings, QUALITY } from './settings';
+import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
 import { MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
@@ -288,7 +288,12 @@ function GameImpl({
     if (P.slow >= 2) {
       P.slow = 0;
       if (P.tier === 0 && quality === 'high') setPerfTier((P.tier = 1));
-      else if (P.dpr > 0.76) setDpr((P.dpr = Math.max(0.75, P.dpr - 0.25)));
+      else if (P.dpr > 1.01) setDpr((P.dpr = Math.max(1, P.dpr - 0.25)));
+      else if (quality !== 'low') {
+        // still slow at native-ish resolution: a lighter preset (smaller shadows, coarser sea, no bloom) before going blurry
+        setSettings({ quality: quality === 'high' ? 'medium' : 'low' });
+        onRoundEvent?.({ type: 'toast', text: `画面有点卡，已自动把画质调到「${quality === 'high' ? '中' : '低'}」（设置里可改回）` });
+      } else if (P.dpr > 0.76) setDpr((P.dpr = Math.max(0.75, P.dpr - 0.25)));
       else if (P.tier < 2) setPerfTier((P.tier = 2));
     } else if (P.fast >= 8 && P.dpr < P.max - 0.01) {
       P.fast = 0;

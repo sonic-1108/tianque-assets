@@ -6,6 +6,7 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
+import { useSettings } from '../settings';
 import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray, StormSky } from './maps/Ocean';
 import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
 import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, shipFloorAt, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
@@ -986,7 +987,12 @@ function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
   // the sea in its own frame: the hull's waterline footprint keeps the chop down right beside it
-  const ocean = useMemo(() => makeOcean({ halfW: 12.6, z0: -50, z1: 41 }, { halfW: 11.8, z0: SHIP_LAYOUT.hold.z0 - 0.2, z1: SHIP_LAYOUT.hold.z1 + 0.2 }), []);
+  // the sea's mesh: fine enough to draw the waves smoothly, no finer than this machine can afford
+  const { quality } = useSettings();
+  const ocean = useMemo(
+    () => makeOcean({ halfW: 12.6, z0: -50, z1: 41 }, { halfW: 11.8, z0: SHIP_LAYOUT.hold.z0 - 0.2, z1: SHIP_LAYOUT.hold.z1 + 0.2 }, quality === 'high' ? 260 : quality === 'medium' ? 180 : 120),
+    [quality],
+  );
   const worldRef = useRef<THREE.Group>(null);
   const deckMat = useRef<THREE.MeshStandardMaterial>(null);
   const crash = useRef({ t: -1, side: 1, last: 0, wet: 0 });

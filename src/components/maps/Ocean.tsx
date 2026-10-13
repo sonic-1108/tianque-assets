@@ -40,11 +40,71 @@ const GLSL_WAVES = `
   ${['dx', 'dz', 'k', 'w', 'A', 'D', 'ph'].map((f) => `const float W_${f}[NW] = float[NW](${W.map((v) => (v as any)[f].toFixed(5)).join(', ')});`).join('\n  ')}
 `;
 
+/**
+ * Noise baked once into a small tiling texture, so the shaders read it instead of computing it: a laptop GPU (a
+ * MacBook Air at retina resolution) can't afford a dozen hashed fractal noises per pixel across the whole sea.
+ * R: 4-octave fractal noise; G: the same, offset; B: single-octave value noise. 8 lattice cells across the tile.
+ */
+let fbmTex: THREE.DataTexture | null = null;
+export function fbmTexture() {
+  if (fbmTex) return fbmTex;
+  const S = 256;
+  const P = 8;
+  const rnd = (x: number, y: number, seed: number) => {
+    const h = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const vnoise = (x: number, y: number, period: number, seed: number) => {
+    const xi = Math.floor(x);
+    const yi = Math.floor(y);
+    const fx = x - xi;
+    const fy = y - yi;
+    const ux = fx * fx * (3 - 2 * fx);
+    const uy = fy * fy * (3 - 2 * fy);
+    const m = (v: number) => ((v % period) + period) % period;
+    const a = rnd(m(xi), m(yi), seed);
+    const b = rnd(m(xi + 1), m(yi), seed);
+    const c = rnd(m(xi), m(yi + 1), seed);
+    const d = rnd(m(xi + 1), m(yi + 1), seed);
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+  };
+  const fbm = (x: number, y: number, seed: number) => {
+    let v = 0;
+    let amp = 0.5;
+    let f = 1;
+    for (let o = 0; o < 4; o++) {
+      v += amp * vnoise(x * f, y * f, P * f, seed + o * 3);
+      f *= 2;
+      amp *= 0.5;
+    }
+    return v;
+  };
+  const data = new Uint8Array(S * S * 4);
+  for (let j = 0; j < S; j++)
+    for (let i = 0; i < S; i++) {
+      const x = (i / S) * P;
+      const y = (j / S) * P;
+      const o = (j * S + i) * 4;
+      data[o] = Math.round(fbm(x, y, 1) * 255);
+      data[o + 1] = Math.round(fbm(x + 3.3, y + 5.1, 7) * 255);
+      data[o + 2] = Math.round(vnoise(x, y, P, 13) * 255);
+      data[o + 3] = 255;
+    }
+  const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.needsUpdate = true;
+  fbmTex = t;
+  return t;
+}
+/** drop-in noise() / fbm() for the shaders, read from the baked texture (needs a uFbm sampler uniform) */
 const NOISE = /* glsl */ `
-  float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
-  float noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); vec2 u=f*f*(3.0-2.0*f);
-    return mix(mix(hash(i),hash(i+vec2(1,0)),u.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x),u.y); }
-  float fbm(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.03; a*=0.5; } return v; }
+  uniform sampler2D uFbm;
+  float noise(vec2 p){ return texture2D(uFbm, p * 0.125).b; }
+  float fbm(vec2 p){ return texture2D(uFbm, p * 0.125).r; }
+  float fbm2(vec2 p){ return texture2D(uFbm, p * 0.125).g; }
 `;
 
 /** a square grid that is fine near the ship and coarse toward the horizon */
@@ -78,10 +138,11 @@ function oceanGeometry(n = 300, half = 300) {
   return g;
 }
 
-export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?: { halfW: number; z0: number; z1: number }) {
+export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?: { halfW: number; z0: number; z1: number }, res = 300) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
+      uFbm: { value: fbmTexture() },
       uFog: { value: new THREE.Color('#1b2530') },
       uLightning: { value: 0 },
       // the rogue wave: x = side (±1), y = where its face is (x in the sea frame), z = height, w = how much it's breaking
@@ -210,7 +271,7 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
         foam += smoothstep(0.55, 0.8, streak) * smoothstep(0.0, 1.5, vCrest) * 0.25;
         // churn along the hull: thin streaks of foam that peel away from the planking
         float hz = 1.0 - smoothstep(-0.5, 2.2, vHull + (noise(vP * 0.4 + uTime * 0.2) - 0.5) * 2.0);
-        float churnN = fbm(vP * 0.75 + vec2(uTime * 0.3, -uTime * 0.5)) + fbm(vP * 2.3 - uTime * 0.4) * 0.35;
+        float churnN = fbm(vP * 0.75 + vec2(uTime * 0.3, -uTime * 0.5)) + fbm2(vP * 2.3 - uTime * 0.4) * 0.35;
         foam += hz * smoothstep(0.62, 0.9, churnN) * 0.55;
         // the rogue wave's lip and face: spume torn off the crest, streaking down its front
         // the big wave: a churning white lip, and thin streaks of foam running down its face
@@ -225,7 +286,7 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
-  return { geometry: oceanGeometry(), material: mat };
+  return { geometry: oceanGeometry(res), material: mat };
 }
 
 let softTex: THREE.Texture | null = null;
@@ -311,7 +372,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
     const m = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 } },
+      uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 }, uFbm: { value: fbmTexture() } },
       vertexShader: /* glsl */ `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: /* glsl */ `
         uniform float uT; uniform float uSide; uniform float uBeam; uniform float uTime; uniform float uLightning; varying vec2 vP;
@@ -456,12 +517,12 @@ export function StormSky({ fog }: { fog: string }) {
         side: THREE.BackSide,
         depthWrite: false,
         fog: false,
-        uniforms: { uTime: { value: 0 }, uLightning: { value: 0 }, uFlash: { value: new THREE.Vector3(0.4, 0.5, -0.7).normalize() }, uFog: { value: new THREE.Color(fog) } },
+        uniforms: { uTime: { value: 0 }, uLightning: { value: 0 }, uFlash: { value: new THREE.Vector3(0.4, 0.5, -0.7).normalize() }, uFog: { value: new THREE.Color(fog) }, uFbm: { value: fbmTexture() } },
         vertexShader: /* glsl */ `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
         fragmentShader: /* glsl */ `
           uniform float uTime; uniform float uLightning; uniform vec3 uFlash; uniform vec3 uFog; varying vec3 vDir;
           ${NOISE}
-          float fbm5(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p=p*2.07+vec2(1.7,9.2); a*=0.5; } return v; }
+          float fbm5(vec2 p){ return fbm(p) * 0.82 + (fbm2(p * 3.7 + 1.3) - 0.5) * 0.22 + 0.09; }
           void main(){
             vec3 d = normalize(vDir);
             float up = max(d.y, 0.0);

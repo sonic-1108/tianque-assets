@@ -652,6 +652,21 @@ function hullMaterial({ map, emissive }: { map: THREE.Texture; emissive: THREE.T
   return m;
 }
 
+/** many copies of one mesh in a single draw call */
+function Instances({ geometry, material, matrices, castShadow = false }: { geometry: THREE.BufferGeometry; material: THREE.Material; matrices: THREE.Matrix4[]; castShadow?: boolean }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  React.useLayoutEffect(() => {
+    const im = ref.current;
+    if (!im) return;
+    matrices.forEach((m, i) => im.setMatrixAt(i, m));
+    im.instanceMatrix.needsUpdate = true;
+    im.computeBoundingSphere();
+  }, [matrices]);
+  return <instancedMesh ref={ref} args={[geometry, material, matrices.length]} castShadow={castShadow} />;
+}
+const M4 = (x: number, y: number, z: number, sx = 1, sy = 1, sz = 1, rz = 0) =>
+  new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rz)), new THREE.Vector3(sx, sy, sz));
+
 // ---------------------------------------------------------------- the hull with its fittings
 export function ShipHull() {
   const { hull, bulwark, mats, stanchions, guns, eyes } = useMemo(() => {
@@ -695,6 +710,10 @@ export function ShipHull() {
     });
     return { hull: buildHullGeometry(), bulwark: buildBulwark(), mats, stanchions: st, guns: gn, eyes: ey };
   }, []);
+  const gunGeo = useMemo(
+    () => ({ port: new THREE.BoxGeometry(0.08, 0.5, 0.56), barrel: new THREE.CylinderGeometry(0.1, 0.13, 0.6, 10), ring: new THREE.TorusGeometry(0.1, 0.035, 6, 12) }),
+    [],
+  );
   const stRef = useRef<THREE.InstancedMesh>(null);
   React.useLayoutEffect(() => {
     const im = stRef.current;
@@ -705,25 +724,16 @@ export function ShipHull() {
   }, [stanchions]);
   return (
     <group>
-      <mesh geometry={hull} material={mats.hull} castShadow receiveShadow />
+      <mesh geometry={hull} material={mats.hull} receiveShadow />
       <mesh geometry={bulwark.inner} material={mats.inner} receiveShadow />
       <mesh geometry={bulwark.cap} material={mats.cap} castShadow />
       <instancedMesh ref={stRef} args={[undefined, undefined, stanchions.length]} material={mats.post} castShadow>
         <boxGeometry args={[1, 1, 1]} />
       </instancedMesh>
-      {guns.map((g, i) => (
-        <group key={i} position={g.p}>
-          <mesh material={mats.port} position={[g.s * 0.02, 0, 0]}>
-            <boxGeometry args={[0.08, 0.5, 0.56]} />
-          </mesh>
-          <mesh material={mats.bronze} position={[g.s * 0.3, 0.02, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.1, 0.13, 0.6, 10]} />
-          </mesh>
-          <mesh material={mats.bronze} position={[g.s * 0.6, 0.02, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <torusGeometry args={[0.1, 0.035, 6, 12]} />
-          </mesh>
-        </group>
-      ))}
+      {/* gunports, barrels and muzzle rings: three draw calls for the lot */}
+      <Instances geometry={gunGeo.port} material={mats.port} matrices={guns.map((g) => M4(g.p[0] + g.s * 0.02, g.p[1], g.p[2]))} />
+      <Instances geometry={gunGeo.barrel} material={mats.bronze} matrices={guns.map((g) => M4(g.p[0] + g.s * 0.3, g.p[1] + 0.02, g.p[2], 1, 1, 1, Math.PI / 2))} />
+      <Instances geometry={gunGeo.ring} material={mats.bronze} matrices={guns.map((g) => M4(g.p[0] + g.s * 0.6, g.p[1] + 0.02, g.p[2], 1, 1, 1, Math.PI / 2))} />
       {eyes.map((e, i) => (
         <mesh key={i} material={mats.eye} position={e.p} rotation={e.rot}>
           <planeGeometry args={[2.4, 1.6]} />
@@ -887,6 +897,7 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
     return { mats, slabs, strips, floors, beams, walls, bowFace, treads, Wfull };
   }, [deckMap, boxes]);
   const { mats, slabs, strips, floors, beams, walls, bowFace, treads, Wfull } = built;
+  const unitBox = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
   React.useLayoutEffect(() => {
     if (deckMatRef) deckMatRef.current = mats.deck;
   }, [mats, deckMatRef]);
@@ -953,7 +964,7 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
     <group>
       {slabs.map((s, i) => (
         <group key={i}>
-          <mesh geometry={s.top} material={mats.deck} receiveShadow castShadow />
+          <mesh geometry={s.top} material={mats.deck} receiveShadow />
           <mesh geometry={s.under} material={mats.ceil} />
           {s.raised && (
             <>
@@ -975,11 +986,7 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
       {floors.map((g, i) => (
         <mesh key={i} geometry={g} material={mats.deck} receiveShadow />
       ))}
-      {beams.map((b, i) => (
-        <mesh key={i} position={[b.x, b.y, b.z]} material={mats.beam}>
-          <boxGeometry args={[b.w, 0.22, 0.2]} />
-        </mesh>
-      ))}
+      <Instances geometry={unitBox} material={mats.beam} matrices={beams.map((b) => M4(b.x, b.y, b.z, b.w, 0.22, 0.2))} />
       {wallMeshes.map((w, i) => (
         <mesh key={i} position={w.pos} material={w.material} castShadow receiveShadow>
           <boxGeometry args={w.size} />
@@ -1017,6 +1024,19 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
         </group>
       ))}
 
+      {/* lamplight in the cabins: only the few rooms nearest the camera get a real light (each one costs every pixel) */}
+      <LightPool
+        anchors={[
+          { p: [0, L.holdY + 2.6, T.z], i: 14, d: 16 },
+          { p: [0, L.holdY + 2.6, 7], i: 8, d: 13 },
+          { p: [0, 2.8, -32], i: 10, d: 13 },
+          ...L.tiers.map((t, i) => {
+            const y = i === 0 ? 0 : L.tiers[i - 1].y;
+            const z0 = t.edge + L.wallT;
+            return { p: [0, y + 2.8, (z0 + back) / 2] as [number, number, number], i: i === 0 ? 12 : 9, d: i === 0 ? 18 : 13 };
+          }),
+        ]}
+      />
       {/* ---- the hold (-1): floor, end bulkheads, the table of food, lanterns on the beams ---- */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.holdY + 0.005, (hold.z0 + hold.z1) / 2]} material={mats.hold} receiveShadow>
         <planeGeometry args={[hold.side * 2, hold.z1 - hold.z0]} />
@@ -1036,8 +1056,7 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
       {[[-4, T.z - 4], [4, T.z + 3], [-3, 2], [3, 9], [0, -21]].map(([x, z], i) => (
         <ShipLantern key={i} position={[x, -L.slab - 0.25, z]} seed={20 + i} glow={1.2} />
       ))}
-      <pointLight position={[0, L.holdY + 2.6, T.z]} color="#ffa458" intensity={14} distance={16} decay={1.3} />
-      <pointLight position={[0, L.holdY + 2.6, 7]} color="#ff9a50" intensity={8} distance={13} decay={1.4} />
+
 
       {/* ---- the fore cabin under the forecastle: crew quarters and an armoury rack ---- */}
       <group position={[0, 0, L.foreEnd + 0.3]}>
@@ -1057,7 +1076,7 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
       </group>
       <ShipLantern position={[-4, L.fore.y - L.slab - 0.05, -30]} seed={11} />
       <ShipLantern position={[4, L.fore.y - L.slab - 0.05, -34]} seed={12} />
-      <pointLight position={[0, 2.8, -32]} color="#ffa458" intensity={10} distance={13} decay={1.4} />
+
 
       {/* ---- the stern tower: a cabin on each storey with a wall of lit stern windows, carpets and lanterns ---- */}
       {L.tiers.map((t, i) => {
@@ -1075,7 +1094,7 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
             </mesh>
             <ShipLantern position={[-3.5, t.y - L.slab - 0.05, zc - 1]} seed={13 + i * 2} />
             <ShipLantern position={[3.5, t.y - L.slab - 0.05, zc + 1]} seed={14 + i * 2} />
-            <pointLight position={[0, y + 2.8, zc]} color="#ffa458" intensity={i === 0 ? 12 : 9} distance={i === 0 ? 18 : 13} decay={1.4} />
+
           </group>
         );
       })}
@@ -1120,6 +1139,44 @@ export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.T
         <cylinderGeometry args={[0.16, 0.32, 8, 8]} />
       </mesh>
     </group>
+  );
+}
+
+/** a few point lights that move to whichever lamp anchors are nearest the camera (and fade as they change) */
+function LightPool({ anchors, count = 3 }: { anchors: { p: [number, number, number]; i: number; d: number }[]; count?: number }) {
+  const lights = useRef<(THREE.PointLight | null)[]>([]);
+  const cur = useRef<number[]>([]);
+  useFrame((st, dt) => {
+    const c = st.camera.position;
+    const order = anchors
+      .map((a, k) => ({ k, d: Math.hypot(a.p[0] - c.x, (a.p[1] - c.y) * 2.5, a.p[2] - c.z) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, count)
+      .map((e) => e.k);
+    lights.current.forEach((l, n) => {
+      if (!l) return;
+      const want = order[n];
+      if (cur.current[n] !== want) {
+        // fade out, then jump to the new lamp
+        l.intensity = Math.max(0, l.intensity - dt * 60);
+        if (l.intensity <= 0.01) {
+          cur.current[n] = want;
+          const a = anchors[want];
+          l.position.set(a.p[0], a.p[1], a.p[2]);
+          l.distance = a.d;
+        }
+        return;
+      }
+      const a = anchors[want];
+      l.intensity = Math.min(a.i, l.intensity + dt * 30);
+    });
+  });
+  return (
+    <>
+      {Array.from({ length: count }, (_, n) => (
+        <pointLight key={n} ref={(el) => (lights.current[n] = el)} color="#ffa458" intensity={0} distance={14} decay={1.4} />
+      ))}
+    </>
   );
 }
 
@@ -1556,6 +1613,21 @@ export function SternCastle({ base }: { base: number }) {
 }
 
 /** hanging paper lantern on a short pole; emissive with a soft glow sprite (no light of its own) */
+/** shared bits of every hanging lantern (one geometry / material each, however many lanterns) */
+let lanternKit: { cord: THREE.BufferGeometry; body: THREE.BufferGeometry; cordMat: THREE.Material; bodyMat: THREE.Material } | null = null;
+function lantern() {
+  if (lanternKit) return lanternKit;
+  const body = new THREE.SphereGeometry(0.24, 12, 8);
+  body.scale(1, 1.2, 1);
+  lanternKit = {
+    cord: new THREE.CylinderGeometry(0.01, 0.01, 0.4, 3),
+    body,
+    cordMat: new THREE.MeshBasicMaterial({ color: '#222' }),
+    bodyMat: new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.26, 0.08), toneMapped: false }),
+  };
+  return lanternKit;
+}
+/** hanging paper lantern on a short cord; emissive with a soft glow sprite (no light of its own) */
 export function ShipLantern({ position, glow = 1, seed = 0 }: { position: [number, number, number]; glow?: number; seed?: number }) {
   const ref = useRef<THREE.Group>(null);
   useFrame((st) => {
@@ -1565,28 +1637,13 @@ export function ShipLantern({ position, glow = 1, seed = 0 }: { position: [numbe
       ref.current.rotation.x = Math.sin(t * 1.1 + seed * 1.7) * 0.08;
     }
   });
+  const kit = lantern();
   const spr = useMemo(() => new THREE.SpriteMaterial({ map: glowTexture(), color: '#ff9a50', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.32 * glow }), [glow]);
   return (
     <group position={position}>
       <group ref={ref}>
-        <mesh position={[0, -0.2, 0]}>
-          <cylinderGeometry args={[0.01, 0.01, 0.4, 4]} />
-          <meshStandardMaterial color="#222" />
-        </mesh>
-        <mesh position={[0, -0.62, 0]} scale={[1, 1.2, 1]}>
-          <sphereGeometry args={[0.24, 14, 10]} />
-          <meshBasicMaterial color={new THREE.Color(1.6, 0.26, 0.08)} toneMapped={false} />
-        </mesh>
-        {[-0.9, -0.34].map((y) => (
-          <mesh key={y} position={[0, y, 0]}>
-            <cylinderGeometry args={[0.1, 0.1, 0.06, 10]} />
-            <meshStandardMaterial color="#3a2a12" metalness={0.6} roughness={0.4} />
-          </mesh>
-        ))}
-        <mesh position={[0, -1.05, 0]}>
-          <cylinderGeometry args={[0.012, 0.03, 0.22, 5]} />
-          <meshBasicMaterial color="#c9a050" />
-        </mesh>
+        <mesh geometry={kit.cord} material={kit.cordMat} position={[0, -0.2, 0]} />
+        <mesh geometry={kit.body} material={kit.bodyMat} position={[0, -0.62, 0]} />
         <sprite material={spr} position={[0, -0.62, 0]} scale={[1.2, 1.2, 1]} />
       </group>
     </group>
@@ -1597,7 +1654,7 @@ export function ShipLantern({ position, glow = 1, seed = 0 }: { position: [numbe
 export function RailLanterns() {
   const list = useMemo(() => {
     const out: { x: number; z: number; s: number }[] = [];
-    for (const z of [-37, -31, -20, -10, 0, 10, 18, 25.5, 31, 37.5]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
+    for (const z of [-37, -20, -4, 10, 25.5, 37.5]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
     return out;
   }, []);
   return (
