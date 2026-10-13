@@ -278,10 +278,13 @@ export function forestFloor(x: number, z: number, steps = true) {
     if (Math.abs(lx) < T.w / 2 + 1.4 && Math.abs(lz) < T.d / 2 + 1.4) h = H.h + T.podium;
     else if (!steps) {
       /* bare slope */
-    } else if (Math.abs(lx) < PODIUM_STEPS.half && lz > 0 && lz < T.d / 2 + 1.4 + PODIUM_STEPS.n * PODIUM_STEPS.dz)
-      h = H.h + T.podium * (1 - Math.ceil((lz - T.d / 2 - 1.4) / PODIUM_STEPS.dz) / (PODIUM_STEPS.n + 1));
-    else if (Math.abs(lx) < HILL_STAIRS.half) {
-      const t = hillStairTread(lz);
+    } else if (Math.abs(lx) < PODIUM_STEPS.half && lz > 0 && lz < T.d / 2 + 1.4 + PODIUM_STEPS.n * PODIUM_STEPS.dz) {
+      // walked as a ramp through the middle of the treads: feet stay within half a riser of the stone, and nobody
+      // hops 30 cm a step (the drawn steps are the real treads)
+      const f = (lz - T.d / 2 - 1.4) / PODIUM_STEPS.dz;
+      h = H.h + T.podium * Math.min(1, Math.max(0, 1 - (f + 0.5) / (PODIUM_STEPS.n + 1)));
+    } else if (Math.abs(lx) < HILL_STAIRS.half) {
+      const t = hillStairRamp(lz);
       if (t !== null) h = Math.max(h, t);
     }
   }
@@ -302,6 +305,13 @@ export function hillStairTread(lz: number): number | null {
   // equal risers: the slope is cut into flat treads, never below the hillside
   const nat = H.h * sstepF(H.r, H.top, lz);
   return Math.min(H.h, Math.ceil(nat / S.rise - 1e-4) * S.rise);
+}
+/** the hill stairs as walked: a smooth slope through the middle of the treads (null off the flight) */
+export function hillStairRamp(lz: number): number | null {
+  const H = FOREST.hill;
+  const S = HILL_STAIRS;
+  if (lz < S.z0 || lz > H.r - 0.15) return null;
+  return Math.min(H.h, H.h * sstepF(H.r, H.top, lz) + S.rise / 2);
 }
 /** Is (x, z) on the footbridge deck? Returns the deck height, or null */
 export function bridgeDeck(x: number, z: number) {
@@ -967,7 +977,7 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
 //    4  the roof of the stern tower
 // Every raised deck is reached by stairs running fore-and-aft along both bulwarks.
 // ----------------------------------------------------------------------
-export interface ShipBox { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: 'slab' | 'wall' | 'tread' | 'block' | 'fill' | 'table' | 'rail' }
+export interface ShipBox { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: 'slab' | 'wall' | 'tread' | 'block' | 'fill' | 'table' | 'rail'; flight?: ShipFlight }
 export interface ShipFlight { foot: number; head: number; y0: number; rise: number; n: number; side: boolean }
 const H = 4.4;
 export const SHIP_LAYOUT = {
@@ -1067,6 +1077,7 @@ function buildShipBoxes() {
         const x1 = sd > 0 ? W : sd < 0 ? -L.stairX : hold.hole.x;
         // (a hair of overlap so there's never a crack between two steps)
         box(x0, x1, f.y0, f.y0 + (f.rise * (k + 1)) / f.n, Math.min(za, zb) - 0.01, Math.max(za, zb) + 0.01, 'tread');
+        out[out.length - 1].flight = f;
       }
   return out;
 }
@@ -1096,8 +1107,17 @@ function shipNear(x: number, z: number): ShipBox[] {
 /** the highest surface under (x, z) that a fighter whose feet are at y stands on (steps up to 0.6 m count) */
 export function shipFloorAt(x: number, z: number, y: number) {
   let g = SHIP_LAYOUT.holdY;
-  for (const b of shipNear(x, z)) if (b.y1 <= y + 0.6 && b.y1 > g && inXZ(b, x, z)) g = b.y1;
+  for (const b of shipNear(x, z)) {
+    if (!inXZ(b, x, z)) continue;
+    // a stair is walked as a ramp through the middle of its treads (no 30 cm hop per step)
+    const top = b.flight ? stairRamp(b.flight, z) : b.y1;
+    if (top <= y + 0.6 && top > g) g = top;
+  }
   return g;
+}
+function stairRamp(f: ShipFlight, z: number) {
+  const t = Math.min(1, Math.max(0, (z - f.foot) / (f.head - f.foot) + 0.5 / f.n));
+  return f.y0 + f.rise * t;
 }
 /** the underside of whatever is overhead (a deck above a cabin); Infinity in the open */
 export function shipCeilAt(x: number, z: number, y: number) {

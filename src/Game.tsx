@@ -870,11 +870,7 @@ function GameImpl({
       const g = groupRefs[i].current;
       if (!g) continue;
       const c = fighters[i];
-      // the body glides up and down stair treads instead of hopping 30 cm a step (physics stays exact)
-      const V = visYRef.current;
-      const want = c.pos[1] + footLift(c, i);
-      V[i] = c.isGrounded && Math.abs(want - V[i]) < 0.7 ? THREE.MathUtils.damp(V[i], want, 16, rawDt) : want;
-      g.position.set(c.pos[0], V[i], c.pos[2]);
+      g.position.set(c.pos[0], c.pos[1] + footLift(c, i), c.pos[2]);
       g.rotation.y = c.rotY;
       g.updateMatrixWorld(true);
     }
@@ -891,7 +887,7 @@ function GameImpl({
         for (let k = 0; k < 6; k++) {
           const a = (k / 6) * Math.PI * 2;
           const h = terrainHeight(map.id, c.pos[0] + Math.cos(a) * 0.24, c.pos[2] + Math.sin(a) * 0.24) - c.pos[1];
-          if (h < 1) target = Math.max(target, h);
+          if (h < 0.2) target = Math.max(target, h); // a gentle slope, not a step up (stairs are ramps already)
         }
         target = Math.min(0.45, target * 0.85);
       }
