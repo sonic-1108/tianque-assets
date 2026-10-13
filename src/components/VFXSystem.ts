@@ -611,11 +611,26 @@ export class VFXSystem {
   trails: RibbonTrail[] = [];
 
   monk!: MonkFX;
+  /** 锁链钩: up to two chains in flight, each a run of iron links ending in a hook */
+  private chains = [0, 1].map(() => {
+    const LINKS = 70;
+    const link = new THREE.TorusGeometry(0.055, 0.016, 6, 10);
+    const iron = new THREE.MeshStandardMaterial({ color: '#9aa1aa', metalness: 0.85, roughness: 0.35, emissive: '#1b2430', emissiveIntensity: 0.6 });
+    const links = new THREE.InstancedMesh(link, iron, LINKS);
+    links.frustumCulled = false;
+    links.count = 0;
+    const hook = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.32, 8), iron);
+    hook.visible = false;
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: '#7dd3fc', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }));
+    hook.add(glow);
+    return { links, hook, from: new THREE.Vector3(), to: new THREE.Vector3(), life: 0, max: 1, LINKS };
+  });
 
   constructor() {
     this.root.name = 'VFXSystem';
     this.monk = new MonkFX(this.root);
     this.root.add(this.sparks.points, this.dust.points, this.debris.mesh);
+    for (const ch of this.chains) this.root.add(ch.links, ch.hook);
     for (const sl of this.slots) this.root.add(sl.vortex.group, sl.pillar.group);
 
     const plane = new THREE.PlaneGeometry(1, 1);
@@ -832,6 +847,7 @@ export class VFXSystem {
     const o = pool.find((x) => !x.visible);
     if (!o) return null;
     o.visible = true;
+    o.scale.setScalar(1); // a pooled dart may have been enlarged last time
     const u = o.userData;
     if (trail !== undefined && u.tail) (u.tail as THREE.MeshBasicMaterial).color.set(variant === 'gold' ? '#fbbf24' : variant === 'poison' ? '#4ade80' : trail);
     if (u.silk) {
@@ -1146,9 +1162,55 @@ export class VFXSystem {
   }
 
   // ---------------- tick ----------------
+  /** 锁链钩: a chain shoots out from `from` to `to` and reels back in over `life` seconds */
+  chain(from: THREE.Vector3, to: THREE.Vector3, life = 0.55) {
+    const ch = this.chains.find((c) => c.life <= 0) ?? this.chains[0];
+    ch.from.copy(from);
+    ch.to.copy(to);
+    ch.life = ch.max = life;
+  }
+  private updateChains(dt: number) {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const q2 = new THREE.Quaternion();
+    const dir = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    const one = new THREE.Vector3(1, 1, 1);
+    for (const ch of this.chains) {
+      if (ch.life <= 0) {
+        ch.links.count = 0;
+        ch.hook.visible = false;
+        continue;
+      }
+      ch.life -= dt;
+      const u = 1 - Math.max(0, ch.life) / ch.max;
+      // out fast (first 35%), a beat at full stretch, then reeled in
+      const reach = u < 0.35 ? 1 - Math.pow(1 - u / 0.35, 3) : u < 0.5 ? 1 : 1 - (u - 0.5) / 0.5;
+      dir.copy(ch.to).sub(ch.from);
+      const full = dir.length();
+      dir.normalize();
+      const len = full * reach;
+      const n = Math.min(ch.LINKS, Math.floor(len / 0.085));
+      q.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+      for (let k = 0; k < n; k++) {
+        p.copy(ch.from).addScaledVector(dir, k * 0.085);
+        p.y += Math.sin((k / Math.max(1, n)) * Math.PI) * 0.12 * (1 - reach); // a little slack while it flies
+        q2.setFromAxisAngle(dir, k % 2 ? Math.PI / 2 : 0).multiply(q);
+        m.compose(p, q2, one);
+        ch.links.setMatrixAt(k, m);
+      }
+      ch.links.count = n;
+      ch.links.instanceMatrix.needsUpdate = true;
+      ch.hook.visible = reach > 0.02;
+      ch.hook.position.copy(ch.from).addScaledVector(dir, len);
+      ch.hook.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    }
+  }
+
   update(dt: number) {
     this.time += dt;
     this.monk.update(dt);
+    this.updateChains(dt);
     if (this.timers.length) {
       const due: (() => void)[] = [];
       this.timers = this.timers.filter((x) => {

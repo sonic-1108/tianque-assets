@@ -132,6 +132,8 @@ const WEATHER_CYCLE = Object.values(WEATHER).reduce((a, b) => a + b, 0);
 /** A flying 暗器 (dart, pin or boomerang) */
 interface Projectile {
   kind: 'dart' | 'pin' | 'boomerang';
+  /** turn rate (rad/s) toward the opponent: 影刃's knives curve in */
+  home?: number;
   obj: THREE.Object3D;
   slot: number;
   pos: THREE.Vector3;
@@ -333,7 +335,7 @@ function GameImpl({
   // Online host: record every top-level effect and sound so the guest can replay them
   useEffect(() => {
     if (!net || net.role !== 'host') return;
-    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail', 'palmStrike', 'palmPush', 'buddha', 'bell', 'bellHit', 'zenField', 'glyph'];
+    const VFX_CALLS = ['ring', 'flash', 'decal', 'sparkBurst', 'embers', 'dustPuff', 'rocks', 'damageNumber', 'slashMark', 'fireColumn', 'spiral', 'chargeWave', 'meteor', 'setVortex', 'pillarAt', 'groundSlam', 'ultimateImpact', 'hitImpact', 'dartTrail', 'palmStrike', 'palmPush', 'buddha', 'bell', 'bellHit', 'zenField', 'glyph', 'chain'];
     const enc = (x: any) =>
       x instanceof THREE.Vector3 ? { v3: [+x.x.toFixed(3), +x.y.toFixed(3), +x.z.toFixed(3)] } : x instanceof THREE.Color ? '#' + x.getHexString() : typeof x === 'function' ? null : x;
     let depth = 0;
@@ -2432,13 +2434,15 @@ function GameImpl({
           const f = fwdOf(intent.faceYaw);
           const along = f.x * (foe.pos[0] - c.pos[0]) + f.z * (foe.pos[2] - c.pos[2]);
           const across = Math.abs(f.x * (foe.pos[2] - c.pos[2]) - f.z * (foe.pos[0] - c.pos[0]));
-          const caught = foeOk && along > 0.5 && along < 13 && across < 1.6 + along * 0.08;
-          const reach = caught ? along : 13;
-          // the chain: a line of links out to the target (or full length on a miss)
-          for (let k = 1; k <= 14; k++) {
-            const u = (k / 14) * reach;
-            vfx.sparkBurst(vB.set(c.pos[0] + f.x * u, c.pos[1] + 1.2, c.pos[2] + f.z * u), 1, '#9ca3af', 0.4, 0.06, UP, 0.3);
+          // generous aim: anyone within about 35 degrees of where you're facing
+          const caught = foeOk && along > 0.5 && along < 13 && across < Math.max(1.6, along * 0.7);
+          const hand = vC.set(c.pos[0] + f.x * 0.4, c.pos[1] + 1.25, c.pos[2] + f.z * 0.4).clone();
+          const end = caught ? new THREE.Vector3(foe.pos[0], foe.pos[1] + 1.1, foe.pos[2]) : hand.clone().addScaledVector(f, 13);
+          if (caught) {
+            c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
+            intent.faceYaw = c.rotY;
           }
+          vfx.chain(hand, end, caught ? 0.6 : 0.5);
           if (caught) {
             foe.pull = { x: c.pos[0] + f.x * 1.4, z: c.pos[2] + f.z * 1.4, t: 0.5 };
             applyHit(slot, c, foe, 40, { knock: 0, state: 'hitstun', dur: 0.8, noStop: true });
@@ -2480,10 +2484,17 @@ function GameImpl({
         else applyHit(slot, c, foe, 115, { heavy: true, knock: 6, dur: 0.5, shake: 0.25 });
       }
       // 飞刀: three knives in a fan
-      if (st === 'skill_2' && cfg && t >= cfg.startup && !c.hasHitCurrentMove) {
-        c.hasHitCurrentMove = true;
-        const from = vA.set(c.pos[0] + fwd.x * 0.5, c.pos[1] + 1.3, c.pos[2] + fwd.z * 0.5).clone();
-        for (const k of [-2, -1, 0, 1, 2]) fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, k * 0.13), 38, { dmg: 62, knock: 2.5, dur: 0.28, stagger: true, noPassive: true });
+      // 飞刀: five knives in a rapid volley that curve in on the target (a hit refreshes 瞬影)
+      if (st === 'skill_2' && cfg && t >= cfg.startup) {
+        const due = Math.min(5, 1 + Math.floor((t - cfg.startup) / 0.05));
+        while ((c.multiHitCounter ?? 0) < due) {
+          const k = c.multiHitCounter ?? 0;
+          c.multiHitCounter = k + 1;
+          const side = (k - 2) * 0.22;
+          const from = vA.set(c.pos[0] + fwd.x * 0.5, c.pos[1] + 1.3, c.pos[2] + fwd.z * 0.5).clone();
+          fireProjectile(slot, c, 'dart', from, aimDir(c, foe, fwd, from, side), 30, { dmg: 58, knock: 1.5, dur: 0.28, stagger: true, noPassive: true, home: 7, life: 1.1 });
+          gameAudio.playSwingLight();
+        }
       }
       // 千影杀: six strikes from every side, then the cut that drops them
       if (st === 'ultimate' && cfg) {
@@ -2693,7 +2704,7 @@ function GameImpl({
       from: THREE.Vector3,
       dir: THREE.Vector3,
       speed: number,
-      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean; target?: THREE.Vector3; stagger?: boolean }
+      o: { dmg: number; knock?: number; dur?: number; root?: number; noStop?: boolean; life?: number; noPassive?: boolean; target?: THREE.Vector3; stagger?: boolean; home?: number }
     ) {
       let pierce = false;
       let dmg = o.dmg;
@@ -2707,6 +2718,7 @@ function GameImpl({
       const poisoned = (c.poisonBuff ?? 0) > 0 && c.actionState.startsWith('attack_');
       const obj = vfx.takeProjectile(kind, colorFor(slot, c), pierce ? 'gold' : poisoned ? 'poison' : 'normal');
       if (!obj) return;
+      if (c.classId === 'Shadowblade') obj.scale.setScalar(1.8); // 影刃's knives: big enough to see coming
       if (pierce) {
         c.pierceNext = false;
         obj.scale.multiplyScalar(1.35);
@@ -2728,6 +2740,7 @@ function GameImpl({
         root: o.root ?? 0,
         noStop: !!o.noStop,
         stagger: !!o.stagger,
+        home: o.home,
         spent: false,
         traveled: 0,
         back: false,
@@ -2970,7 +2983,15 @@ function GameImpl({
               dead = true;
               break;
             }
-          } else p.pos.addScaledVector(p.vel, step / 2);
+          } else {
+            if (p.home && def.hp > 0 && !p.spent) {
+              const sp = p.vel.length();
+              const want = vA.set(def.pos[0] - p.pos.x, def.pos[1] + 1.1 - p.pos.y, def.pos[2] - p.pos.z).normalize();
+              const cur = vB.copy(p.vel).normalize();
+              p.vel.copy(cur.lerp(want, Math.min(1, (p.home * step) / 2)).normalize().multiplyScalar(sp));
+            }
+            p.pos.addScaledVector(p.vel, step / 2);
+          }
           p.traveled += (p.vel.length() * step) / 2;
           if (p.kind !== 'boomerang') {
             if (p.pos.y < fy(p.pos.x, p.pos.z) + 0.02) {
