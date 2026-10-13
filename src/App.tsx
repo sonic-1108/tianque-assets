@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense } from 'react';
 import { startPresence, setPresence } from './presence';
+import { Lobby, NameGate } from './components/lobby/Lobby';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { usePlayground, usePlaygroundGameLifecycle } from './utils/usePlayground';
@@ -725,239 +726,102 @@ export default function App() {
 
       {/* NICKNAME: asked before the first match */}
       {(!nickname || editingName) && !modelProgress.isLoading && (
-        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              saveNickname(nameDraft);
-            }}
-            className="w-full max-w-md bg-zinc-950 border border-amber-500/50 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4"
-          >
-            <div className="text-4xl font-black text-amber-300 tracking-[0.4em]" style={{ fontFamily: '"Noto Serif SC", "Songti SC", serif' }}>
-              天阙
-            </div>
-            <div className="text-sm text-zinc-300">初入江湖，报上你的名号</div>
-            <input
-              autoFocus
-              value={nameDraft}
-              maxLength={12}
-              onChange={(e) => setNameDraft(e.target.value)}
-              placeholder="例如：一剑西来"
-              className="w-full bg-black border border-zinc-700 focus:border-amber-400 outline-none rounded-xl px-4 py-3 text-center text-lg font-bold text-white"
-            />
-            <div className="text-[11px] text-zinc-500">最多 12 个字，会显示在血条和联机对手的屏幕上</div>
-            <div className="flex gap-2 w-full">
-              {editingName && nickname && (
-                <button type="button" onClick={() => setEditingName(false)} className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 text-sm font-bold">
-                  取消
-                </button>
-              )}
-              <button
-                type="submit"
-                disabled={!nameDraft.trim()}
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-black text-sm font-black tracking-widest"
-              >
-                进入江湖
-              </button>
-            </div>
-          </form>
-        </div>
+        <NameGate value={nameDraft} onChange={setNameDraft} onSubmit={() => saveNickname(nameDraft)} onCancel={editingName && nickname ? () => setEditingName(false) : undefined} />
       )}
 
-      {/* MAP SELECT */}
+      {/* LOBBY: hero, opponent, battlefield */}
       {isMapSelectOpen && !modelProgress.isLoading && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm overflow-y-auto flex justify-center p-4">
-          <div className="w-full max-w-5xl my-auto">
-            <div className="text-center mb-5">
-              <h2 className="text-3xl font-black text-amber-300 tracking-widest">选择战场</h2>
-              <div className="mt-1 text-xs text-zinc-300">
-                名号：<span className="font-bold text-amber-200">{nickname || '未设置'}</span>
-                <button
-                  onClick={() => {
-                    setNameDraft(nickname);
-                    setEditingName(true);
-                  }}
-                  className="ml-2 text-[11px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded px-1.5"
-                >
-                  改名
-                </button>
-              </div>
-              <p className="text-xs text-zinc-400 mt-1">每张地图都有自己的机制和主场职业，主场职业在该地图伤害 +10%</p>
-            </div>
-            {/* ONLINE 1v1 */}
-            <div className="mb-4 bg-zinc-900/80 border border-sky-700/60 rounded-2xl p-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-black text-sky-300">
-                  🌐 联机对战（1v1）<span className="ml-2 text-[10px] font-normal text-zinc-500">版本 {__BUILD__}</span>
-                </span>
-                {net && (
-                  <button onClick={leaveNet} className="text-[11px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded-lg px-2 py-0.5">
-                    退出联机
-                  </button>
-                )}
-              </div>
+        <Lobby
+          nickname={nickname}
+          onRename={() => {
+            setNameDraft(nickname);
+            setEditingName(true);
+          }}
+          heroes={PLAYABLE}
+          playerClass={playerClass}
+          enemyClass={enemyClass}
+          onPlayerClass={(cid) => {
+            gameAudio.playCrispClick();
+            setPlayerClass(cid);
+            setScore({ player: 0, enemy: 0 });
+          }}
+          onEnemyClass={(cid) => {
+            gameAudio.playCrispClick();
+            setEnemyClass(cid);
+            setScore({ player: 0, enemy: 0 });
+          }}
+          online={!!net}
+          aiEnabled={aiEnabled}
+          onAI={(on) => {
+            if (aiEnabledRef.current !== on) toggleAI();
+          }}
+          mapId={mapId}
+          onSelectMap={(id) => {
+            gameAudio.playCrispClick();
+            setMapId(id);
+          }}
+          onStart={() => {
+            if (!MAPS[mapId].available) return;
+            gameAudio.playCrispClick();
+            setRoundBanner(null);
+            setIsMapSelectOpen(false);
+            requestGameFocus();
+          }}
+          hostPicks={net?.role === 'guest'}
+          onlineBadge={!net ? '' : net.status === 'connected' ? '已连上' : net.status === 'error' ? '出错' : '等待中'}
+          version={`版本 ${__BUILD__}`}
+          onlinePanel={
+            <div className="tq-on">
               {!net && (
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <button
-                    onClick={() => startNet('host', makeRoomCode())}
-                    className="flex-1 bg-sky-700 hover:bg-sky-600 text-white text-sm font-bold rounded-xl py-2"
-                  >
-                    创建房间
+                <>
+                  <button className="tq-btn" onClick={() => startNet('host', makeRoomCode())}>
+                    开房间
                   </button>
-                  <div className="flex-1 flex gap-2">
+                  <div className="tq-on-row">
                     <input
+                      className="tq-input"
                       value={joinCode}
                       onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
-                      placeholder="输入房间号"
-                      className="flex-1 min-w-0 bg-zinc-950 border border-zinc-700 rounded-xl px-3 text-sm font-mono tracking-widest text-white"
+                      placeholder="房间号"
                     />
-                    <button
-                      disabled={joinCode.length !== 5}
-                      onClick={() => startNet('guest', joinCode)}
-                      className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-sm font-bold rounded-xl px-4"
-                    >
+                    <button className="tq-btn ghost" disabled={joinCode.length !== 5} onClick={() => startNet('guest', joinCode)}>
                       加入
                     </button>
                   </div>
-                </div>
+                </>
               )}
               {net && (
-                <div className="text-xs text-zinc-300 space-y-1">
+                <>
                   {net.role === 'host' && (
-                    <div className="flex items-center gap-2">
-                      房间号
-                      <span className="font-mono text-lg font-black tracking-[0.3em] text-amber-300">{net.code}</span>
-                      <button onClick={() => navigator.clipboard?.writeText(net.code)} className="text-[11px] border border-zinc-700 rounded px-1.5">
+                    <div className="tq-on-row">
+                      房间号 <span className="tq-on-code">{net.code}</span>
+                      <button className="tq-btn ghost" onClick={() => navigator.clipboard?.writeText(net.code)}>
                         复制
                       </button>
                     </div>
                   )}
                   {net.status === 'opening' && <div>正在连接联机服务器…</div>}
-                  {net.status === 'waiting' && (
-                    <div>
-                      把房间号发给朋友，让他打开同一个网址，在这里输入房间号加入。等待对手…
-                      {net.relayState && <span className="ml-2 text-[11px] text-zinc-400">{net.relayState}</span>}
-                    </div>
-                  )}
+                  {net.status === 'waiting' && <div>把房间号发给朋友，在这里输入就能加入。等待对手…{net.relayState && <div style={{ fontSize: 11 }}>{net.relayState}</div>}</div>}
                   {net.status === 'connecting' && (
                     <div>
                       正在加入房间 {net.code}…
-                      <span className="ml-2 text-[11px] text-zinc-400">
-                        {net.relayState ? net.relayState : net.iceState === 'checking' ? '正在打通两台电脑之间的连接' : net.iceState === 'new' || !net.iceState ? '正在联系房主' : net.iceState === 'disconnected' ? '连接不稳定，重试中' : ''}
-                      </span>
+                      <div style={{ fontSize: 11 }}>{net.relayState ? net.relayState : net.iceState === 'checking' ? '正在打通两台电脑之间的连接' : net.iceState === 'disconnected' ? '连接不稳定，重试中' : '正在联系房主'}</div>
                     </div>
                   )}
                   {net.status === 'connected' && net.role === 'host' && (
-                    <div className="text-emerald-300 font-bold">
-                      对手已加入 ✓ 对手职业：{CLASS_CONFIGS[net.remoteClass || enemyClass].name}。选好你的职业，点一张地图开打。
-                    </div>
+                    <div className="tq-on-ok">对手已加入（{CLASS_CONFIGS[net.remoteClass || enemyClass].name}）· 选好侠客和战场就出征</div>
                   )}
-                  {net.status === 'connected' && net.role === 'guest' && <div className="text-emerald-300 font-bold">已加入房间 ✓ 选好你的职业，等房主选地图开打。</div>}
-                  {net.status === 'connected' && (
-                    <div className="text-[11px] text-zinc-400">{net.via === 'relay' ? '线路：中转服务器（直连没打通，延迟会高一些）' : '线路：直连'}</div>
-                  )}
-                  {net.status === 'error' && <div className="text-red-400 font-bold">{net.error}</div>}
-                </div>
+                  {net.status === 'connected' && net.role === 'guest' && <div className="tq-on-ok">已加入 · 选好侠客，等房主选战场</div>}
+                  {net.status === 'connected' && <div style={{ fontSize: 11 }}>{net.via === 'relay' ? '线路：中转（直连没打通，延迟高一些）' : '线路：直连'}</div>}
+                  {net.status === 'error' && <div className="tq-on-err">{net.error}</div>}
+                  <button className="tq-btn ghost" onClick={leaveNet}>
+                    退出联机
+                  </button>
+                </>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-              {(net ? ([['你的职业', playerClass, setPlayerClass]] as const) : ([['你的职业', playerClass, setPlayerClass], ['对手职业', enemyClass, setEnemyClass]] as const)).map(([label, cur, set]) => (
-                <div key={label} className="bg-zinc-900/80 border border-zinc-700 rounded-2xl p-3">
-                  <div className="text-xs font-bold text-zinc-300 mb-2">{label}</div>
-                  <div className="flex gap-2">
-                    {PLAYABLE.map((cid) => {
-                      const cc = CLASS_CONFIGS[cid];
-                      const on = cur === cid;
-                      return (
-                        <button
-                          key={cid}
-                          onClick={() => {
-                            gameAudio.playCrispClick();
-                            set(cid);
-                            setScore({ player: 0, enemy: 0 });
-                          }}
-                          className={`flex-1 text-left rounded-xl border px-3 py-2 transition-all ${
-                            on ? (cid === 'Shadowblade' ? 'border-cyan-400 bg-indigo-950/60 ring-2 ring-cyan-400/50' : cid === 'Ranger' ? 'border-teal-400 bg-teal-900/40 ring-2 ring-teal-400/50' : cid === 'BuddhistMage' ? 'border-yellow-300 bg-yellow-900/30 ring-2 ring-yellow-300/50' : 'border-amber-400 bg-amber-900/40 ring-2 ring-amber-400/50') : 'border-zinc-700 hover:border-zinc-500'
-                          }`}
-                        >
-                          <div className="text-sm font-black text-white">{cc.name} · {cc.defaultCharacter}</div>
-                          <div className="text-[10px] text-zinc-400 leading-snug mt-0.5">{cc.role}</div>
-                          <div className="text-[10px] text-zinc-500 mt-0.5">生命 {cc.hp} · 移速 {Math.round((cc.speedRatio || 1) * 100)}%</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {!net && (
-              <div className="flex items-center justify-center gap-2 -mt-2 mb-3">
-                <span className="text-[11px] text-zinc-400">对手：</span>
-                {([
-                  [true, '会还手的 AI'],
-                  [false, '木桩（站着不动）'],
-                ] as const).map(([on, label]) => (
-                  <button
-                    key={label}
-                    onClick={() => {
-                      if (aiEnabledRef.current !== on) toggleAI();
-                    }}
-                    className={`text-[11px] px-3 py-1 rounded-full border transition-all ${
-                      aiEnabled === on ? 'bg-amber-500 text-black border-amber-400 font-bold' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="text-center text-[11px] text-zinc-500 mb-4">选好职业后点一张地图开打 · 游戏里按 P 随时让对手停手或恢复</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {MAP_ORDER.map((id) => {
-                const m = MAPS[id];
-                const selected = id === mapId;
-                return (
-                  <button
-                    key={id}
-                    disabled={!m.available || net?.role === 'guest'}
-                    onClick={() => {
-                      gameAudio.playCrispClick();
-                      setMapId(id);
-                      setRoundBanner(null);
-                      setIsMapSelectOpen(false);
-                      requestGameFocus();
-                    }}
-                    className={`text-left rounded-2xl border p-4 bg-gradient-to-br ${m.cardGradient} transition-all ${
-                      m.available ? 'hover:scale-[1.02] hover:border-amber-400 cursor-pointer' : 'opacity-50 cursor-not-allowed'
-                    } ${selected ? 'border-amber-400 ring-2 ring-amber-400/60' : 'border-zinc-700'}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xl font-black text-white">{m.icon} {m.name}</span>
-                      <span
-                        className={`ml-auto text-[10px] font-black px-2 py-0.5 rounded-full ${m.sizeClass === '50Q' ? 'bg-emerald-400 text-black' : 'bg-white/15 text-zinc-200'}`}
-                        title={m.sizeClass === '50Q' ? '大地图：面积约为 10Q 地图的五倍' : '小地图：竞技场'}
-                      >
-                        {m.sizeClass ?? '10Q'}
-                      </span>
-                      {!m.available && <span className="text-[10px] bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-full">敬请期待</span>}
-                      {selected && m.available && <span className="text-[10px] bg-amber-500 text-black font-bold px-2 py-0.5 rounded-full">当前</span>}
-                    </div>
-                    <p className="text-xs text-zinc-300 mt-1">{m.subtitle}</p>
-                    <ul className="mt-3 space-y-1">
-                      {m.mechanics.map((x) => (
-                        <li key={x} className="text-[11px] text-zinc-200">• {x}</li>
-                      ))}
-                    </ul>
-                    <div className="mt-3 pt-2 border-t border-white/10 text-[11px] text-amber-200">
-                      主场职业：<span className="font-bold">{m.homeClassName}</span> · {m.homeBonus}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-center text-[11px] text-zinc-500 mt-4">游戏中按 M 可随时回到这里</p>
-          </div>
-        </div>
+          }
+        />
       )}
 
       {/* Round result banner */}
