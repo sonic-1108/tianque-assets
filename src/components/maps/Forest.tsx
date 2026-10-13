@@ -399,6 +399,22 @@ function Ground() {
             vec3 nP = normalize(abs(det) * nW - grad * 3.0);
             normal = normalize((viewMatrix * vec4(nP, 0.0)).xyz);
           }`
+        )
+        .replace(
+          '#include <lights_fragment_end>',
+          `#include <lights_fragment_end>
+          #if NUM_DIR_LIGHTS > 0
+          // under the river no hard shadows: seen through the water a body's (or a branch's) shadow on the bed
+          // reads as a dark ghost double. Light under water is diffused anyway.
+          {
+            float under = smoothstep(uWaterY - 0.02, uWaterY - 0.25, vWP.y);
+            if (under > 0.0) {
+              vec3 L = directionalLights[0].direction;
+              vec3 full = directionalLights[0].color * saturate(dot(normal, L)) * BRDF_Lambert(diffuseColor.rgb);
+              reflectedLight.directDiffuse = mix(reflectedLight.directDiffuse, max(reflectedLight.directDiffuse, full * 0.8), under);
+            }
+          }
+          #endif`
         );
     };
     return { geo: terrainGeometry(), mat: m };

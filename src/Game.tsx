@@ -4301,6 +4301,13 @@ function GameImpl({
     /** 青冥古林 water: deep water floats you at the surface (swimming), shallow water just slows you */
     function updateWater(c: CombatantState) {
       const was = !!c.swimming;
+      // standing in the shallows or at the water's edge: the sun would throw this fighter's shadow onto the river bed
+      {
+        let wet = false;
+        if (c.pos[1] < FOREST.waterY + 1.6)
+          for (const [ox, oz] of [[0, 0], [1.4, 0], [-1.4, 0], [0, 1.4], [0, -1.4]]) if (waterDepth(c.pos[0] + ox, c.pos[2] + oz) > 0.02) wet = true;
+        c.wading = wet;
+      }
       const deep = waterDepth(c.pos[0], c.pos[2]) > FOREST.waterY - FOREST.swimY - 0.05;
       c.swimming = deep && c.isGrounded && c.treeClimb === undefined && c.pos[1] <= FOREST.swimY + 0.12;
       if (c.swimming && !was) {

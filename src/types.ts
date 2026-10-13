@@ -188,6 +188,7 @@ export interface CombatantState {
   ultTarget?: boolean; // 千影杀: a target was in reach when it began
   burrowT?: number; // 遁地: seconds left under the ground
   ballista?: number; // 怒海战船: manning this mounted crossbow
+  wading?: boolean; // 青冥古林: in or at the edge of the river (no body shadow: it would ghost on the river bed)
   pull?: { x: number; z: number; t: number }; // 锁链钩: being dragged toward (x, z)
   mantraShots?: number; // 六字真言 syllables released so far
   zenField?: { x: number; z: number; t: number }; // 禅定结界 centre and seconds left

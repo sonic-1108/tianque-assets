@@ -735,14 +735,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.opacity = lastOpRef.current;
           m.depthWrite = lastOpRef.current >= 1;
         }
-        o.castShadow = lastOpRef.current >= 1 && !c.swimming;
+        o.castShadow = lastOpRef.current >= 1 && !c.swimming && !c.wading;
       };
       model.traverse(apply);
       weaponsRef.current.right?.group.traverse(apply);
       weaponsRef.current.left?.group.traverse(apply);
     }
     // in the water the body's shadow lands on the river bed and shows through as a dark double: no shadow while swimming
-    const shadowOn = !c.swimming;
+    const shadowOn = !c.swimming && !c.wading;
     if (shadowOn !== castRef.current) {
       castRef.current = shadowOn;
       model.traverse((o: any) => {
