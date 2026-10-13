@@ -316,7 +316,7 @@ function daggerModel() {
           });
           const box = new THREE.Box3().setFromObject(g.scene);
           const len = Math.max(0.01, box.max.y - box.min.y);
-          g.scene.scale.setScalar(0.42 / len); // about 42 cm from pommel to point
+          g.scene.scale.setScalar(0.32 / len); // about 32 cm from pommel to point
           resolve(g.scene);
         },
         undefined,
@@ -331,9 +331,9 @@ function buildDagger(glow: THREE.Color) {
     .then((proto) => group.add(proto.clone()))
     .catch(() => group.add(buildKnife(glow).group)); // missing file: a plain knife stands in
   const base = new THREE.Object3D();
-  base.position.y = 0.1;
+  base.position.y = 0.08;
   const tip = new THREE.Object3D();
-  tip.position.y = 0.36;
+  tip.position.y = 0.27;
   group.add(base, tip);
   const fullerMat = new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0 });
   const steel = new THREE.MeshStandardMaterial({ color: '#c8d3de', metalness: 0.9, roughness: 0.25 });
