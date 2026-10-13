@@ -79,7 +79,7 @@ function paintRange(cv: HTMLCanvasElement, r: Range) {
   for (let x = -20; x < W + 20; x += 1) {
     const y0 = y(x);
     const len = r.depth * (0.5 + 0.7 * n3(x * 0.012));
-    const a = r.density * (0.62 + 0.55 * n2(x * 0.08)) * (0.85 + 0.3 * n(x * 0.6));
+    const a = r.density * (0.78 + 0.28 * n2(x * 0.03)) * (0.95 + 0.1 * n(x * 0.6));
     const grd = g.createLinearGradient(0, y0, 0, y0 + len);
     grd.addColorStop(0, ink(a));
     grd.addColorStop(0.08, ink(a * 0.8));
@@ -305,6 +305,99 @@ function LoneBoat() {
   );
 }
 
+
+/** a painted cloud bank: soft white puffs on a flat base, a grey wash on the underside (the way clouds are laid in ink) */
+function paintCloud(seed: number) {
+  const cw = 640;
+  const ch = 240;
+  const c = document.createElement('canvas');
+  c.width = cw;
+  c.height = ch;
+  const g = c.getContext('2d')!;
+  const r = rng(seed);
+  const base = ch * 0.68;
+  const n = 16 + Math.floor(r() * 8);
+  for (let k = 0; k < n; k++) {
+    const t = k / (n - 1);
+    const x = cw * (0.1 + t * 0.8) + (r() - 0.5) * 30;
+    const hump = Math.sin(t * Math.PI); // taller in the middle
+    const rad = 34 + hump * (40 + r() * 40) + r() * 14;
+    const y = base - rad * (0.45 + r() * 0.25) * (0.6 + hump * 0.6);
+    const grd = g.createRadialGradient(x, y, 0, x, y, rad);
+    grd.addColorStop(0, 'rgba(251,248,241,0.98)');
+    grd.addColorStop(0.55, 'rgba(249,245,237,0.9)');
+    grd.addColorStop(1, 'rgba(247,243,234,0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(x, y, rad, 0, Math.PI * 2);
+    g.fill();
+  }
+  // a flat, soft underside
+  const flat = g.createLinearGradient(0, base - 20, 0, base + 30);
+  flat.addColorStop(0, 'rgba(249,245,237,0.85)');
+  flat.addColorStop(1, 'rgba(249,245,237,0)');
+  g.fillStyle = flat;
+  g.beginPath();
+  g.ellipse(cw / 2, base, cw * 0.4, 26, 0, 0, Math.PI * 2);
+  g.fill();
+  // ink wash shading the lower half, only where there's cloud
+  g.globalCompositeOperation = 'source-atop';
+  const sh = g.createLinearGradient(0, base - ch * 0.45, 0, base + 20);
+  sh.addColorStop(0, 'rgba(110,108,100,0)');
+  sh.addColorStop(0.7, 'rgba(110,108,100,0.09)');
+  sh.addColorStop(1, 'rgba(90,88,80,0.18)');
+  g.fillStyle = sh;
+  g.fillRect(0, 0, cw, ch);
+  g.globalCompositeOperation = 'source-over';
+  return c.toDataURL('image/png');
+}
+let cloudImgs: string[] | null = null;
+
+/** clouds drifting across the scene at different depths: [shape, top %, width vw, seconds per pass, layer, opacity, direction] */
+const CLOUDS: [number, number, number, number, number, number, 1 | -1][] = [
+  [0, 6, 20, 150, 1, 0.85, 1],
+  [2, 16, 14, 115, 1, 0.75, -1],
+  [1, 34, 26, 125, 3, 0.95, 1],
+  [0, 43, 34, 175, 3, 0.9, -1],
+  [2, 52, 30, 100, 6, 0.95, 1],
+  [1, 60, 42, 145, 6, 0.9, -1],
+  [0, 70, 38, 85, 8, 0.9, 1],
+  [2, 78, 48, 120, 8, 0.85, -1],
+];
+
+function Clouds() {
+  const [imgs, setImgs] = React.useState<string[] | null>(cloudImgs);
+  useEffect(() => {
+    if (imgs) return;
+    idle(() => {
+      cloudImgs ??= [paintCloud(3), paintCloud(14), paintCloud(27)];
+      setImgs(cloudImgs);
+    }, 1);
+  }, [imgs]);
+  if (!imgs) return null;
+  return (
+    <>
+      {CLOUDS.map(([v, top, w, dur, z, op, dir], i) => (
+        <div
+          key={i}
+          className="tq-pcloud"
+          style={{
+            zIndex: z,
+            top: `${top}%`,
+            width: `${w}vw`,
+            opacity: op,
+            animationName: dir > 0 ? 'tqCloudR' : 'tqCloudL',
+            animationDuration: `${dur}s`,
+            animationDelay: `${-((i * 37) % dur)}s`,
+          }}
+        >
+          <img src={imgs[v]} alt="" draggable={false} style={{ animationDelay: `${-i * 1.3}s`, transform: dir < 0 ? 'scaleX(-1)' : undefined }} />
+        </div>
+      ))}
+    </>
+  );
+}
+
 const paintFar = (c: HTMLCanvasElement) => paintRange(c, RANGES[0]);
 const paintMid = (c: HTMLCanvasElement) => paintRange(c, RANGES[1]);
 const paintNear = (c: HTMLCanvasElement) => paintRange(c, RANGES[2]);
@@ -335,12 +428,13 @@ export function InkBackdrop({ poem = true }: { poem?: boolean }) {
       <div className="tq-lake">
         <LoneBoat />
       </div>
+      <Clouds />
       <Canvas paint={paintPine} z={10} className="tq-pine" order={3} />
       {poem && (
         <div className="tq-poem">
           <span>只在此山中</span>
           <span>云深不知处</span>
-          <i>天阙</i>
+          <i>天<br />阙</i>
         </div>
       )}
       <div className="tq-vignette" />
@@ -369,11 +463,11 @@ const INK_CSS = `
 .tq-boat { width:100%; height:auto; display:block; animation:tqBoat 9s ease-in-out infinite; }
 @keyframes tqBoat { 0%,100% { transform:translateY(0) rotate(-.6deg); } 50% { transform:translateY(2px) rotate(.6deg); } }
 .tq-pine { mix-blend-mode:multiply; opacity:.95; }
-.tq-poem { position:absolute; z-index:11; right:5.5vw; top:22%; display:flex; flex-direction:row-reverse; gap:.6em; align-items:flex-start;
+.tq-poem { position:absolute; z-index:11; right:5vw; top:9%; display:flex; flex-direction:row-reverse; gap:.6em; align-items:flex-start;
   font-family:"Ma Shan Zheng","STXingkai","KaiTi",serif; font-size:clamp(20px,1.9vw,30px); color:rgba(30,27,23,.78); }
 .tq-poem span { writing-mode:vertical-rl; letter-spacing:.18em; }
 .tq-poem span:nth-child(2) { margin-top:1.6em; }
-.tq-poem i { font-style:normal; writing-mode:vertical-rl; align-self:flex-end; margin-top:6.6em; font-size:.42em; color:#f5ecdc; background:#a8362a; padding:4px 2px; border-radius:2px; letter-spacing:.1em; }
+.tq-poem i { font-style:normal; align-self:flex-end; margin-top:6.4em; width:1.15em; text-align:center; font-size:.5em; line-height:1.15; color:#f5ecdc; background:#a8362a; padding:4px 0; border-radius:2px; }
 .tq-vignette { position:absolute; inset:0; z-index:12; pointer-events:none;
   background:radial-gradient(120% 95% at 50% 45%, rgba(0,0,0,0) 62%, rgba(90,70,40,.16) 100%); }
 .tq-birds { position:absolute; z-index:1; width:60px; left:30%; top:20%; opacity:.55; }
@@ -393,5 +487,11 @@ const INK_CSS = `
 .tq-sash2 { animation-delay:-.7s; }
 @keyframes tqSash { 0%,100% { transform:skewY(0deg) scaleX(1); } 50% { transform:skewY(-5deg) scaleX(1.04); } }
 @media (max-width: 900px) { .tq-poem { display:none; } }
-@media (prefers-reduced-motion: reduce) { .tq-cloud, .tq-crane, .tq-crane-bob, .tq-wing, .tq-sash, .tq-boat { animation:none; } }
+/* painted clouds: drift right across or left across, and rise and fall a little as they go */
+.tq-pcloud { position:absolute; left:0; pointer-events:none; animation-timing-function:linear; animation-iteration-count:infinite; will-change:transform; }
+.tq-pcloud img { display:block; width:100%; height:auto; animation:tqCloudBob 14s ease-in-out infinite; filter:blur(1px); }
+@keyframes tqCloudR { from { transform:translateX(-55vw); } to { transform:translateX(105vw); } }
+@keyframes tqCloudL { from { transform:translateX(105vw); } to { transform:translateX(-55vw); } }
+@keyframes tqCloudBob { 0%,100% { translate:0 0; } 50% { translate:0 -10px; } }
+@media (prefers-reduced-motion: reduce) { .tq-pcloud, .tq-pcloud img, .tq-cloud, .tq-crane, .tq-crane-bob, .tq-wing, .tq-sash, .tq-boat { animation:none; } }
 `;
