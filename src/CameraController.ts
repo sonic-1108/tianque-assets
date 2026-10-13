@@ -16,6 +16,9 @@ export class CameraController {
   pendingDY = 0;
   private sensitivity = 0.0025;
   private smoothPos = new THREE.Vector3();
+  private outPos = new THREE.Vector3();
+  private boomK = 1;
+  private followY = 0;
   private initialized = false;
   private onMouseMove: (e: MouseEvent) => void;
   private onWheel: (e: WheelEvent) => void;
@@ -61,7 +64,10 @@ export class CameraController {
     this.pitch = THREE.MathUtils.clamp(this.pitch, 0.05, 1.15);
 
     // Look slightly over the right shoulder so the character sits left of the crosshair
-    const target = playerPos.clone().add(new THREE.Vector3(0, 1.55, 0));
+    // the height the camera follows is eased, so walking up stairs (a 30 cm hop per step) glides instead of jolting
+    if (!this.initialized || Math.abs(playerPos.y - this.followY) > 2.5) this.followY = playerPos.y;
+    else this.followY = THREE.MathUtils.damp(this.followY, playerPos.y, 10, dt);
+    const target = new THREE.Vector3(playerPos.x, this.followY + 1.55, playerPos.z);
     target.x += Math.cos(this.yaw) * 0.45;
     target.z -= Math.sin(this.yaw) * 0.45;
 
@@ -78,25 +84,29 @@ export class CameraController {
       this.initialized = true;
     }
     this.smoothPos.lerp(desired, 1 - Math.exp(-22 * dt));
+    // where the camera actually goes: the free position, pulled in along the boom when something is in the way.
+    // Pulling in is instant (never see through a wall); letting back out is gradual, so the camera doesn't flicker
+    // in and out every frame as the boom grazes a step or a corner.
+    const P = this.outPos.copy(this.smoothPos);
     if (this.groundAt) {
-      // walk the boom from the player outward: if a slope is in the way, pull the camera in front of it
+      let k = 1;
       const n = this.solidAt ? 20 : 8;
       for (let i = 1; i <= n; i++) {
         const t = i / n;
         const x = target.x + (this.smoothPos.x - target.x) * t;
         const z = target.z + (this.smoothPos.z - target.z) * t;
         const y = target.y + (this.smoothPos.y - target.y) * t;
-        const g = this.groundAt(x, z) + 0.45;
-        if (y < g || (this.solidAt && this.solidAt(x, y, z))) {
-          const keep = Math.max(0.35, (i - 1) / n);
-          this.smoothPos.set(target.x + (this.smoothPos.x - target.x) * keep, Math.max(g, target.y + (this.smoothPos.y - target.y) * keep), target.z + (this.smoothPos.z - target.z) * keep);
+        if (y < this.groundAt(x, z) + 0.45 || (this.solidAt && this.solidAt(x, y, z))) {
+          k = Math.max(0.35, (i - 1) / n);
           break;
         }
       }
-      this.smoothPos.y = Math.max(this.smoothPos.y, this.groundAt(this.smoothPos.x, this.smoothPos.z) + 0.45);
+      this.boomK = k < this.boomK ? k : this.boomK + (k - this.boomK) * (1 - Math.exp(-3.5 * dt));
+      P.set(target.x + (this.smoothPos.x - target.x) * this.boomK, target.y + (this.smoothPos.y - target.y) * this.boomK, target.z + (this.smoothPos.z - target.z) * this.boomK);
+      P.y = Math.max(P.y, this.groundAt(P.x, P.z) + 0.45);
       // in a cabin: keep under the ceiling
-      if (this.ceilAt) this.smoothPos.y = Math.min(this.smoothPos.y, this.ceilAt(this.smoothPos.x, this.smoothPos.z) - 0.25);
-    }
+      if (this.ceilAt) P.y = Math.min(P.y, this.ceilAt(P.x, P.z) - 0.25);
+    } else this.boomK = 1;
 
     // Calculate Trauma Shake offset
     if (this.shakeTrauma > 0) {
@@ -107,13 +117,13 @@ export class CameraController {
       const shakeOffsetZ = (Math.sin(this.shakeTime * 1.1) + (Math.random() - 0.5) * 0.4) * 0.3 * shakePower;
 
       this.camera.position.set(
-        this.smoothPos.x + shakeOffsetX,
-        this.smoothPos.y + shakeOffsetY,
-        this.smoothPos.z + shakeOffsetZ
+        P.x + shakeOffsetX,
+        P.y + shakeOffsetY,
+        P.z + shakeOffsetZ
       );
       this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 2.2);
     } else {
-      this.camera.position.copy(this.smoothPos);
+      this.camera.position.copy(P);
     }
 
     this.camera.lookAt(target);

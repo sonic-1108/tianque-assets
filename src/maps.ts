@@ -1112,8 +1112,8 @@ export function shipBlocked(x: number, z: number, y: number, r = 0.38) {
   return false;
 }
 /** is the point inside a solid (camera, projectiles) */
-export function shipSolidAt(x: number, y: number, z: number, r = 0) {
-  for (const b of r <= SG.pad ? shipNear(x, z) : SHIP_BOXES) if (y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
+export function shipSolidAt(x: number, y: number, z: number, r = 0, skipSteps = false) {
+  for (const b of r <= SG.pad ? shipNear(x, z) : SHIP_BOXES) if (!(skipSteps && (b.kind === 'tread' || b.kind === 'rail')) && y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
   return false;
 }
 // the crates and crossbow posts stand on whatever deck is under them, and only there

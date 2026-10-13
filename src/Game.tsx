@@ -329,6 +329,7 @@ function GameImpl({
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0, 0, 0]);
+  const visYRef = useRef([0, 0, 0, 0]);
   const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
@@ -869,7 +870,11 @@ function GameImpl({
       const g = groupRefs[i].current;
       if (!g) continue;
       const c = fighters[i];
-      g.position.set(c.pos[0], c.pos[1] + footLift(c, i), c.pos[2]);
+      // the body glides up and down stair treads instead of hopping 30 cm a step (physics stays exact)
+      const V = visYRef.current;
+      const want = c.pos[1] + footLift(c, i);
+      V[i] = c.isGrounded && Math.abs(want - V[i]) < 0.7 ? THREE.MathUtils.damp(V[i], want, 16, rawDt) : want;
+      g.position.set(c.pos[0], V[i], c.pos[2]);
       g.rotation.y = c.rotY;
       g.updateMatrixWorld(true);
     }
@@ -899,7 +904,7 @@ function GameImpl({
         // the camera stays in the room the player is in: under the cabin ceiling, and never behind a wall
         controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, p1.pos[1] + 0.8);
         controller.ceilAt = (x: number, z: number) => shipCeilAt(x, z, p1.pos[1] + 0.5);
-        controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18);
+        controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18, true); // the camera glides over steps and rails
       } else {
         controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), p1.pos[1] - 2.5) : null;
         controller.ceilAt = null;
