@@ -2,22 +2,24 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { seeded } from '../Scenery';
+import { SHIP_LAYOUT } from '../../maps';
 
 // ---------------------------------------------------------------
-// 怒海战船: a 福船-style war junk. Ship frame: deck at y = 0, bow toward -z.
-// The fighters play on |x| <= 7, |z| <= 19; everything here stays outside that box
-// or lies flat on the deck.
+// 怒海战船: a great 福船-style war junk, five storeys. Ship frame: main deck at y = 0, bow toward -z.
+// The fighters play on |x| <= 11.8, |z| <= 40 (see SHIP_LAYOUT); the hull wraps round that box.
 // ---------------------------------------------------------------
-export const SHIP = { stern: 29.6, bow: -35, beam: 9.6, wall: 0.45 };
+export const SHIP = { stern: 43, bow: -56, beam: 12.9, wall: 0.45 };
+const BOW_T = -39.5; // full beam aft of here, then the bow narrows to its stem
+const STERN_T = 40.4;
 
 /** half-width of the hull at the gunwale */
 export function hullW(z: number) {
-  if (z > 25.4) {
-    const t = Math.min(1, (z - 25.4) / (SHIP.stern - 25.4));
-    return SHIP.beam - 1.3 * t * t;
+  if (z > STERN_T) {
+    const t = Math.min(1, (z - STERN_T) / (SHIP.stern - STERN_T));
+    return SHIP.beam - 1.6 * t * t;
   }
-  if (z < -23) {
-    const t = Math.min(1, (-23 - z) / (-23 - SHIP.bow));
+  if (z < BOW_T) {
+    const t = Math.min(1, (BOW_T - z) / (BOW_T - SHIP.bow));
     return SHIP.beam * Math.pow(Math.max(0, 1 - Math.pow(t, 1.8)), 0.75);
   }
   return SHIP.beam;
@@ -26,23 +28,23 @@ const ss = (a: number, b: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
-/** gunwale height above the main deck: steps up around each raised deck, sweeps up at the bow and the stern */
+/** gunwale height above the main deck: steps up a storey around each raised deck, sweeps up at the bow */
 export function sheer(z: number) {
+  const L = SHIP_LAYOUT;
   let h = 1.3;
-  h += 3.3 * ss(-18.0, -19.6, z); // forecastle bulwark
-  if (z < -22) h += 2.6 * Math.pow((-22 - z) / (-22 - SHIP.bow), 2);
-  h += 3.3 * ss(17.2, 18.8, z); // quarterdeck
-  h += 3.2 * ss(21.4, 23.0, z); // poop deck
-  if (z > 25) h += 0.6 * Math.min(1, (z - 25) / (SHIP.stern - 25));
+  h += L.H * ss(L.fore.edge + 1.6, L.fore.edge, z); // forecastle
+  if (z < -40) h += 3.2 * Math.pow((-40 - z) / (-40 - SHIP.bow), 2);
+  for (const t of L.tiers) h += L.H * ss(t.edge - 1.6, t.edge, z); // each storey of the stern tower
+  if (z > 40) h += 0.6 * Math.min(1, (z - 40) / (SHIP.stern - 40));
   return h;
 }
 function keelY(z: number) {
-  if (z < -24) return -5.4 + 3.6 * Math.pow(Math.min(1, (-24 - z) / (-24 - SHIP.bow)), 1.5);
-  if (z > 23) return -5.4 + 1.4 * Math.min(1, (z - 23) / (SHIP.stern - 23));
-  return -5.4;
+  if (z < -38) return -9.6 + 6.6 * Math.pow(Math.min(1, (-38 - z) / (-38 - SHIP.bow)), 1.5);
+  if (z > 34) return -9.6 + 3.2 * Math.min(1, (z - 34) / (SHIP.stern - 34));
+  return -9.6;
 }
-const bowness = (z: number) => (z < -23 ? Math.min(1, (-23 - z) / (-23 - SHIP.bow)) : 0);
-const sternness = (z: number) => (z > 25.4 ? Math.min(1, (z - 25.4) / (SHIP.stern - 25.4)) : 0);
+const bowness = (z: number) => (z < BOW_T ? Math.min(1, (BOW_T - z) / (BOW_T - SHIP.bow)) : 0);
+const sternness = (z: number) => (z > STERN_T ? Math.min(1, (z - STERN_T) / (SHIP.stern - STERN_T)) : 0);
 // round-bilged section with a little flare at the top, keel at v = 1
 const PROF: [number, number][] = [
   [1.0, 0], [1.02, 0.08], [1.025, 0.16], [1.01, 0.28], [0.97, 0.42], [0.88, 0.57], [0.74, 0.7], [0.55, 0.81], [0.33, 0.9], [0.13, 0.97], [0, 1],
@@ -61,7 +63,11 @@ export function hullPoint(z: number, j: number, side: number) {
   return new THREE.Vector3(side * hullW(z) * u, y, zz);
 }
 
-const HULL_TEX_M = 9; // metres of hull side the hull texture covers, gunwale down
+// the hull texture runs from HULL_TOP (above the top of the stern tower) down HULL_TEX_M metres past the keel:
+// the tower's lacquered storeys with their windows, then the main gunwale (y = 1.3), the wales and the planking
+const HULL_TOP = 19.6;
+const HULL_TEX_M = 30;
+const GUNWALE = 1.3;
 
 function stationList(n: number) {
   const out: number[] = [];
@@ -83,13 +89,12 @@ export function buildHullGeometry(nz = 72) {
   const uv: number[] = [];
   const idx: number[] = [];
   for (const z of zs) {
-    const top = sheer(z);
     for (let c = 0; c < cols; c++) {
       const side = c < NS ? 1 : -1;
       const j = c < NS ? c : cols - 1 - c;
       const p = hullPoint(z, j, side);
       pos.push(p.x, p.y, p.z);
-      uv.push(z / 3.2, (top - p.y) / HULL_TEX_M);
+      uv.push(z / 3.2, (HULL_TOP - p.y) / HULL_TEX_M);
     }
   }
   for (let i = 0; i < zs.length - 1; i++)
@@ -111,7 +116,7 @@ export function buildHullGeometry(nz = 72) {
   uv.push(0, 0.5);
   for (let c = 0; c < cols; c++) {
     pos.push(pos[c * 3], pos[c * 3 + 1], pos[c * 3 + 2]);
-    uv.push(pos[c * 3] / 3.2, (sheer(zT) - pos[c * 3 + 1]) / HULL_TEX_M);
+    uv.push(pos[c * 3] / 3.2, (HULL_TOP - pos[c * 3 + 1]) / HULL_TEX_M);
   }
   // close the top edge of the transom too
   for (let c = 0; c < cols - 1; c++) idx.push(base, base + 1 + c, base + 2 + c);
@@ -188,11 +193,55 @@ function grain(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: 
 /** hull planking: horizontal strakes, a lacquered sheer band with gold beading and a heavy wale at deck level */
 export function hullTexture() {
   const rand = seeded(5);
-  const { c, g } = canvas(512, 2048);
-  // the texture covers HULL_TEX_M metres below the gunwale
-  const px = 2048 / HULL_TEX_M;
-  let y = 0;
-  while (y < 2048) {
+  const { c, g } = canvas(512, 4096);
+  const e = canvas(512, 4096);
+  e.g.fillStyle = '#000';
+  e.g.fillRect(0, 0, 512, 4096);
+  const px = 4096 / HULL_TEX_M;
+  const g0 = (HULL_TOP - GUNWALE) * px; // the main gunwale, in texture rows
+  // the stern tower and the forecastle above the main gunwale: dark lacquer boards, gilt beads at each deck,
+  // and a row of lattice windows (lit from inside) in every storey
+  g.fillStyle = '#4a1610';
+  g.fillRect(0, 0, 512, g0);
+  for (let y = 0; y < g0; y += px * 0.34) {
+    g.fillStyle = `hsl(${6 + rand() * 6}, ${45 + rand() * 10}%, ${16 + rand() * 5}%)`;
+    g.fillRect(0, y, 512, px * 0.32);
+    grain(g, 0, y, 512, px * 0.32, rand, 20, false);
+  }
+  const H = SHIP_LAYOUT.H;
+  for (let k = 0; k <= 4; k++) {
+    const yd = (HULL_TOP - k * H) * px; // deck line of storey k
+    g.fillStyle = '#c8a050';
+    g.fillRect(0, yd - 5, 512, 10);
+    g.fillStyle = '#120c08';
+    g.fillRect(0, yd + 5, 512, px * 0.12);
+    if (k > 3) continue;
+    const top = (HULL_TOP - k * H - 3.3) * px;
+    const bot = (HULL_TOP - k * H - 1.7) * px;
+    for (const x0 of [40, 296]) {
+      const w = 176;
+      g.fillStyle = '#c8a050';
+      g.fillRect(x0 - 8, top - 8, w + 16, bot - top + 16);
+      g.fillStyle = '#e6b25a';
+      g.fillRect(x0, top, w, bot - top);
+      e.g.fillStyle = '#ffb45a';
+      e.g.fillRect(x0, top, w, bot - top);
+      // lattice
+      g.fillStyle = '#2a0e08';
+      e.g.fillStyle = '#000';
+      for (let x = x0; x <= x0 + w; x += 22) {
+        g.fillRect(x - 2, top, 4, bot - top);
+        e.g.fillRect(x - 2, top, 4, bot - top);
+      }
+      for (let y = top; y <= bot; y += 22) {
+        g.fillRect(x0, y - 2, w, 4);
+        e.g.fillRect(x0, y - 2, w, 4);
+      }
+    }
+  }
+  // planking below the gunwale
+  let y = g0;
+  while (y < 4096) {
     const h = px * (0.3 + rand() * 0.06);
     const l = 30 + rand() * 10;
     g.fillStyle = `hsl(${22 + rand() * 8}, ${30 + rand() * 12}%, ${l}%)`;
@@ -208,6 +257,8 @@ export function hullTexture() {
     g.fillRect(0, y, 512, 2);
     y += h;
   }
+  g.save();
+  g.translate(0, g0);
   // lacquered red sheer band with painted cloud scrolls and gold beading
   const band = px * 0.5;
   g.fillStyle = '#6a1510';
@@ -248,9 +299,12 @@ export function hullTexture() {
     g.fillStyle = grd;
     g.fillRect(x, wy + px * 0.2, 3 + rand() * 6, 500);
   }
+  g.restore();
   const t = tex(c);
   t.wrapT = THREE.ClampToEdgeWrapping;
-  return t;
+  const em = tex(e.c);
+  em.wrapT = THREE.ClampToEdgeWrapping;
+  return { map: t, emissive: em };
 }
 
 /** inside of the bulwark: red lacquered boards */
@@ -576,8 +630,8 @@ export function glowTexture() {
 }
 
 /** hull material: darkens and greens below the waterline, glistens wet */
-function hullMaterial(map: THREE.Texture) {
-  const m = new THREE.MeshStandardMaterial({ map, roughness: 0.72, metalness: 0.02, side: THREE.DoubleSide });
+function hullMaterial({ map, emissive }: { map: THREE.Texture; emissive: THREE.Texture }) {
+  const m = new THREE.MeshStandardMaterial({ map, emissiveMap: emissive, emissive: new THREE.Color(1.4, 0.8, 0.35), roughness: 0.72, metalness: 0.02, side: THREE.DoubleSide });
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace('void main() {', 'varying float vShipY;\nvoid main() {\n  vShipY = position.y;');
     sh.fragmentShader = sh.fragmentShader
@@ -615,19 +669,20 @@ export function ShipHull() {
     // stanchions along the inside of the bulwark
     const st: THREE.Matrix4[] = [];
     const q = new THREE.Quaternion();
-    for (let z = -18.6; z <= 18.2; z += 1.45)
+    for (let z = SHIP_LAYOUT.fore.edge + 1.8; z <= SHIP_LAYOUT.tiers[0].edge - 1.8; z += 1.45)
       for (const s of [1, -1]) {
         const h = sheer(z);
         st.push(new THREE.Matrix4().compose(new THREE.Vector3(s * (hullW(z) - SHIP.wall - 0.07), h / 2, z), q, new THREE.Vector3(0.16, h + 0.02, 0.2)));
       }
     // cannon muzzles poking out of gunports along both sides
     const gn: { p: [number, number, number]; s: number }[] = [];
-    for (const z of [-16, -11, -6, -1, 4, 9, 14]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), -1.0, z], s });
-    // a second, upper battery under the raised decks
-    for (const z of [-23.5, -21, 20, 23.5]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 1.4, z], s });
+    for (const z of [-22, -16, -10, -4, 2, 8]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), -1.6, z], s });
+    // more batteries up the stern tower and in the forecastle
+    for (const z of [-36, -31, 17, 24, 31, 37]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 1.0, z], s });
+    for (const z of [25, 31, 37]) for (const s of [1, -1]) gn.push({ p: [s * hullW(z), 5.6 + (z > 30 ? 4.4 : 0), z], s });
     // eyes: sample the skin to sit them flush on the bow
     const ey = [1, -1].map((s) => {
-      const z = -30.6;
+      const z = -47.5;
       const a = hullPoint(z, 2, s);
       const b = hullPoint(z + 0.3, 2, s);
       const c2 = hullPoint(z, 3, s);
@@ -671,7 +726,7 @@ export function ShipHull() {
       ))}
       {eyes.map((e, i) => (
         <mesh key={i} material={mats.eye} position={e.p} rotation={e.rot}>
-          <planeGeometry args={[1.5, 1.0]} />
+          <planeGeometry args={[2.4, 1.6]} />
         </mesh>
       ))}
     </group>
@@ -777,11 +832,12 @@ function sternWindows(widthM: number, heightM: number) {
 
 /**
  * Everything built from SHIP_BOXES (shared with the physics, so what you see is what you bump into):
- * the forecastle, quarterdeck and poop deck with the cabins under them, their walls and doors, the stairs
- * along both bulwarks, the cabin interiors, and the railings.
+ * the decks of every storey with the cabins under them, their walls and doors, the hold and its hatch,
+ * the stairs along both bulwarks, the cabin interiors and the railings.
  */
-export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Texture; boxes: { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: string }[]; layout: any }) {
-  const L = layout;
+type Box = { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: string };
+export function ShipStructure({ deckMap, boxes, deckMatRef }: { deckMap: THREE.Texture; boxes: Box[]; deckMatRef?: React.MutableRefObject<THREE.MeshStandardMaterial | null> }) {
+  const L = SHIP_LAYOUT;
   const built = useMemo(() => {
     const fm = deckMap.clone();
     fm.repeat.set(1, 1);
@@ -789,6 +845,7 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
     const inner = new THREE.MeshStandardMaterial({ map: innerWall(), roughness: 0.8 });
     const mats = {
       deck: new THREE.MeshStandardMaterial({ map: fm, roughness: 0.8, color: '#8c7c6c', envMapIntensity: 0.2 }),
+      hold: new THREE.MeshStandardMaterial({ map: fm, roughness: 0.9, color: '#5c4c40' }),
       ceil: new THREE.MeshStandardMaterial({ color: '#2e1d12', roughness: 0.9, side: THREE.BackSide }),
       beam: new THREE.MeshStandardMaterial({ color: '#24160d', roughness: 0.85 }),
       tread: new THREE.MeshStandardMaterial({ color: '#6a462a', roughness: 0.8 }),
@@ -800,35 +857,51 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
       carpet: new THREE.MeshStandardMaterial({ color: '#6a1414', roughness: 1 }),
       inner,
     };
-    // deck slabs: the top you walk on, its underside (the cabin ceiling) with beams, and a gilded edge
-    const slabs = boxes.filter((b) => b.kind === 'slab').map((b) => {
-      const zA = Math.max(b.z0, SHIP.bow + 0.05);
-      const zB = Math.min(b.z1, SHIP.stern - 0.05);
-      const front = b.z1 < 0 ? b.z1 : b.z0; // the edge that faces the open main deck
-      return { top: deckTop(zA, zB, b.y1), under: deckTop(zA, zB, b.y0), front, y0: b.y0, y1: b.y1, zA, zB };
-    });
+    const Wfull = (z: number) => (hullW(z) - SHIP.wall) * 2;
+    const full = (b: Box) => b.x0 <= -L.W + 0.01 && b.x1 >= L.W - 0.01;
+    // deck slabs: the top you walk on, its underside (the cabin ceiling) with beams, and a gilded edge on the raised decks
+    const slabs = boxes
+      .filter((b) => b.kind === 'slab' && full(b))
+      .map((b) => {
+        const zA = Math.max(b.z0, SHIP.bow + 0.05);
+        const zB = Math.min(b.z1, SHIP.stern - 0.05);
+        const front = b.z1 < 0 ? b.z1 : b.z0; // the edge that faces the open deck below
+        return { top: deckTop(zA, zB, b.y1), under: deckTop(zA, zB, b.y0), front, raised: b.y1 > 0.5, y0: b.y0, y1: b.y1, zA, zB };
+      });
+    // the narrow strips of main deck either side of the hatch
+    const strips = boxes.filter((b) => b.kind === 'slab' && !full(b));
+    // floors laid on the filled-in hull (fore cabin, great cabin)
+    const floors = boxes
+      .filter((b) => b.kind === 'fill')
+      .map((b) => deckTop(Math.max(b.z0, SHIP.bow + 0.05), Math.min(b.z1, SHIP.stern - 0.05), b.y1));
     const beams: { x: number; y: number; z: number; w: number }[] = [];
     for (const s of slabs)
-      for (let z = s.zA + 0.6; z < s.zB - 0.3; z += 1.15) {
-        const w = (hullW(z) - SHIP.wall) * 2;
+      for (let z = s.zA + 0.6; z < s.zB - 0.3; z += 1.4) {
+        const w = Wfull(z);
         if (w > 1) beams.push({ x: 0, y: s.y0 - 0.11, z, w });
       }
-    const walls = boxes.filter((b) => b.kind === 'wall' || b.kind === 'block');
+    // walls: cabin fronts, the hold's sides; the bow block shows only its face toward the fore cabin; the pavilion on the roof is drawn separately
+    const walls = boxes.filter((b) => (b.kind === 'wall' || b.kind === 'block') && b.z0 > SHIP.bow && b.y0 < L.tiers[3].y - 0.01);
+    const bowFace = boxes.find((b) => b.kind === 'block' && b.z0 <= SHIP.bow);
     const treads = boxes.filter((b) => b.kind === 'tread');
-    return { mats, slabs, beams, walls, treads };
+    return { mats, slabs, strips, floors, beams, walls, bowFace, treads, Wfull };
   }, [deckMap, boxes]);
-  const { mats, slabs, beams, walls, treads } = built;
+  const { mats, slabs, strips, floors, beams, walls, bowFace, treads, Wfull } = built;
+  React.useLayoutEffect(() => {
+    if (deckMatRef) deckMatRef.current = mats.deck;
+  }, [mats, deckMatRef]);
   const wallMeshes = useMemo(
     () =>
       walls.map((b) => {
         const w = b.x1 - b.x0;
         const h = b.y1 - b.y0;
         const d = b.z1 - b.z0;
-        // which way the wall looks out onto open deck: the fore cabin's wall faces aft (+z), the others forward
+        // which way the wall looks out onto open deck: the fore cabin's wall faces aft (+z), the stern tower's forward
         const outward: 1 | -1 = b.z1 <= L.fore.edge + 0.01 ? 1 : -1;
         const lintel = b.kind === 'wall' && b.x0 < 0 && b.x1 > 0; // the beam over a doorway
-        const material = b.kind === 'block' ? [mats.inner, mats.inner, mats.lacq, mats.lacq, mats.lacq, mats.lacq] : lintel ? mats.lacq : wallMats(w, h, outward, b.y0 >= L.quarter.y - 0.01 ? 1.9 : 1.5, mats.inner, mats.lacq);
-        return { pos: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2] as [number, number, number], size: [w, h, d] as [number, number, number], material, lintel };
+        const material =
+          b.kind === 'block' ? [mats.inner, mats.inner, mats.lacq, mats.lacq, mats.lacq, mats.lacq] : lintel ? mats.lacq : wallMats(w, h, outward, b.y0 >= L.H - 0.01 ? 1.9 : 1.5, mats.inner, mats.lacq);
+        return { pos: [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2] as [number, number, number], size: [w, h, d] as [number, number, number], material };
       }),
     [walls, mats, L],
   );
@@ -845,39 +918,62 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
     im.instanceMatrix.needsUpdate = true;
     im.computeBoundingSphere();
   }, [treads]);
-  // stair stringers and handrails along the inner side of each flight
+  // stair stringers and handrails along the open (inboard) side of each flight along the bulwarks
   const flights = useMemo(() => {
     const out: { s: number; foot: number; head: number; y0: number; rise: number }[] = [];
-    for (const s of [-1, 1]) {
-      out.push({ s, foot: L.foreStairs.foot, head: L.foreStairs.head, y0: 0, rise: L.fore.y });
-      out.push({ s, foot: L.quarterStairs.foot, head: L.quarterStairs.head, y0: 0, rise: L.quarter.y });
-      out.push({ s, foot: L.poopStairs.foot, head: L.poopStairs.head, y0: L.quarter.y, rise: L.poop.y - L.quarter.y });
-    }
+    for (const f of L.flights) if (f.side) for (const s of [-1, 1]) out.push({ s, foot: f.foot, head: f.head, y0: f.y0, rise: f.rise });
     return out;
   }, [L]);
   const segs = useMemo<Seg[]>(() => {
     const X = L.stairX;
-    const r: Seg[] = [
-      [[-X + 0.05, L.fore.y, L.fore.edge - 0.06], [X - 0.05, L.fore.y, L.fore.edge - 0.06]],
-      [[-X + 0.05, L.quarter.y, L.quarter.edge + 0.06], [X - 0.05, L.quarter.y, L.quarter.edge + 0.06]],
-      [[-L.captainHalf + 0.05, L.poop.y, L.poop.edge + 0.06], [L.captainHalf - 0.05, L.poop.y, L.poop.edge + 0.06]],
-    ];
+    const r: Seg[] = [[[-X + 0.05, L.fore.y, L.fore.edge - 0.06], [X - 0.05, L.fore.y, L.fore.edge - 0.06]]];
+    for (const t of L.tiers) r.push([[-X + 0.05, t.y, t.edge + 0.06], [X - 0.05, t.y, t.edge + 0.06]]);
     for (const f of flights) r.push([[f.s * (X - 0.04), f.y0, f.foot], [f.s * (X - 0.04), f.y0 + f.rise, f.head]]);
     return r;
   }, [L, flights]);
+  // the hatch railing (its boxes are in the physics too)
+  const hatchSegs = useMemo<Seg[]>(() => {
+    const h = L.hold.hole;
+    const x = h.x + 0.1;
+    return [
+      [[-x, 0, h.z1], [-x, 0, h.z0 - 0.1]],
+      [[-x, 0, h.z0 - 0.1], [x, 0, h.z0 - 0.1]],
+      [[x, 0, h.z0 - 0.1], [x, 0, h.z1]],
+    ];
+  }, [L]);
+  const doors = useMemo(
+    () => [{ z: L.fore.edge, y: 0, out: 1 }, ...L.tiers.map((t, i) => ({ z: t.edge, y: i === 0 ? 0 : L.tiers[i - 1].y, out: -1 }))],
+    [L],
+  );
+  const winMats = useMemo(() => L.tiers.map(() => sternWindows(22, 3.4)), [L]);
+  const hold = L.hold;
+  const T = L.table;
+  const back = L.sternEnd + 0.3; // the stern windows across the back of each cabin
   return (
     <group>
       {slabs.map((s, i) => (
         <group key={i}>
           <mesh geometry={s.top} material={mats.deck} receiveShadow castShadow />
           <mesh geometry={s.under} material={mats.ceil} />
-          <mesh position={[0, (s.y0 + s.y1) / 2, s.front]} material={mats.lacq} castShadow>
-            <boxGeometry args={[(hullW(s.front) - SHIP.wall) * 2, s.y1 - s.y0, 0.1]} />
-          </mesh>
-          <mesh position={[0, s.y1 - 0.02, s.front]} material={mats.gold}>
-            <boxGeometry args={[(hullW(s.front) - SHIP.wall) * 2, 0.05, 0.14]} />
-          </mesh>
+          {s.raised && (
+            <>
+              <mesh position={[0, (s.y0 + s.y1) / 2, s.front]} material={mats.lacq} castShadow>
+                <boxGeometry args={[Wfull(s.front), s.y1 - s.y0, 0.1]} />
+              </mesh>
+              <mesh position={[0, s.y1 - 0.02, s.front]} material={mats.gold}>
+                <boxGeometry args={[Wfull(s.front), 0.05, 0.14]} />
+              </mesh>
+            </>
+          )}
         </group>
+      ))}
+      {strips.map((b, i) => (
+        <mesh key={i} position={[(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2]} material={mats.deck} receiveShadow>
+          <boxGeometry args={[b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0]} />
+        </mesh>
+      ))}
+      {floors.map((g, i) => (
+        <mesh key={i} geometry={g} material={mats.deck} receiveShadow />
       ))}
       {beams.map((b, i) => (
         <mesh key={i} position={[b.x, b.y, b.z]} material={mats.beam}>
@@ -889,6 +985,11 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <boxGeometry args={w.size} />
         </mesh>
       ))}
+      {bowFace && (
+        <mesh position={[0, (bowFace.y0 + bowFace.y1) / 2, bowFace.z1 + 0.01]} material={mats.inner}>
+          <planeGeometry args={[Wfull(bowFace.z1), bowFace.y1 - bowFace.y0]} />
+        </mesh>
+      )}
       <instancedMesh ref={tRef} args={[undefined, undefined, treads.length]} material={mats.tread} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
       </instancedMesh>
@@ -902,27 +1003,44 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
         );
       })}
       <Balustrade segs={segs} mat={mats.lacq} />
-      {/* door frames: gilt posts and a lantern over each cabin door */}
-      {[
-        { z: L.fore.edge, y: 0, half: L.door, out: 1 },
-        { z: L.quarter.edge, y: 0, half: L.door, out: -1 },
-        { z: L.poop.edge, y: L.quarter.y, half: L.captainDoor, out: -1 },
-      ].map((d, i) => (
+      <Balustrade segs={hatchSegs} mat={mats.lacq} h={1.0} />
+      {/* door frames: gilt posts and a lantern either side of each cabin door */}
+      {doors.map((d, i) => (
         <group key={i}>
           {[-1, 1].map((s) => (
-            <mesh key={s} position={[s * (d.half + 0.06), d.y + 1.25, d.z + d.out * 0.02]} material={mats.gold} castShadow>
-              <boxGeometry args={[0.12, 2.5, 0.36]} />
+            <mesh key={s} position={[s * (L.door + 0.06), d.y + L.lintel / 2, d.z + d.out * 0.02]} material={mats.gold} castShadow>
+              <boxGeometry args={[0.12, L.lintel, 0.36]} />
             </mesh>
           ))}
-          <ShipLantern position={[d.half + 0.75, d.y + 2.75, d.z + d.out * 0.4]} seed={i * 2} />
-          <ShipLantern position={[-d.half - 0.75, d.y + 2.75, d.z + d.out * 0.4]} seed={i * 2 + 1} />
+          <ShipLantern position={[L.door + 0.8, d.y + 3.4, d.z + d.out * 0.4]} seed={i * 2} />
+          <ShipLantern position={[-L.door - 0.8, d.y + 3.4, d.z + d.out * 0.4]} seed={i * 2 + 1} />
         </group>
       ))}
-      {/* ---- the forecastle cabin: crew quarters and armoury ---- */}
-      <mesh position={[0, 1.6, -25.65]} material={mats.inner}>
-        <boxGeometry args={[(hullW(-25.65) - SHIP.wall) * 2, 3.2, 0.2]} />
+
+      {/* ---- the hold (-1): floor, end bulkheads, the table of food, lanterns on the beams ---- */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.holdY + 0.005, (hold.z0 + hold.z1) / 2]} material={mats.hold} receiveShadow>
+        <planeGeometry args={[hold.side * 2, hold.z1 - hold.z0]} />
       </mesh>
-      <group position={[0, 0, -25.45]}>
+      {[hold.z0, hold.z1].map((z, i) => (
+        <mesh key={i} position={[0, L.holdY / 2 - L.slab / 2, z + (i ? -0.01 : 0.01)]} rotation={[0, i ? Math.PI : 0, 0]} material={mats.inner}>
+          <planeGeometry args={[hold.side * 2, -L.holdY - L.slab]} />
+        </mesh>
+      ))}
+      {/* pillars holding up the main deck */}
+      {[-5.2, 5.2].flatMap((x) => [-20, -12, -4, 4, 11].map((z) => (
+        <mesh key={`${x}${z}`} position={[x, L.holdY / 2 - 0.2, z]} material={mats.wood} castShadow>
+          <boxGeometry args={[0.32, -L.holdY - 0.4, 0.32]} />
+        </mesh>
+      )))}
+      <FoodTable at={[T.x, L.holdY, T.z]} hx={T.hx} hz={T.hz} h={T.h} mats={mats} />
+      {[[-4, T.z - 4], [4, T.z + 3], [-3, 2], [3, 9], [0, -21]].map(([x, z], i) => (
+        <ShipLantern key={i} position={[x, -L.slab - 0.25, z]} seed={20 + i} glow={1.2} />
+      ))}
+      <pointLight position={[0, L.holdY + 2.6, T.z]} color="#ffa458" intensity={14} distance={16} decay={1.3} />
+      <pointLight position={[0, L.holdY + 2.6, 7]} color="#ff9a50" intensity={8} distance={13} decay={1.4} />
+
+      {/* ---- the fore cabin under the forecastle: crew quarters and an armoury rack ---- */}
+      <group position={[0, 0, L.foreEnd + 0.3]}>
         {[-3.2, -2.4, -1.6, 1.6, 2.4, 3.2].map((x) => (
           <group key={x} position={[x, 0, 0]}>
             <mesh position={[0, 1.15, 0]} material={mats.wood} castShadow>
@@ -937,17 +1055,32 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <boxGeometry args={[7.4, 0.1, 0.1]} />
         </mesh>
       </group>
-      <ShipLantern position={[-3.5, L.fore.y - L.slab - 0.05, -22.0]} seed={11} />
-      <ShipLantern position={[3.5, L.fore.y - L.slab - 0.05, -23.4]} seed={12} />
-      <pointLight position={[0, 2.4, -22.2]} color="#ffa458" intensity={9} distance={10} decay={1.4} />
-      {/* ---- the great cabin under the quarterdeck: stern windows, carpet, the chart table ---- */}
-      <mesh position={[0, 1.55, 25.65]} material={useMemo(() => sternWindows(14, 3.1), [])}>
-        <planeGeometry args={[(hullW(25.65) - SHIP.wall) * 2, 3.1]} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 21.6]} material={mats.carpet} receiveShadow>
-        <planeGeometry args={[6, 5.6]} />
-      </mesh>
-      <group position={[4.2, 0, 21.2]}>
+      <ShipLantern position={[-4, L.fore.y - L.slab - 0.05, -30]} seed={11} />
+      <ShipLantern position={[4, L.fore.y - L.slab - 0.05, -34]} seed={12} />
+      <pointLight position={[0, 2.8, -32]} color="#ffa458" intensity={10} distance={13} decay={1.4} />
+
+      {/* ---- the stern tower: a cabin on each storey with a wall of lit stern windows, carpets and lanterns ---- */}
+      {L.tiers.map((t, i) => {
+        const y = i === 0 ? 0 : L.tiers[i - 1].y; // this cabin's floor
+        const z0 = t.edge + L.wallT;
+        const zc = (z0 + back) / 2;
+        const h = t.y - L.slab - y;
+        return (
+          <group key={i}>
+            <mesh position={[0, y + h / 2, back]} rotation={[0, Math.PI, 0]} material={winMats[i]}>
+              <planeGeometry args={[Wfull(back), h]} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, y + 0.012, zc]} material={mats.carpet} receiveShadow>
+              <planeGeometry args={[7, Math.max(2, back - z0 - 3)]} />
+            </mesh>
+            <ShipLantern position={[-3.5, t.y - L.slab - 0.05, zc - 1]} seed={13 + i * 2} />
+            <ShipLantern position={[3.5, t.y - L.slab - 0.05, zc + 1]} seed={14 + i * 2} />
+            <pointLight position={[0, y + 2.8, zc]} color="#ffa458" intensity={i === 0 ? 12 : 9} distance={i === 0 ? 18 : 13} decay={1.4} />
+          </group>
+        );
+      })}
+      {/* the chart table in the great cabin */}
+      <group position={[5, 0, 26]}>
         <mesh position={[0, 0.8, 0]} material={mats.wood} castShadow receiveShadow>
           <cylinderGeometry args={[0.85, 0.85, 0.1, 16]} />
         </mesh>
@@ -959,20 +1092,8 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <meshStandardMaterial color="#d8c8a0" roughness={1} />
         </mesh>
       </group>
-      <ShipLantern position={[-2.5, L.quarter.y - L.slab - 0.05, 21.0]} seed={13} />
-      <ShipLantern position={[2.5, L.quarter.y - L.slab - 0.05, 23.6]} seed={14} />
-      <pointLight position={[0, 2.4, 21.6]} color="#ffa458" intensity={10} distance={11} decay={1.4} />
-      {/* ---- the captain's cabin under the poop deck ---- */}
-      <mesh position={[0, L.quarter.y + 1.45, 25.64]} material={useMemo(() => sternWindows(13.6, 2.9), [])}>
-        <planeGeometry args={[L.captainHalf * 2, 2.9]} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, L.quarter.y + 0.012, 24.0]} material={mats.carpet}>
-        <planeGeometry args={[4, 2.6]} />
-      </mesh>
-      <ShipLantern position={[0, L.poop.y - L.slab - 0.05, 24.2]} seed={15} />
-      <pointLight position={[0, L.quarter.y + 2.2, 23.9]} color="#ffb060" intensity={7} distance={8} decay={1.4} />
       {/* windlass and the anchor out at the bow */}
-      <group position={[0, L.fore.y, -27.0]}>
+      <group position={[0, L.fore.y, -39.2]}>
         {[-1.4, 1.4].map((x) => (
           <mesh key={x} position={[x, 0.45, 0]} material={mats.wood} castShadow>
             <boxGeometry args={[0.26, 0.9, 0.5]} />
@@ -985,19 +1106,116 @@ export function ShipStructure({ deckMap, boxes, layout }: { deckMap: THREE.Textu
           <cylinderGeometry args={[0.32, 0.32, 1.2, 12]} />
         </mesh>
       </group>
-      <group position={[hullW(-30.8) + 0.4, 4.4, -30.8]} rotation={[0, 0.5, 0.06]}>
+      <group position={[hullW(-44) + 0.4, 5.6, -44]} rotation={[0, 0.5, 0.06]}>
         <mesh material={mats.iron} position={[0, -0.8, 0]}>
-          <cylinderGeometry args={[0.08, 0.08, 2.2, 6]} />
+          <cylinderGeometry args={[0.1, 0.1, 2.8, 6]} />
         </mesh>
         {[-1, 1].map((s) => (
-          <mesh key={s} material={mats.iron} position={[s * 0.38, -1.8, 0]} rotation={[0, 0, s * 0.9]}>
-            <coneGeometry args={[0.08, 0.9, 5]} />
+          <mesh key={s} material={mats.iron} position={[s * 0.45, -2.1, 0]} rotation={[0, 0, s * 0.9]}>
+            <coneGeometry args={[0.1, 1.1, 5]} />
           </mesh>
         ))}
       </group>
-      <mesh position={[0, sheer(SHIP.bow) + 0.4, SHIP.bow - 1.4]} rotation={[-1.15, 0, 0]} material={mats.wood} castShadow>
-        <cylinderGeometry args={[0.12, 0.24, 5.5, 8]} />
+      <mesh position={[0, sheer(SHIP.bow) + 0.6, SHIP.bow - 2.2]} rotation={[-1.15, 0, 0]} material={mats.wood} castShadow>
+        <cylinderGeometry args={[0.16, 0.32, 8, 8]} />
       </mesh>
+    </group>
+  );
+}
+
+/** the table of food in the hold: a long lacquered table set with bowls, a whole fish, buns, a roast and wine jars */
+function FoodTable({ at, hx, hz, h, mats }: { at: [number, number, number]; hx: number; hz: number; h: number; mats: Record<string, THREE.Material> }) {
+  const dish = useMemo(
+    () => ({
+      plate: new THREE.MeshStandardMaterial({ color: '#e8e2d4', roughness: 0.35 }),
+      blue: new THREE.MeshStandardMaterial({ color: '#2a4a8a', roughness: 0.4 }),
+      bun: new THREE.MeshStandardMaterial({ color: '#f2e6cc', roughness: 0.9 }),
+      roast: new THREE.MeshStandardMaterial({ color: '#7a3a14', roughness: 0.55 }),
+      fish: new THREE.MeshStandardMaterial({ color: '#b86a2a', roughness: 0.5 }),
+      greens: new THREE.MeshStandardMaterial({ color: '#3f7a2a', roughness: 0.8 }),
+      jar: new THREE.MeshStandardMaterial({ color: '#4a3020', roughness: 0.6 }),
+      steam: new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.12, depthWrite: false }),
+    }),
+    [],
+  );
+  const steam = useRef<THREE.Group>(null);
+  useFrame((st) => {
+    const g = steam.current;
+    if (!g) return;
+    const t = st.clock.elapsedTime;
+    g.children.forEach((m, i) => {
+      const k = (t * 0.35 + i / g.children.length) % 1;
+      m.position.y = h + 0.25 + k * 0.9;
+      m.scale.setScalar(0.12 + k * 0.3);
+      ((m as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = 0.14 * (1 - k);
+    });
+  });
+  const top = h;
+  return (
+    <group position={at}>
+      <mesh position={[0, top - 0.06, 0]} material={mats.lacq} castShadow receiveShadow>
+        <boxGeometry args={[hx * 2, 0.12, hz * 2]} />
+      </mesh>
+      {[-1, 1].flatMap((sx) => [-1, 1].map((sz) => (
+        <mesh key={`${sx}${sz}`} position={[sx * (hx - 0.15), (top - 0.12) / 2, sz * (hz - 0.15)]} material={mats.wood}>
+          <boxGeometry args={[0.14, top - 0.12, 0.14]} />
+        </mesh>
+      )))}
+      {/* benches */}
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[0, 0.24, s * (hz + 0.55)]} material={mats.wood} castShadow>
+          <boxGeometry args={[hx * 1.8, 0.08, 0.36]} />
+        </mesh>
+      ))}
+      {/* the whole fish on a long plate */}
+      <mesh position={[0, top + 0.02, 0]} scale={[1, 0.18, 0.45]} material={dish.plate}>
+        <cylinderGeometry args={[0.55, 0.55, 0.12, 20]} />
+      </mesh>
+      <mesh position={[0, top + 0.1, 0]} scale={[1, 0.32, 0.36]} material={dish.fish}>
+        <sphereGeometry args={[0.45, 14, 8]} />
+      </mesh>
+      {/* a roast on a platter */}
+      <mesh position={[-1.25, top + 0.03, 0.15]} material={dish.plate}>
+        <cylinderGeometry args={[0.36, 0.3, 0.06, 18]} />
+      </mesh>
+      <mesh position={[-1.25, top + 0.17, 0.15]} scale={[1.3, 0.8, 1]} material={dish.roast}>
+        <sphereGeometry args={[0.2, 12, 8]} />
+      </mesh>
+      {/* steamed buns */}
+      <mesh position={[1.25, top + 0.03, -0.2]} material={dish.blue}>
+        <cylinderGeometry args={[0.34, 0.28, 0.08, 18]} />
+      </mesh>
+      {[[0, 0], [0.16, 0.1], [-0.15, 0.08], [0.02, -0.16], [0.05, 0.02]].map(([x, z], i) => (
+        <mesh key={i} position={[1.25 + x, top + 0.13 + (i === 4 ? 0.1 : 0), -0.2 + z]} scale={[1, 0.75, 1]} material={dish.bun}>
+          <sphereGeometry args={[0.11, 10, 8]} />
+        </mesh>
+      ))}
+      {/* bowls of greens and rice, chopsticks, wine jars */}
+      {[[-0.6, -0.75], [0.6, -0.75], [-0.6, 0.75], [0.6, 0.75], [1.6, 0.6], [-1.7, -0.6]].map(([x, z], i) => (
+        <group key={i} position={[x, top, z]}>
+          <mesh position={[0, 0.06, 0]} material={i % 2 ? dish.blue : dish.plate}>
+            <cylinderGeometry args={[0.13, 0.08, 0.12, 14]} />
+          </mesh>
+          <mesh position={[0, 0.11, 0]} scale={[1, 0.4, 1]} material={i % 3 === 0 ? dish.greens : dish.bun}>
+            <sphereGeometry args={[0.11, 10, 6]} />
+          </mesh>
+          <mesh position={[0.17, 0.015, 0]} rotation={[0, 0.2, Math.PI / 2]} material={mats.wood}>
+            <cylinderGeometry args={[0.008, 0.008, 0.3, 4]} />
+          </mesh>
+        </group>
+      ))}
+      {[[-hx + 0.3, -hz + 0.3], [hx - 0.3, hz - 0.3]].map(([x, z], i) => (
+        <mesh key={i} position={[x, top + 0.2, z]} scale={[1, 1.25, 1]} material={dish.jar}>
+          <sphereGeometry args={[0.17, 12, 10]} />
+        </mesh>
+      ))}
+      <group ref={steam}>
+        {[[0, 0], [1.25, -0.2], [-1.25, 0.15], [0.3, 0.05], [1.2, -0.1], [-1.2, 0.2]].map(([x, z], i) => (
+          <mesh key={i} position={[x, top + 0.3, z]} material={dish.steam.clone()}>
+            <sphereGeometry args={[1, 8, 6]} />
+          </mesh>
+        ))}
+      </group>
     </group>
   );
 }
@@ -1226,11 +1444,12 @@ function hipRoof(w: number, d: number, rise: number, ridge: number, sweep: numbe
 
 /** two-storey stern castle with a gallery, a tiled hip roof, the great rudder and stern lanterns */
 export function SternCastle({ base }: { base: number }) {
-  const z0 = 25.6;
-  const z1 = 29.2;
-  const W1 = 8.0;
+  const P = SHIP_LAYOUT.pavilion;
+  const z0 = P.z0;
+  const z1 = P.z1;
+  const W1 = P.hw;
   const W2 = 6.0;
-  const H1 = 2.7;
+  const H1 = P.h;
   const H2 = 2.2;
   const { mats, roof, lowRoof, bal } = useMemo(() => {
     const w1 = castleWall(W1 * 2, H1, true);
@@ -1322,11 +1541,11 @@ export function SternCastle({ base }: { base: number }) {
       </group>
       {/* the great rudder hanging off the transom */}
       <group position={[0, 0, SHIP.stern + 0.3]}>
-        <mesh position={[0, 0.5, 0.1]} material={mats.wood} castShadow>
-          <cylinderGeometry args={[0.22, 0.22, 11, 8]} />
+        <mesh position={[0, -1.0, 0.1]} material={mats.wood} castShadow>
+          <cylinderGeometry args={[0.3, 0.3, 16, 8]} />
         </mesh>
-        <mesh position={[0, -3.6, 1.5]} material={mats.wood} castShadow>
-          <boxGeometry args={[0.3, 4.4, 3.0]} />
+        <mesh position={[0, -6.6, 2.0]} material={mats.wood} castShadow>
+          <boxGeometry args={[0.4, 5.6, 4.0]} />
         </mesh>
         <mesh position={[0, 6.2, -0.7]} rotation={[Math.PI / 2, 0, 0]} material={mats.wood}>
           <cylinderGeometry args={[0.08, 0.1, 1.8, 6]} />
@@ -1378,7 +1597,7 @@ export function ShipLantern({ position, glow = 1, seed = 0 }: { position: [numbe
 export function RailLanterns() {
   const list = useMemo(() => {
     const out: { x: number; z: number; s: number }[] = [];
-    for (const z of [-23.5, -11, -3, 3, 10, 20.2, 24.2]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
+    for (const z of [-37, -31, -20, -10, 0, 10, 18, 25.5, 31, 37.5]) for (const s of [1, -1]) out.push({ x: s * (hullW(z) - 0.12), z, s });
     return out;
   }, []);
   return (

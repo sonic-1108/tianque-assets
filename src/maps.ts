@@ -422,16 +422,16 @@ export const MAPS = {
     name: '怒海战船',
     subtitle: '风暴夜里，大海上的古战船甲板',
     icon: '🌊',
-    mechanics: ['船头楼、后甲板、艉楼三层高台，两舷有楼梯，也可以冲向墙边一跃而上；船头、船尾和艉楼下都有能进去的船舱', '船头和艉楼各架一台床弩，按 F 抢占，左右 60° 转向射击，箭能把人钉住', '巨浪会拍上主甲板把人冲走；躲进船舱或站上高台就不怕'],
+    mechanics: ['一艘五层楼船：甲板下有货舱，船尾高塔四层，每层都有能进去的船舱，两舷楼梯上下', '货舱里有一桌饭菜，按 F 吃一口回复已损失气血的 10%', '船头楼和船尾高塔各架一台床弩，按 F 抢占射击，箭能把人钉住', '巨浪会拍上主甲板把人冲走；躲进船舱或站上高处就不怕'],
     homeClass: 'LightHealer',
     homeClassName: '灵雀',
     homeBonus: '移速 +10%（职业开发中）',
     available: true,
-    radius: 27,
-    rect: { hx: 8.8, hz: 25 },
+    radius: 42,
+    rect: { hx: 11.8, hz: 40 },
     terrain: true,
-    spawnPlayer: [2.5, 9],
-    spawnEnemy: [-2.5, -10],
+    spawnPlayer: [3, 9],
+    spawnEnemy: [-3, -14],
     background: '#1b2530',
     fog: [40, 240],
     hemi: ['#8fb3d9', '#10202c', 0.85],
@@ -441,27 +441,33 @@ export const MAPS = {
     cardGradient: 'from-sky-900/80 via-cyan-950/80 to-slate-950/90',
     pillars: [
       // two masts
-      { x: 0, z: -9, r: 0.6 },
-      { x: 0, z: 7, r: 0.6 },
-      // cargo on the main deck: single crates (1.1 m) and stacks (2.2 m) to fight around
-      { x: 5.2, z: -3.5, r: 0.75, h: 1.1 },
-      { x: -5.4, z: 2.5, r: 0.75, h: 1.1 },
-      { x: -4.4, z: -15.8, r: 0.85, h: 2.2 },
-      { x: 4.4, z: 15.2, r: 0.85, h: 2.2 },
-      { x: 5.6, z: -12.0, r: 0.7, h: 1.1 },
-      { x: -5.6, z: 11.5, r: 0.7, h: 1.1 },
-      { x: 2.8, z: -1.2, r: 0.6, h: 1.1 },
-      // in the cabins (h is the top, measured from the main deck)
-      { x: -5.6, z: -23.0, r: 0.75, h: 1.1 },
-      { x: 6.0, z: -21.0, r: 0.7, h: 1.1 },
-      { x: -6.4, z: 23.4, r: 0.7, h: 1.1 },
-      { x: 4.2, z: 21.2, r: 0.8, h: 0.85 }, // the chart table in the great cabin
+      { x: 0, z: -15, r: 0.7 },
+      { x: 0, z: 9, r: 0.7 },
+      // cargo on the main deck (h is the top, measured from the main deck)
+      { x: 5.5, z: -9, r: 0.8, h: 1.1 },
+      { x: -6, z: -2, r: 0.8, h: 1.1 },
+      { x: 6, z: 3, r: 0.75, h: 1.1 },
+      { x: -5, z: -21, r: 0.9, h: 2.2 },
+      { x: 5, z: -21, r: 0.8, h: 1.1 },
+      { x: -6, z: 8, r: 0.9, h: 2.2 },
+      { x: 4, z: 12, r: 0.7, h: 1.1 },
+      // down in the hold
+      { x: -8, z: -18, r: 0.9, h: -3.3 },
+      { x: 8, z: -10, r: 0.9, h: -3.3 },
+      { x: -8, z: 6, r: 1.0, h: -2.2 },
+      { x: 7.5, z: 8, r: 0.8, h: -3.3 },
+      { x: -7.5, z: -6, r: 0.7, h: -3.3 },
+      // the cabins
+      { x: -7, z: -33, r: 0.75, h: 1.1 },
+      { x: 7, z: -30, r: 0.7, h: 1.1 },
+      { x: -8, z: 34, r: 0.8, h: 1.1 },
+      { x: 5, z: 26, r: 0.9, h: 0.85 }, // the chart table in the great cabin
       // up on the forecastle and the quarterdeck
-      { x: 5.0, z: -23.6, r: 0.7, h: 4.5 },
-      { x: -4.4, z: 20.2, r: 0.65, h: 4.5 },
+      { x: 6, z: -34, r: 0.7, h: 5.5 },
+      { x: -5, z: 17, r: 0.7, h: 5.5 },
       // the two mounted crossbows
-      { x: 0, z: -21.3, r: 0.5, h: 4.5 },
-      { x: 0, z: 23.1, r: 0.45, h: 7.7 },
+      { x: 0, z: -31.5, r: 0.5, h: 5.5 },
+      { x: 0, z: 30.5, r: 0.45, h: 14.3 },
     ],
   },
   glacier: {
@@ -938,83 +944,123 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
 }
 
 // ----------------------------------------------------------------------
-// 怒海战船: a war junk with walk-in cabins. The ship is a set of solid boxes
-// (deck slabs, cabin walls, stair treads); the main deck is the floor at 0.
-// Fore: a forecastle deck over a cabin. Aft: a quarterdeck over the great cabin,
-// and on the quarterdeck the captain's cabin under the poop deck.
-// Stairs run fore-and-aft along both bulwarks.
+// 怒海战船: a great war junk, five storeys of cabins. The ship is a set of solid boxes
+// (deck slabs, cabin walls, stair treads, filled-in hull); everything stands on them.
+//   -1  the hold under the main deck (a hatch and stairs in the middle of the deck), a table of food
+//    0  the main deck; the fore cabin and the great cabin
+//    1  the forecastle; the quarterdeck, over the captain's cabin
+//    2  the poop deck, over the hall
+//    3  the castle deck, over the lookout cabin
+//    4  the roof of the stern tower
+// Every raised deck is reached by stairs running fore-and-aft along both bulwarks.
 // ----------------------------------------------------------------------
-export interface ShipBox { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: 'slab' | 'wall' | 'tread' | 'block' }
+export interface ShipBox { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number; kind: 'slab' | 'wall' | 'tread' | 'block' | 'fill' | 'table' | 'rail' }
+export interface ShipFlight { foot: number; head: number; y0: number; rise: number; n: number; side: boolean }
+const H = 4.4;
 export const SHIP_LAYOUT = {
-  W: 9.3, // boxes run out to here (inside the hull, past the play area)
-  slab: 0.3,
-  fore: { edge: -18.8, y: 3.4 },
-  quarter: { edge: 18.0, y: 3.4 },
-  poop: { edge: 22.2, y: 6.6 },
-  wallT: 0.3,
-  door: 1.3, // half width of the cabin doors
-  captainDoor: 1.1,
-  captainHalf: 6.8,
-  stairX: 6.9, // stairs fill |x| from here out to the bulwark
-  foreStairs: { foot: -13.4, head: -18.8, n: 13 },
-  quarterStairs: { foot: 12.6, head: 18.0, n: 13 },
-  poopStairs: { foot: 18.4, head: 22.2, n: 11 },
-  lintel: 2.5, // doorways are this tall
-  /** mounted crossbows: where they stand, which way they face by default (yaw), and where the gunner stands */
+  W: 12.4, // boxes run out to here (inside the hull)
+  slab: 0.4,
+  H,
+  holdY: -H,
+  hold: { z0: -25.6, z1: 13.6, side: 10.4, hole: { x: 1.8, z0: -4.2, z1: 4.2 } },
+  fore: { edge: -26, y: H },
+  /** the stern tower: where each deck begins (its front edge) and its height; the cabin of the level below sits under it */
+  tiers: [
+    { edge: 14, y: H },
+    { edge: 22, y: 2 * H },
+    { edge: 28, y: 3 * H },
+    { edge: 33, y: 4 * H },
+  ],
+  sternEnd: 39.8,
+  foreEnd: -38,
+  wallT: 0.35,
+  door: 1.6,
+  lintel: 3.0,
+  stairX: 8.8,
+  flights: [
+    { foot: -16, head: -26, y0: 0, rise: H, n: 15, side: true },
+    { foot: 4, head: 14, y0: 0, rise: H, n: 15, side: true },
+    { foot: 15, head: 22, y0: H, rise: H, n: 15, side: true },
+    { foot: 22.6, head: 28, y0: 2 * H, rise: H, n: 15, side: true },
+    { foot: 28.6, head: 33, y0: 3 * H, rise: H, n: 15, side: true },
+    // down through the hatch into the hold (the bottom toward the bow)
+    { foot: -4.2, head: 4.2, y0: -H, rise: H, n: 15, side: false },
+  ] as ShipFlight[],
+  /** the food in the hold: F to eat, heals 10% of what you've lost */
+  table: { x: 0, z: -11.8, hx: 2.2, hz: 1.2, h: 0.8 },
+  meal: { share: 0.1, cooldown: 12 },
+  /** mounted crossbows: where they stand, which way they face by default (yaw) */
   ballistae: [
-    { x: 0, z: -21.3, y: 3.4, yaw: Math.PI },
-    { x: 0, z: 23.1, y: 6.6, yaw: 0 },
+    { x: 0, z: -31.5, y: H, yaw: Math.PI },
+    { x: 0, z: 30.5, y: 3 * H, yaw: 0 },
   ],
   ballistaArc: Math.PI / 3, // ±60°
+  /** the two-storey pavilion on the roof (solid) */
+  pavilion: { hw: 8, z0: 36.2, z1: 39.8, h: 2.9 },
 };
 function buildShipBoxes() {
   const L = SHIP_LAYOUT;
   const W = L.W;
+  const s = L.slab;
   const out: ShipBox[] = [];
   const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, kind: ShipBox['kind']) => out.push({ x0, x1, y0, y1, z0, z1, kind });
-  // forecastle deck and the cabin's front wall with its door
-  box(-W, W, L.fore.y - L.slab, L.fore.y, -36, L.fore.edge, 'slab');
-  const fz0 = L.fore.edge - L.wallT;
-  box(-W, -L.door, 0, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
-  box(L.door, W, 0, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
-  box(-L.door, L.door, L.lintel, L.fore.y - L.slab, fz0, L.fore.edge, 'wall');
-  // quarterdeck over the great cabin
-  box(-W, W, L.quarter.y - L.slab, L.quarter.y, L.quarter.edge, 30, 'slab');
-  const qz1 = L.quarter.edge + L.wallT;
-  box(-W, -L.door, 0, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
-  box(L.door, W, 0, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
-  box(-L.door, L.door, L.lintel, L.quarter.y - L.slab, L.quarter.edge, qz1, 'wall');
-  // poop deck over the captain's cabin (on the quarterdeck); solid either side of the cabin
-  box(-W, W, L.poop.y - L.slab, L.poop.y, L.poop.edge, 30, 'slab');
-  const pz1 = L.poop.edge + L.wallT;
-  const cy0 = L.quarter.y;
-  const cy1 = L.poop.y - L.slab;
-  box(-L.captainHalf, -L.captainDoor, cy0, cy1, L.poop.edge, pz1, 'wall');
-  box(L.captainDoor, L.captainHalf, cy0, cy1, L.poop.edge, pz1, 'wall');
-  box(-L.captainDoor, L.captainDoor, cy0 + L.lintel - 0.2, cy1, L.poop.edge, pz1, 'wall');
-  box(-W, -L.captainHalf, cy0, cy1, L.poop.edge, 30, 'block');
-  box(L.captainHalf, W, cy0, cy1, L.poop.edge, 30, 'block');
-  // stairs: one flight along each bulwark
-  const flight = (foot: number, head: number, n: number, y0: number, rise: number) => {
-    for (const s of [-1, 1])
-      for (let k = 0; k < n; k++) {
-        const za = foot + ((head - foot) * k) / n;
-        const zb = foot + ((head - foot) * (k + 1)) / n;
-        const x0 = s > 0 ? L.stairX : -W;
-        const x1 = s > 0 ? W : -L.stairX;
-        box(x0, x1, y0, y0 + (rise * (k + 1)) / n, Math.min(za, zb), Math.max(za, zb), 'tread');
-      }
+  const hold = L.hold;
+  // the hull below the main deck is filled in, except the hold
+  box(-W, W, L.holdY, 0, -80, hold.z0, 'fill');
+  box(-W, W, L.holdY, 0, hold.z1, 80, 'fill');
+  box(-W, -hold.side, L.holdY, -s, hold.z0, hold.z1, 'block');
+  box(hold.side, W, L.holdY, -s, hold.z0, hold.z1, 'block');
+  // the main deck over the hold, with the hatch
+  box(-W, W, -s, 0, hold.z0, hold.hole.z0, 'slab');
+  box(-W, W, -s, 0, hold.hole.z1, hold.z1, 'slab');
+  box(-W, -hold.hole.x, -s, 0, hold.hole.z0, hold.hole.z1, 'slab');
+  box(hold.hole.x, W, -s, 0, hold.hole.z0, hold.hole.z1, 'slab');
+  // a waist-high railing round three sides of the hatch (the stairs go down from its open, sternward side)
+  const hh = hold.hole;
+  box(-hh.x - 0.2, -hh.x, 0, 1.0, hh.z0 - 0.2, hh.z1, 'rail');
+  box(hh.x, hh.x + 0.2, 0, 1.0, hh.z0 - 0.2, hh.z1, 'rail');
+  box(-hh.x - 0.2, hh.x + 0.2, 0, 1.0, hh.z0 - 0.2, hh.z0, 'rail');
+  // the pavilion on the roof of the stern tower
+  const P = L.pavilion;
+  box(-P.hw, P.hw, L.tiers[3].y, L.tiers[3].y + P.h, P.z0, P.z1, 'block');
+  // the table of food
+  const T = L.table;
+  box(T.x - T.hx, T.x + T.hx, L.holdY, L.holdY + T.h, T.z - T.hz, T.z + T.hz, 'table');
+  // a cabin front: wall either side of a door, and a beam over it
+  const front = (z: number, y0: number, y1: number, outward: 1 | -1) => {
+    const za = outward > 0 ? z - L.wallT : z;
+    const zb = outward > 0 ? z : z + L.wallT;
+    box(-W, -L.door, y0, y1, za, zb, 'wall');
+    box(L.door, W, y0, y1, za, zb, 'wall');
+    box(-L.door, L.door, y0 + L.lintel, y1, za, zb, 'wall');
   };
-  flight(L.foreStairs.foot, L.foreStairs.head, L.foreStairs.n, 0, L.fore.y);
-  flight(L.quarterStairs.foot, L.quarterStairs.head, L.quarterStairs.n, 0, L.quarter.y);
-  flight(L.poopStairs.foot, L.poopStairs.head, L.poopStairs.n, L.quarter.y, L.poop.y - L.quarter.y);
+  // forecastle over the fore cabin; the bow beyond the cabin is solid
+  box(-W, W, L.fore.y - s, L.fore.y, -80, L.fore.edge, 'slab');
+  front(L.fore.edge, 0, L.fore.y - s, 1);
+  box(-W, W, 0, L.fore.y - s, -80, L.foreEnd, 'block');
+  // the stern tower: one deck per tier, the cabin under it opening onto the deck in front
+  L.tiers.forEach((t, i) => {
+    const below = i === 0 ? 0 : L.tiers[i - 1].y;
+    box(-W, W, t.y - s, t.y, t.edge, 80, 'slab');
+    front(t.edge, below, t.y - s, -1);
+  });
+  // stairs
+  for (const f of L.flights)
+    for (const sd of f.side ? [-1, 1] : [0])
+      for (let k = 0; k < f.n; k++) {
+        const za = f.foot + ((f.head - f.foot) * k) / f.n;
+        const zb = f.foot + ((f.head - f.foot) * (k + 1)) / f.n;
+        const x0 = sd > 0 ? L.stairX : sd < 0 ? -W : -hold.hole.x;
+        const x1 = sd > 0 ? W : sd < 0 ? -L.stairX : hold.hole.x;
+        box(x0, x1, f.y0, f.y0 + (f.rise * (k + 1)) / f.n, Math.min(za, zb), Math.max(za, zb), 'tread');
+      }
   return out;
 }
 export const SHIP_BOXES = buildShipBoxes();
 const inXZ = (b: ShipBox, x: number, z: number, r = 0) => x > b.x0 - r && x < b.x1 + r && z > b.z0 - r && z < b.z1 + r;
 /** the highest surface under (x, z) that a fighter whose feet are at y stands on (steps up to 0.6 m count) */
 export function shipFloorAt(x: number, z: number, y: number) {
-  let g = 0;
+  let g = SHIP_LAYOUT.holdY;
   for (const b of SHIP_BOXES) if (b.y1 <= y + 0.6 && b.y1 > g && inXZ(b, x, z)) g = b.y1;
   return g;
 }
@@ -1036,18 +1082,27 @@ export function shipSolidAt(x: number, y: number, z: number, r = 0) {
   return false;
 }
 /** which room or deck a point is on (for the AI's routing) */
-export type ShipRegion = 'deck' | 'foreCabin' | 'fore' | 'greatCabin' | 'quarter' | 'captain' | 'poop';
+export type ShipRegion = 'hold' | 'deck' | 'foreCabin' | 'fore' | 'greatCabin' | 'quarter' | 'captain' | 'poop' | 'hall' | 'castle' | 'lookout' | 'roof';
+export function shipLevel(y: number) {
+  return Math.floor((y + 1.6) / SHIP_LAYOUT.H);
+}
 export function shipRegion(x: number, y: number, z: number): ShipRegion {
   const L = SHIP_LAYOUT;
-  if (y >= L.poop.y - 0.8) return 'poop';
-  if (y < 2.4) {
-    if (z < L.fore.edge - L.wallT + 0.05) return 'foreCabin';
-    if (z > L.quarter.edge + L.wallT - 0.05) return 'greatCabin';
+  const lv = shipLevel(y);
+  const inside = (edge: number) => z > edge + L.wallT * 0.5;
+  if (lv <= -1) return 'hold';
+  if (lv === 0) {
+    if (z < L.fore.edge - L.wallT * 0.5) return 'foreCabin';
+    if (inside(L.tiers[0].edge)) return 'greatCabin';
     return 'deck';
   }
-  if (z < 0) return 'fore';
-  if (z > L.poop.edge + L.wallT - 0.05 && Math.abs(x) < L.captainHalf) return 'captain';
-  return 'quarter';
+  if (lv === 1) {
+    if (z < 0) return 'fore';
+    return inside(L.tiers[1].edge) ? 'captain' : 'quarter';
+  }
+  if (lv === 2) return inside(L.tiers[2].edge) ? 'hall' : 'poop';
+  if (lv === 3) return inside(L.tiers[3].edge) ? 'lookout' : 'castle';
+  return 'roof';
 }
 // ----------------------------------------------------------------------
 // 天阙之巅: three concentric jade rings that break away during the round.

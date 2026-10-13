@@ -78,7 +78,7 @@ function oceanGeometry(n = 300, half = 300) {
   return g;
 }
 
-export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
+export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?: { halfW: number; z0: number; z1: number }) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
@@ -87,6 +87,8 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
       // the rogue wave: x = side (±1), y = where its face is (x in the sea frame), z = height, w = how much it's breaking
       uRogue: { value: new THREE.Vector4(0, 999, 0, 0) },
       uHull: { value: new THREE.Vector4(hull.halfW, (hull.z0 + hull.z1) / 2, (hull.z1 - hull.z0) / 2, 0) },
+      // the hold sits below the waterline: no sea inside it
+      uHold: { value: new THREE.Vector3(hold ? hold.halfW : -1, hold ? hold.z0 : 0, hold ? hold.z1 : 0) },
     },
     vertexShader: /* glsl */ `
       uniform float uTime; uniform vec4 uRogue; uniform vec4 uHull;
@@ -160,10 +162,11 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }) {
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uFog; uniform float uLightning; uniform float uTime;
+      uniform vec3 uFog; uniform float uLightning; uniform float uTime; uniform vec3 uHold;
       varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP; varying float vRogue; varying float vFace;
       ${NOISE}
       void main(){
+        if (abs(vWorld.x) < uHold.x && vWorld.z > uHold.y && vWorld.z < uHold.z) discard;
         vec3 V = normalize(cameraPosition - vWorld);
         float dist = length(cameraPosition - vWorld);
         // fine wind ripples on top of the waves, fading with distance
@@ -384,7 +387,7 @@ export function CrestSpray({ rogue }: { rogue: THREE.Vector4 }) {
     for (let i = 0; i < N; i++) {
       pos[i * 3] = 0;
       pos[i * 3 + 1] = 0;
-      pos[i * 3 + 2] = (Math.random() * 2 - 1) * 36; // along the crest
+      pos[i * 3 + 2] = (Math.random() * 2 - 1) * 52 - 4; // along the crest
       seed[i * 3] = Math.random(); // phase
       seed[i * 3 + 1] = 0.5 + Math.random(); // size
       seed[i * 3 + 2] = 0.6 + Math.random() * 0.8; // gust strength

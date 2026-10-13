@@ -289,7 +289,7 @@ function GameImpl({
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
-  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0 });
+  const shipAiRef = useRef({ goal: -1, cool: 3, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0 });
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0]);
@@ -3294,7 +3294,7 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false };
       mapRuntime.ballistae = SHIP_LAYOUT.ballistae.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0 };
+      shipAiRef.current = { goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -4553,7 +4553,33 @@ function GameImpl({
         }
         break;
       }
+      if (!c.interactHint) shipMeal(i, c, pressed);
       return false;
+    }
+    /** the table of food in the hold: F to eat, heals a tenth of the health you've lost (12 s between helpings) */
+    function shipMeal(i: number, c: CombatantState, pressed: boolean) {
+      const T = SHIP_LAYOUT.table;
+      if (c.pos[1] > SHIP_LAYOUT.holdY + 0.5) return;
+      const dx = Math.max(0, Math.abs(c.pos[0] - T.x) - T.hx);
+      const dz = Math.max(0, Math.abs(c.pos[2] - T.z) - T.hz);
+      if (Math.hypot(dx, dz) > 1.3) return;
+      const cd = c.cooldowns['meal'] || 0;
+      const lost = c.maxHp - c.hp;
+      if (cd > 0) {
+        c.interactHint = `饭菜 · ${cd.toFixed(0)} 秒后可再吃`;
+        return;
+      }
+      c.interactHint = lost > 1 ? `F 吃饭 · 回复已损失气血 ${Math.round(SHIP_LAYOUT.meal.share * 100)}%` : '饭菜 · 气血已满';
+      if (!pressed || lost <= 1) return;
+      const heal = Math.max(1, Math.round(lost * SHIP_LAYOUT.meal.share));
+      c.hp = Math.min(c.maxHp, c.hp + heal);
+      c.cooldowns['meal'] = SHIP_LAYOUT.meal.cooldown;
+      const at = vB.set(c.pos[0], c.pos[1] + 1.2, c.pos[2]);
+      vfx.sparkBurst(at, 16, '#86efac', 4, 0.07, UP, 0.6);
+      vfx.ring(vC.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.2, '#4ade80', 0.5, 0.12);
+      vfx.dustPuff(vC.set(T.x, SHIP_LAYOUT.holdY + T.h + 0.3, T.z), 6, 0.3, 0.8, 0.8, '#f5f0e6');
+      vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), `+${heal}`, false, '#4ade80');
+      if (i === 0) onRoundEvent?.({ type: 'toast', text: `吃了一口热饭，回复 ${heal} 气血` });
     }
     function looseBolt(i: number, k: number, c: CombatantState, foe: CombatantState) {
       const b = mapRuntime.ballistae[k];
@@ -4615,7 +4641,7 @@ function GameImpl({
             gameAudio.playDartStick();
             break;
           }
-          if (Math.abs(bo.x) > 9.5 || bo.y < -3) {
+          if (Math.abs(bo.x) > 12.6 || Math.abs(bo.z) > 46) {
             // over the side into the sea
             if (bo.y < -3) vfx.sparkBurst(vB.set(bo.x, -3.2, bo.z), 8, '#cfe8ff', 4, 0.08, UP, 0.4);
             bo.t = Math.min(bo.t, 0.4);
@@ -4720,7 +4746,7 @@ function GameImpl({
               best = k;
             }
           }
-          if (best >= 0 && bestD < 20 && Math.random() < (dist > 11 ? 0.5 : 0.3)) {
+          if (best >= 0 && bestD < 34 && Math.random() < (dist > 11 ? 0.5 : 0.3)) {
             S.goal = best;
             S.goalT = 0;
           }
@@ -4729,11 +4755,33 @@ function GameImpl({
       let tx = foe.pos[0];
       let ty = foe.pos[1];
       let tz = foe.pos[2];
-      if (S.goal >= 0) {
+      // badly hurt with the player well away: go down to the hold and eat
+      const T = SHIP_LAYOUT.table;
+      const mealReady = !(me.cooldowns['meal'] > 0);
+      if (S.goal < 0 && mealReady && me.hp < me.maxHp * 0.55 && dist > 9 && isFree(me) && Math.random() < dt * 0.5) {
+        S.goal = 99;
+        S.goalT = 0;
+      }
+      if (S.goal === 99) {
+        S.goalT += dt;
+        if (!mealReady || dist < 4 || S.goalT > 18) {
+          S.goal = -1;
+          S.cool = 6;
+        } else {
+          tx = T.x + T.hx + 0.7;
+          ty = SHIP_LAYOUT.holdY;
+          tz = T.z;
+          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.0 && me.pos[1] < ty + 0.5) {
+            out.interact = !me.intPrev;
+            out.move.set(0, 0, 0);
+            return;
+          }
+        }
+      } else if (S.goal >= 0) {
         const d = SHIP_LAYOUT.ballistae[S.goal];
         S.goalT += dt;
         // give it up to fight if the player closes in, someone else took it, or it's taking too long
-        if (B[S.goal].user >= 0 || dist < 5 || S.goalT > 9) {
+        if (B[S.goal].user >= 0 || dist < 5 || S.goalT > 16) {
           S.goal = -1;
           S.cool = 8;
         } else {
@@ -4759,54 +4807,60 @@ function GameImpl({
         S.edge = '';
         return;
       }
-      // breadth-first over the rooms and decks
-      const adj: Record<ShipRegion, ShipRegion[]> = {
-        deck: ['foreCabin', 'fore', 'greatCabin', 'quarter'],
-        foreCabin: ['deck'],
-        fore: ['deck'],
-        greatCabin: ['deck'],
-        quarter: ['deck', 'captain', 'poop'],
-        captain: ['quarter'],
-        poop: ['quarter'],
+      // breadth-first over the rooms and decks: doors between a deck and the cabin under the next deck up,
+      // stairs (both ways) between decks
+      const L = SHIP_LAYOUT;
+      const sx = (me.pos[0] >= 0 ? 1 : -1) * 10.3; // the middle of the side flight on its own side
+      const ways: Record<string, [number, number][]> = {};
+      const door = (a: ShipRegion, b: ShipRegion, edge: number, inward: 1 | -1) => {
+        ways[`${a}>${b}`] = [[0, edge - inward * 1.1], [0, edge + inward * 1.5]];
+        ways[`${b}>${a}`] = [[0, edge + inward * 1.1], [0, edge - inward * 1.5]];
       };
+      const stairs = (lo: ShipRegion, hi: ShipRegion, f: (typeof L.flights)[number], x: number) => {
+        const dir = Math.sign(f.head - f.foot);
+        const foot: [number, number] = [x, f.foot - dir * 0.9];
+        const head: [number, number] = [x, f.head + dir * 0.9];
+        ways[`${lo}>${hi}`] = [foot, head];
+        ways[`${hi}>${lo}`] = [head, foot];
+      };
+      const F = L.flights;
+      door('deck', 'foreCabin', L.fore.edge, -1);
+      door('deck', 'greatCabin', L.tiers[0].edge, 1);
+      door('quarter', 'captain', L.tiers[1].edge, 1);
+      door('poop', 'hall', L.tiers[2].edge, 1);
+      door('castle', 'lookout', L.tiers[3].edge, 1);
+      stairs('deck', 'fore', F[0], sx);
+      stairs('deck', 'quarter', F[1], sx);
+      stairs('quarter', 'poop', F[2], sx);
+      stairs('poop', 'castle', F[3], sx);
+      stairs('castle', 'roof', F[4], sx);
+      stairs('hold', 'deck', F[5], 0);
+      const adj: Partial<Record<ShipRegion, ShipRegion[]>> = {};
+      for (const k of Object.keys(ways)) {
+        const [a, b] = k.split('>') as [ShipRegion, ShipRegion];
+        (adj[a] ||= []).push(b);
+      }
       const prev: Partial<Record<ShipRegion, ShipRegion>> = { [from]: from };
       const q: ShipRegion[] = [from];
       while (q.length) {
         const r = q.shift()!;
         if (r === to) break;
-        for (const n of adj[r]) if (!(n in prev)) { prev[n] = r; q.push(n); }
+        for (const n of adj[r] || []) if (!(n in prev)) { prev[n] = r; q.push(n); }
       }
+      if (!(to in prev)) return;
       let next: ShipRegion = to;
       while (prev[next] !== from && prev[next] !== undefined && prev[next] !== next) next = prev[next]!;
-      const L = SHIP_LAYOUT;
-      // which flight of stairs: the side it's already on
-      const sx = (me.pos[0] >= 0 ? 1 : -1) * 7.7; // the middle of the flight, well clear of its open edge
-      const cx = THREE.MathUtils.clamp(me.pos[0], -4.5, 4.5);
-      const ways: Record<string, [number, number][]> = {
-        'deck>foreCabin': [[0, L.fore.edge + 1.0], [0, L.fore.edge - 1.4]],
-        'foreCabin>deck': [[0, L.fore.edge - 1.0], [0, L.fore.edge + 1.4]],
-        'deck>greatCabin': [[0, L.quarter.edge - 1.0], [0, L.quarter.edge + 1.4]],
-        'greatCabin>deck': [[0, L.quarter.edge + 1.0], [0, L.quarter.edge - 1.4]],
-        'quarter>captain': [[0, L.poop.edge - 0.9], [0, L.poop.edge + 1.2]],
-        'captain>quarter': [[0, L.poop.edge + 0.9], [0, L.poop.edge - 1.2]],
-        // up: by the stairs along the bulwark (foot, then past the head); down: walk off the edge
-        'deck>fore': [[sx, L.foreStairs.foot + 0.9], [sx, L.foreStairs.head - 0.9]],
-        'fore>deck': [[cx, L.fore.edge - 0.4], [cx, L.fore.edge + 2.0]],
-        'deck>quarter': [[sx, L.quarterStairs.foot - 0.9], [sx, L.quarterStairs.head + 0.3]],
-        'quarter>deck': [[cx, L.quarter.edge + 0.6], [cx, L.quarter.edge - 2.0]],
-        'quarter>poop': [[sx, L.poopStairs.foot + 0.1], [sx, L.poopStairs.head + 0.9]],
-        'poop>quarter': [[cx, L.poop.edge + 0.4], [cx, L.poop.edge - 1.6]],
-      };
       const key = `${from}>${next}`;
       const w = ways[key];
       if (!w) return;
       if (S.edge !== key) {
         S.edge = key;
         S.stage = 0;
+        S.y0 = me.pos[1];
       }
       if (S.stage === 0 && Math.hypot(w[0][0] - me.pos[0], w[0][1] - me.pos[2]) < 0.7) S.stage = 1;
       // knocked off the flight partway up: back to its foot and start again
-      if (S.stage === 1 && me.pos[1] < 0.15 && Math.abs(me.pos[0] - w[0][0]) > 1.2 && Math.abs(w[1][1] - w[0][1]) > 3) S.stage = 0;
+      if (S.stage === 1 && me.isGrounded && Math.abs(me.pos[0] - w[0][0]) > 1.6 && Math.abs(w[1][1] - w[0][1]) > 3 && shipRegion(me.pos[0], me.pos[1], me.pos[2]) === from && Math.abs(me.pos[1] - S.y0) < 0.3) S.stage = 0;
       const pt = w[S.stage];
       out.move.set(pt[0] - me.pos[0], 0, pt[1] - me.pos[2]);
       if (out.move.lengthSq() > 0.01) out.move.normalize();
@@ -4827,7 +4881,7 @@ function GameImpl({
       }
       // spray off the bow as she ploughs into the swell
       if (Math.random() < dt * 0.8) {
-        vB.set((Math.random() - 0.5) * 3, 0.8, -(map.rect!.hz + 3.5));
+        vB.set((Math.random() - 0.5) * 3, 3.5, -(map.rect!.hz + 13));
         vfx.dustPuff(vB, 5, 0.8, 4, 1.0, '#cfe3f5');
         vfx.sparkBurst(vB, 6, '#e0f2ff', 7, 0.08, vC.set(0, 1, 0.4), 0.6);
       }

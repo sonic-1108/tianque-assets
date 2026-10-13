@@ -976,17 +976,17 @@ function Rain({ hideUnder }: { hideUnder?: (x: number, y: number, z: number) => 
 }
 
 const SEA_Y = -3.4; // the sea surface sits well below the deck: a tall-sided war junk
-const MAST_TOP = 16.6;
+const MAST_TOP = 31;
 const SAILS = [
-  { w: 12, h: 10, y: 10.6 },
-  { w: 10.5, h: 8.8, y: 11.4 },
+  { w: 17, h: 15, y: 19.5 },
+  { w: 19, h: 17, y: 20.5 },
 ];
 
 function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
   // the sea in its own frame: the hull's waterline footprint keeps the chop down right beside it
-  const ocean = useMemo(() => makeOcean({ halfW: 9.4, z0: -33, z1: 29 }), []);
+  const ocean = useMemo(() => makeOcean({ halfW: 12.6, z0: -50, z1: 41 }, { halfW: 11.8, z0: SHIP_LAYOUT.hold.z0 - 0.2, z1: SHIP_LAYOUT.hold.z1 + 0.2 }), []);
   const worldRef = useRef<THREE.Group>(null);
   const deckMat = useRef<THREE.MeshStandardMaterial>(null);
   const crash = useRef({ t: -1, side: 1, last: 0, wet: 0 });
@@ -1007,8 +1007,8 @@ function SeaMap() {
     // The deck is the fighters' frame of reference, so the world rolls around the ship instead:
     // sample the long swell under the hull: centre for heave, the beams for roll, bow and stern for pitch
     const h0 = (seaSwell(0, 0, t) + seaSwell(0, -15, t) + seaSwell(0, 15, t)) / 3;
-    const roll = Math.atan2(seaSwell(9.6, 0, t) - seaSwell(-9.6, 0, t), 19.2);
-    const pitch = Math.atan2(seaSwell(0, -28, t) - seaSwell(0, 26, t), 54);
+    const roll = Math.atan2(seaSwell(12.9, 0, t) - seaSwell(-12.9, 0, t), 25.8);
+    const pitch = Math.atan2(seaSwell(0, -45, t) - seaSwell(0, 38, t), 83);
     const c = crash.current;
     if (mapRuntime.waveRise > 1.05 && c.last <= 1.05) {
       c.t = 0;
@@ -1020,7 +1020,7 @@ function SeaMap() {
       c.t += Math.min(0.05, dtf);
       if (c.t > 3) c.t = -1;
     }
-    rogueState(u.uRogue.value, c.t, 9.6);
+    rogueState(u.uRogue.value, c.t, 12.9);
     // the rearing wave heels her over toward it, and the blow throws her back the other way
     const heel = mapRuntime.waveSide * (Math.min(1, mapRuntime.waveRise) * 0.06 - (c.t >= 0 && c.t < 1.2 ? Math.sin((c.t / 1.2) * Math.PI) * 0.1 : 0));
     mapRuntime.shipRoll = roll * 0.8 + heel;
@@ -1059,8 +1059,8 @@ function SeaMap() {
         pts.push(bx, y0 - H / 2 + v * H, p.z + 0.47, hullW(zb) - 0.1, sheer(zb) + 1.2, zb);
       }
     });
-    pts.push(0, MAST_TOP, masts[0].z, 0, 7.2, -37.6);
-    pts.push(0, MAST_TOP, masts[1].z, 0, 10.5, 25.8);
+    pts.push(0, MAST_TOP, masts[0].z, 0, sheer(-52) + 0.4, -52);
+    pts.push(0, MAST_TOP, masts[1].z, 0, sheer(SHIP_LAYOUT.tiers[3].edge + 0.5) + 0.2, SHIP_LAYOUT.tiers[3].edge + 0.5);
     pts.push(0, MAST_TOP, masts[0].z, 0, MAST_TOP, masts[1].z);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -1096,37 +1096,35 @@ function SeaMap() {
       </group>
       </group>
       {/* the rogue wave breaking over the side: spray over the rail and foaming water across the main deck */}
-      <WaveCrash beam={9.3} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.quarter.edge]} />
+      <WaveCrash beam={12.5} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.tiers[0].edge]} />
       <group ref={shipRef}>
-        {/* deck */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-          <planeGeometry args={[hx * 2 + 1.0, hz * 2 + 1.3]} />
-          <meshStandardMaterial ref={deckMat} map={planks} roughness={0.78} metalness={0.02} color="#8c7c6c" envMapIntensity={0.2} />
-        </mesh>
         <ShipHull />
-        <ShipStructure deckMap={planks} boxes={SHIP_BOXES} layout={SHIP_LAYOUT} />
+        <ShipStructure deckMap={planks} boxes={SHIP_BOXES} deckMatRef={deckMat} />
         {SHIP_LAYOUT.ballistae.map((b, k) => (
           <Ballista key={k} k={k} at={b} rt={mapRuntime} />
         ))}
         <Bolts rt={mapRuntime} />
-        <SternCastle base={SHIP_LAYOUT.poop.y} />
-        <pointLight position={[0, 2.6, SHIP_LAYOUT.quarter.edge - 1.6]} color="#ffb060" intensity={8} distance={12} decay={1.5} />
+        <SternCastle base={SHIP_LAYOUT.tiers[3].y} />
+        <pointLight position={[0, 3.2, -6]} color="#ffb060" intensity={10} distance={22} decay={1.4} />
         <RailLanterns />
-        <HatchGrate position={[0, 0, -2.6]} w={2.4} d={2.8} />
-        <HatchGrate position={[0, 0, 11]} w={2.0} d={2.0} />
-        <HatchGrate position={[-2.6, SHIP_LAYOUT.fore.y, -23.2]} w={1.6} d={1.6} />
+        <HatchGrate position={[5, 0, -17]} w={2.0} d={2.0} />
+        <HatchGrate position={[-4, SHIP_LAYOUT.fore.y, -35]} w={1.6} d={1.6} />
         <RopeCoil position={[1.5, 0, -10.4]} />
-        <RopeCoil position={[-1.5, 0, 8.4]} r={0.36} />
-        <RopeCoil position={[-2.6, SHIP_LAYOUT.poop.y, 24.0]} r={0.5} />
-        <RopeCoil position={[3.0, SHIP_LAYOUT.quarter.y, 20.4]} r={0.4} />
+        <RopeCoil position={[-3.5, 0, 6.4]} r={0.36} />
+        <RopeCoil position={[-3, SHIP_LAYOUT.tiers[1].y, 25.0]} r={0.5} />
+        <RopeCoil position={[3.0, SHIP_LAYOUT.tiers[0].y, 18.4]} r={0.4} />
         {/* masts with battened junk sails high above the deck, a lantern hung on each, and pennants */}
         {def.pillars!.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
             <Mast r={p.r} h={MAST_TOP + 0.4} />
+            {/* down through the hold to the keelson */}
+            <mesh position={[0, SHIP_LAYOUT.holdY / 2, 0]} castShadow>
+              <cylinderGeometry args={[p.r, p.r * 1.05, -SHIP_LAYOUT.holdY, 12]} />
+              <meshStandardMaterial color="#3a2416" roughness={0.8} />
+            </mesh>
             <JunkSail width={SAILS[i].w} height={SAILS[i].h} y={SAILS[i].y} seed={3 + i * 7} />
             <Banner position={[0, MAST_TOP - 0.4, 0]} color="#7a1a14" trim="#c9a24a" height={2.2} width={0.6} pole={1.6} />
             <ShipLantern position={[0, 3.6, -p.r - 0.18]} seed={i * 3} glow={1.3} />
-            <pointLight position={[0, 2.9, -p.r - 0.5]} color="#ff9a50" intensity={7} distance={9} decay={1.5} />
           </group>
         ))}
         <lineSegments geometry={rigging}>
