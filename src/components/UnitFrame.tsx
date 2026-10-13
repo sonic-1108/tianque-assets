@@ -26,7 +26,7 @@ const DOT: Record<UnitStats['chips'][number]['tone'], string> = {
 
 const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Berserker: `${import.meta.env.BASE_URL}portraits/berserker.png`,
-  Ranger: `${import.meta.env.BASE_URL}portraits/ranger.png`,
+  Ranger: `${import.meta.env.BASE_URL}portraits/ranger.png?v=2`,
   BuddhistMage: `${import.meta.env.BASE_URL}portraits/monk.png`,
   Shadowblade: `${import.meta.env.BASE_URL}portraits/shadowblade.png`,
 };

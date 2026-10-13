@@ -6,7 +6,7 @@ import { CharacterClassId } from '../../types';
 
 const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Berserker: './portraits/berserker.png',
-  Ranger: './portraits/ranger.png',
+  Ranger: './portraits/ranger.png?v=2',
   BuddhistMage: './portraits/monk.png',
   Shadowblade: './portraits/shadowblade.png',
 };
@@ -242,7 +242,7 @@ const LOBBY_CSS = `
 .tq-hero.on { transform:translateY(-10px); border-color:var(--acc); box-shadow:0 18px 40px -18px rgba(60,35,15,.45), inset 0 0 0 1px var(--acc); }
 .tq-hero-art { position:relative; height:clamp(150px,24vh,250px); display:flex; align-items:flex-end; justify-content:center; }
 .tq-hero-art img { position:relative; height:100%; width:auto; max-width:100%; object-fit:contain; filter:saturate(.85) contrast(1.02); transition:filter .25s; -webkit-mask-image:linear-gradient(to bottom, #000 72%, transparent 100%); mask-image:linear-gradient(to bottom, #000 72%, transparent 100%); }
-.tq-hero:not(.on) .tq-hero-art img { filter:grayscale(.55) saturate(.7) brightness(1.03); }
+.tq-hero:not(.on) .tq-hero-art img { filter:saturate(.8) brightness(.97); }
 .tq-hero-wash { position:absolute; left:50%; bottom:6%; width:86%; aspect-ratio:1; transform:translateX(-50%); border-radius:50%;
   background:radial-gradient(circle, color-mix(in srgb, var(--acc) 26%, transparent) 0%, transparent 66%); opacity:.0; transition:opacity .3s; }
 .tq-hero.on .tq-hero-wash, .tq-hero:hover .tq-hero-wash { opacity:1; }
