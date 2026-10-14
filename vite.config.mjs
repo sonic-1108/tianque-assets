@@ -6,7 +6,11 @@ import { hashTable, ITER } from './tools/admin-codes.mjs';
 const stamp = new Date().toLocaleString('zh-CN', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 export default defineConfig({
   base: './',
-  plugins: [react()],
+  plugins: [
+    react(),
+    // version.json beside the page: the running game polls it (never cached) to notice a newer deploy
+    { name: 'tq-version', generateBundle() { this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: stamp }) }); } },
+  ],
   define: {
     __BUILD__: JSON.stringify(stamp),
     // admin.html passcode: slow hashes of each day's code (null when ADMIN_SEED isn't set: the page stays open)

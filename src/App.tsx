@@ -587,7 +587,21 @@ export default function App() {
   // who's playing: a heartbeat for admin.html (nickname, screen, map, class, match type)
   useEffect(() => {
     startPresence(typeof __BUILD__ !== 'undefined' ? __BUILD__ : '');
+    // a newer version deployed while this page is open (GitHub Pages caches the page for up to 10 minutes):
+    // reload by itself if we're in the lobby and not in a room, otherwise say so
+    const checkVersion = () =>
+      fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((v) => {
+          if (!v?.build || v.build === __BUILD__) return;
+          setNewBuild(v.build);
+        })
+        .catch(() => {});
+    checkVersion();
+    const vt = window.setInterval(checkVersion, 60000);
+    return () => window.clearInterval(vt);
   }, []);
+  const [newBuild, setNewBuild] = useState('');
   useEffect(() => {
     setPresence({
       name: nickname || '无名',
@@ -1214,6 +1228,17 @@ export default function App() {
         })()}
       </div>
 
+      {newBuild && (
+        <button
+          className="absolute top-1 right-1/2 translate-x-1/2 z-50 rounded-full bg-amber-400 px-4 py-1 text-xs font-bold text-black shadow-lg"
+          style={{ top: 2 }}
+          onClick={() => {
+            location.href = location.pathname + '?v=' + encodeURIComponent(newBuild);
+          }}
+        >
+          有新版本（{newBuild}），点这里刷新 · 联机时两边都要刷新
+        </button>
+      )}
       {/* TOP CENTER: arena and score */}
       <div className="absolute top-3 inset-x-0 z-20 pointer-events-none flex flex-col items-center gap-1.5">
         <div className="flex flex-col items-center bg-zinc-950/75 px-5 py-1.5 rounded-xl border border-zinc-700/70 shadow-md backdrop-blur-md">
