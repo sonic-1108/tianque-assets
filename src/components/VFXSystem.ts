@@ -1007,6 +1007,17 @@ export class VFXSystem {
     }
   }
 
+  /** fine grains peeling off and drifting away on the wind (being eaten by the 飞虫沙暴) */
+  grains(posIn: THREE.Vector3, count: number, color: THREE.ColorRepresentation, wind: THREE.Vector3, radius = 0.3, size = 0.05) {
+    const pos = origin.copy(posIn);
+    for (let i = 0; i < count; i++) {
+      tmpV2.set(pos.x + (Math.random() - 0.5) * radius * 2, pos.y + (Math.random() - 0.5) * 0.12, pos.z + (Math.random() - 0.5) * radius * 2);
+      tmpV.set(Math.random() - 0.5, Math.random() * 0.6, Math.random() - 0.5).multiplyScalar(0.8).addScaledVector(wind, 0.5 + Math.random() * 0.8);
+      tmpV.y += 0.3 + Math.random() * 0.7;
+      this.sparks.emit(tmpV2, tmpV, color, size * (0.6 + Math.random() * 0.9), 1.0 + Math.random() * 1.4, { drag: 0.5, gravity: -0.25 });
+    }
+  }
+
   embers(posIn: THREE.Vector3, count: number, color: THREE.ColorRepresentation, radius = 0.6, rise = 2.5, size = 0.07) {
     const pos = origin.copy(posIn);
     for (let i = 0; i < count; i++) {

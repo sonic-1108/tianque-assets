@@ -429,6 +429,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const leanRef = useRef(new THREE.Vector2());
   const weaponScaledRef = useRef(false);
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  /** 飞虫沙暴: world height above which the body is gone (99 = whole) */
+  const cutU = useMemo(() => ({ value: 99 }), []);
+  const eatenRef = useRef(false);
   const climbKickRef = useRef(-1);
   const sitBlendRef = useRef(0);
   const castRef = useRef(true);
@@ -489,7 +492,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.envMapIntensity = 1.6;
           m.roughness = Math.min(m.roughness ?? 1, 0.85);
         }
-        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback);
+        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU);
         o.material = m;
         mats.push(m);
       }
@@ -624,6 +627,22 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const pose = poseRootRef.current;
     if (!c || !mixer || !pose || !asset) return;
     const delta = c.hitStopTimer > 0 ? rawDelta * 0.08 : rawDelta;
+    {
+      // 飞虫沙暴: dissolve from the head down; the parts already gone cast no shadow, the weapons go with the hands
+      const dv = c.devoured ?? 0;
+      cutU.value = dv > 0 ? c.pos[1] + 1.95 - dv * 2.2 : 99;
+      const eaten = dv > 0;
+      if (eaten !== eatenRef.current) {
+        eatenRef.current = eaten;
+        pose.traverse((o: any) => {
+          if (o.isMesh) o.castShadow = !eaten;
+        });
+      }
+      const w = weaponsRef.current;
+      const showW = dv < 0.45;
+      if (w.right && w.right.group.visible !== showW) w.right.group.visible = showW;
+      if (w.left && w.left.group.visible !== showW) w.left.group.visible = showW;
+    }
 
     // Size weapons once the model's world scale is known
     if (!weaponScaledRef.current && weaponsRef.current.right?.group.parent) {

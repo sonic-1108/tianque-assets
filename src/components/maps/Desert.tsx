@@ -514,6 +514,81 @@ function FortWalls() {
   );
 }
 
+/** four barracks (营房) against the inside of the north and south walls: earth walls, a door, a tiled lean-to roof */
+function Barracks() {
+  const K = DESERT.barracks;
+  const inner = F.half - F.wall;
+  const { walls, roofs, wood } = useMemo(() => {
+    const w: THREE.BufferGeometry[] = [];
+    const r: THREE.BufferGeometry[] = [];
+    const d: THREE.BufferGeometry[] = [];
+    const mid = (K.x0 + K.x1) / 2;
+    for (const sx of [1, -1])
+      for (const sz of [1, -1]) {
+        const X = (a: number, b: number) => (sx > 0 ? [a, b] : [-b, -a]);
+        const Z = (a: number, b: number) => (sz > 0 ? [a, b] : [-b, -a]);
+        const add = (xa: number, xb: number, y0: number, y1: number, za: number, zb: number, list = w) => {
+          const [x0, x1] = X(xa, xb);
+          const [z0, z1] = Z(za, zb);
+          list.push(box(x0, x1, y0, y1, z0, z1));
+        };
+        add(K.x0, K.x0 + K.wall, 0, K.h, K.z0, inner);
+        add(K.x1 - K.wall, K.x1, 0, K.h, K.z0, inner);
+        add(K.x0, mid - K.door, 0, K.h, K.z0, K.z0 + K.wall);
+        add(mid + K.door, K.x1, 0, K.h, K.z0, K.z0 + K.wall);
+        add(mid - K.door, mid + K.door, 2.45, K.h, K.z0, K.z0 + K.wall);
+        // lean-to roof: high against the fort wall, sloping down over the door, with eaves
+        const roof = new THREE.BoxGeometry(K.x1 - K.x0 + 0.9, 0.22, inner - K.z0 + 1.1);
+        roof.rotateX(sz > 0 ? 0.16 : -0.16);
+        roof.translate(sx * mid, K.h + 0.45, sz * ((K.z0 + inner) / 2 - 0.45));
+        r.push(roof);
+        // ridge tiles along the eave
+        const eave = new THREE.CylinderGeometry(0.1, 0.1, K.x1 - K.x0 + 0.9, 6);
+        eave.rotateZ(Math.PI / 2);
+        eave.translate(sx * mid, K.h + 0.08, sz * (K.z0 - 0.5));
+        r.push(eave);
+        // door frame and one door leaf standing open inward
+        add(mid - K.door - 0.12, mid - K.door, 0, 2.5, K.z0 - 0.05, K.z0 + K.wall + 0.05, d);
+        add(mid + K.door, mid + K.door + 0.12, 0, 2.5, K.z0 - 0.05, K.z0 + K.wall + 0.05, d);
+        add(mid - K.door, mid + K.door, 2.38, 2.52, K.z0 - 0.06, K.z0 + K.wall + 0.06, d);
+        add(mid + K.door - 0.1, mid + K.door - 0.02, 0.05, 2.35, K.z0 + K.wall, K.z0 + K.wall + 1.6, d);
+      }
+    return {
+      walls: mergeGeometries(w.map(nonIndexed), false)!,
+      roofs: mergeGeometries(r.map(nonIndexed), false)!,
+      wood: mergeGeometries(d.map(nonIndexed), false)!,
+    };
+  }, []);
+  const earth = useMemo(() => makeEarthMaterial('#a99274'), []);
+  const mid = (K.x0 + K.x1) / 2;
+  return (
+    <group>
+      <mesh geometry={walls} material={earth} castShadow receiveShadow />
+      <mesh geometry={roofs} castShadow receiveShadow>
+        <meshStandardMaterial color="#55504c" roughness={0.8} />
+      </mesh>
+      <mesh geometry={wood} castShadow>
+        <meshStandardMaterial color="#5a3a22" roughness={0.85} />
+      </mesh>
+      {/* a lantern over each door, and a dim lamp inside so the room isn't black */}
+      {[1, -1].flatMap((sx) =>
+        [1, -1].map((sz) => (
+          <group key={`${sx}${sz}`}>
+            <mesh position={[sx * mid, 2.75, sz * (K.z0 - 0.25)]}>
+              <cylinderGeometry args={[0.16, 0.16, 0.34, 8]} />
+              <meshStandardMaterial color="#c2410c" emissive="#ff7a2a" emissiveIntensity={1.6} roughness={0.6} />
+            </mesh>
+            <mesh position={[sx * mid, 0.02, sz * ((K.z0 + inner) / 2 + 0.2)]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[K.x1 - K.x0 - 1.0, inner - K.z0 - 0.9]} />
+              <meshStandardMaterial color="#6a5440" roughness={0.95} />
+            </mesh>
+          </group>
+        ))
+      )}
+    </group>
+  );
+}
+
 /** the gate pavilions (城楼) over the north and south gates: timber, red pillars, a grey tiled hip roof */
 function GatePavilion({ z }: { z: number }) {
   const y = F.towerH;
@@ -873,9 +948,9 @@ function DustWall() {
         depthWrite: false,
         side: THREE.BackSide,
         fog: false,
-        uniforms: { uT: { value: 0 }, uA: { value: 0 }, uWind: { value: 1 } },
+        uniforms: { uT: { value: 0 }, uA: { value: 0 }, uWind: { value: 1 }, uSwarm: { value: 0 } },
         vertexShader: /* glsl */ `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-        fragmentShader: /* glsl */ `varying vec3 vP; uniform float uT; uniform float uA; uniform float uWind;
+        fragmentShader: /* glsl */ `varying vec3 vP; uniform float uT; uniform float uA; uniform float uWind; uniform float uSwarm;
           ${GLSL_NOISE}
           void main(){
             float a = atan(vP.z, vP.x);
@@ -885,7 +960,11 @@ function DustWall() {
             float side = 0.55 + 0.45 * (-cos(a) * uWind);
             float al = smoothstep(1.0, 0.1, y) * (0.35 + n * 0.8) * side * uA;
             vec3 col = mix(vec3(0.72, 0.5, 0.3), vec3(0.88, 0.68, 0.45), n);
-            gl_FragColor = vec4(col, clamp(al, 0.0, 0.95));
+            // the insect swarm: a seething black-brown mass, flickering as it churns
+            float churn = noise(vec2(a * 40.0 + uT * 2.0 * uWind, y * 30.0 - uT * 1.5));
+            col = mix(col, vec3(0.08, 0.06, 0.05) + churn * 0.08, uSwarm);
+            al = max(al, uSwarm * smoothstep(1.0, 0.0, y) * (0.55 + n * 0.5) * (0.4 + 0.6 * side));
+            gl_FragColor = vec4(col, clamp(al, 0.0, 0.97));
           }`,
       }),
     []
@@ -895,6 +974,7 @@ function DustWall() {
     mat.uniforms.uT.value = st.clock.elapsedTime;
     mat.uniforms.uA.value = Math.max(D.warn * 0.9, D.sand);
     mat.uniforms.uWind.value = D.wind;
+    mat.uniforms.uSwarm.value = Math.max(D.swarmWarn, D.swarm);
   });
   return (
     <mesh material={mat} position={[0, -5, 0]}>
@@ -941,6 +1021,57 @@ function SandStorm() {
       x += cam.x;
       v.set(x, cam.y + y - 1.5, cam.z + z);
       sc.set(D.wind * (0.6 + s[3]), 1, 1);
+      M.compose(v, q, sc);
+      m.setMatrixAt(i, M);
+    }
+    m.instanceMatrix.needsUpdate = true;
+  });
+  return <instancedMesh ref={ref} args={[geo, mat, COUNT]} frustumCulled={false} />;
+}
+
+/** the 飞虫沙暴 swarm round the camera: thousands of dark flecks whirling downwind */
+function Swarm() {
+  const COUNT = 1600;
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const seeds = useMemo(() => {
+    const rand = seeded(29);
+    return Array.from({ length: COUNT }, () => [rand(), rand(), rand(), 0.5 + rand(), rand() * 6.28]);
+  }, []);
+  const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#17110c', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false }), []);
+  const geo = useMemo(() => new THREE.PlaneGeometry(0.09, 0.05), []);
+  const M = useMemo(() => new THREE.Matrix4(), []);
+  const q = useMemo(() => new THREE.Quaternion(), []);
+  const e = useMemo(() => new THREE.Euler(), []);
+  const v = useMemo(() => new THREE.Vector3(), []);
+  const sc = useMemo(() => new THREE.Vector3(1, 1, 1), []);
+  useFrame((st) => {
+    const m = ref.current;
+    if (!m) return;
+    const D = mapRuntime.desert;
+    const a = Math.max(D.swarm, D.swarmWarn > 0.75 ? (D.swarmWarn - 0.75) * 1.2 : 0);
+    m.visible = a > 0.02;
+    if (!m.visible) return;
+    mat.opacity = Math.min(1, a * 1.2);
+    const cam = st.camera.position;
+    const t = st.clock.elapsedTime;
+    const size = 22;
+    const n = Math.floor(COUNT * Math.min(1, a));
+    for (let i = 0; i < COUNT; i++) {
+      const s = seeds[i];
+      if (i >= n) {
+        M.makeScale(0, 0, 0);
+        m.setMatrixAt(i, M);
+        continue;
+      }
+      const sp = 7 * s[3];
+      const x = ((((s[0] * size + t * sp * D.wind) % size) + size) % size) - size / 2;
+      // each one loops and dives as it goes
+      const y = s[1] * 6 - 1 + Math.sin(t * 3 * s[3] + s[4]) * 0.6;
+      const z = s[2] * size - size / 2 + Math.cos(t * 2.3 * s[3] + s[4]) * 0.8;
+      v.set(cam.x + x, cam.y + y - 1.5, cam.z + z);
+      e.set(t * 9 + s[4], t * 4 * s[3], Math.sin(t * 30 + s[4]) * 1.2);
+      q.setFromEuler(e);
+      sc.set(1, 0.4 + Math.abs(Math.sin(t * 40 + s[4] * 3)), 1); // wings beating
       M.compose(v, q, sc);
       m.setMatrixAt(i, M);
     }
@@ -1034,6 +1165,7 @@ export function DesertMap() {
       <GatePavilion z={-(F.half - F.wall / 2)} />
       <Beacon />
       <Wells />
+      <Barracks />
       <Props />
       <Campfires />
       {banners.map((b, i) => (
@@ -1042,6 +1174,7 @@ export function DesertMap() {
       <SandDrifts />
       <DustWall />
       <SandStorm />
+      <Swarm />
     </group>
   );
 }

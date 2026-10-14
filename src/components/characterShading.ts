@@ -11,11 +11,20 @@ import type * as THREE from 'three';
 /** 0 normal .. 1 pitch-black night: dims the viewer-side fill and rim so characters vanish into the dark */
 export const TQ_DARK = { value: 0 };
 
-export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: boolean, monkGold: boolean) {
+export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: boolean, monkGold: boolean, cut?: { value: number }) {
   const rim = isPlayer ? 'vec3(1.0, 0.82, 0.55) * 0.22' : 'vec3(0.45, 0.68, 1.0) * 0.28';
   m.onBeforeCompile = (sh) => {
     sh.uniforms.tqDark = TQ_DARK;
-    let f = sh.fragmentShader.replace('void main() {', 'uniform float tqDark;\nvoid main() {');
+    // 飞虫沙暴: everything above world height tqCut is gone (eaten from the head down), with a glowing ragged edge
+    sh.uniforms.tqCut = cut ?? { value: 99 };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float tqWY;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\ntqWY = (modelMatrix * vec4(transformed, 1.0)).y;');
+    let f = sh.fragmentShader.replace('void main() {', 'uniform float tqDark;\nuniform float tqCut;\nvarying float tqWY;\nvoid main() {');
+    f = f.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+      float tqGrain = fract(sin(dot(floor(gl_FragCoord.xy / 2.0), vec2(12.9898, 78.233))) * 43758.5453);
+      float tqEdge = tqCut + (tqGrain - 0.5) * 0.16 - tqWY;
+      if (tqEdge < 0.0) discard;`);
     if (monkGold) {
       f = f
         .replace('#include <map_fragment>', `#include <map_fragment>
@@ -31,6 +40,8 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += tqSkin * vec3(0.13, 0.08, 0.015) * ${isPlayer ? '1.0' : '0.6'} * (1.0 - tqDark);`);
     }
+    f = f.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      totalEmissiveRadiance += vec3(0.9, 0.55, 0.2) * (1.0 - smoothstep(0.0, 0.07, tqEdge)) * step(tqCut, 50.0) * 1.5;`);
     f = f.replace('#include <aomap_fragment>', `#include <aomap_fragment>
       {
         vec3 tqV = normalize(vViewPosition);

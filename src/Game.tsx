@@ -16,7 +16,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, DESERT, desertSheltered } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, DESERT, desertSheltered, desertIndoor, desertCeil } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -981,7 +981,7 @@ function GameImpl({
         controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18, true); // the camera glides over steps and rails
       } else {
         controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), view.pos[1] - 2.5) : null;
-        controller.ceilAt = null;
+        controller.ceilAt = map.id === 'desert' && desertIndoor(view.pos[0], view.pos[2], view.pos[1]) ? (x: number, z: number) => Math.min(desertCeil(x, z), desertCeil(view.pos[0], view.pos[2])) : null;
         controller.solidAt = null;
       }
     }
@@ -3536,6 +3536,8 @@ function GameImpl({
         c.revived = 0;
         c.reviveT = 0;
         c.beaconHold = 0;
+        c.devoured = 0;
+        c.swarmExpo = 0;
         c.reviveHint = '';
         c.interactHint = '';
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
@@ -3592,7 +3594,12 @@ function GameImpl({
       shipAiRefs.current = [0, 1, 2, 3].map(newShipAi);
       desertNavRefs.current = [0, 1, 2, 3].map(newDesertNav);
       desertAiRefs.current = [0, 1, 2, 3].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
-      mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0 };
+      {
+        // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
+        const force = (globalThis as any).__TQ_SWARM;
+        const swarmAt = map.id !== 'desert' ? -1 : force ? +force : Math.random() < DESERT.swarm.chance ? 30 + Math.random() * 45 : -1;
+        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0 };
+      }
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -3865,6 +3872,7 @@ function GameImpl({
       const target = u < b - 1.5 ? 0 : u < b + 2 ? (u - (b - 1.5)) / 3.5 : u < c2 ? 1 : Math.max(0, 1 - (u - c2) / S.ease);
       D.sand = Math.min(1, Math.max(0, target));
       if (u >= a && u - dt < a && !round.over) onRoundEvent?.({ type: 'toast', text: '天边发黄 · 沙暴要来了，进城躲风' });
+      updateSwarm(t);
       if (D.beaconT > 0) {
         D.beaconT -= dt;
         if (D.beaconT <= 0) {
@@ -3883,11 +3891,77 @@ function GameImpl({
         vfx.dustPuff(vB.set(x, fy(x, z) + 0.3 + Math.random() * 1.5, z), 2, 0.6, 2.4, 1.2, '#d9b07a');
       }
     }
+    /**
+     * 飞虫沙暴: a black cloud of insects rolls in on the wind. Twelve seconds' warning, then for a while anyone not
+     * under a roof (a barracks room, the gate passage) is eaten: they come apart into grains from the head down and
+     * blow away, and they're out of the round (nobody can help them up).
+     */
+    function updateSwarm(t: number) {
+      const D = mapRuntime.desert;
+      const S = DESERT.swarm;
+      if (D.swarmAt < 0) {
+        D.swarmWarn = D.swarm = D.swarmLeft = 0;
+        return;
+      }
+      const w0 = D.swarmAt - S.warn;
+      const e = D.swarmAt + S.dur;
+      D.swarmWarn = t < w0 ? 0 : t < D.swarmAt ? (t - w0) / S.warn : t < e ? 1 : Math.max(0, 1 - (t - e) / 4);
+      D.swarm = t < D.swarmAt ? 0 : t < e ? Math.min(1, (t - D.swarmAt) / 1.2) : Math.max(0, 1 - (t - e) / 3);
+      D.swarmLeft = t < w0 ? 0 : t < D.swarmAt ? D.swarmAt - t : 0;
+      D.sand = Math.max(D.sand, D.swarm * 0.85, D.swarmWarn * 0.25);
+      const cross = (at: number) => t >= at && t - dt < at;
+      if (cross(w0)) {
+        gameAudio.playGong();
+        onRoundEvent?.({ type: 'toast', text: `远处黑压压一片涌过来…飞虫沙暴！${S.warn} 秒内躲进屋里（营房或城门洞）` });
+      }
+      if (cross(D.swarmAt)) onRoundEvent?.({ type: 'toast', text: '虫群到了！待在屋里别出去' });
+      if (cross(e)) onRoundEvent?.({ type: 'toast', text: '虫群过去了' });
+      const live = t >= D.swarmAt && t < e;
+      const wind = vC.set(D.wind * 2.4, 0, 0.4);
+      for (let i = 0; i < N; i++) {
+        const c = fighters[i];
+        const dv = c.devoured ?? 0;
+        if (dv <= 0) {
+          if (!live || c.hp <= 0) {
+            c.swarmExpo = 0;
+            continue;
+          }
+          if (desertIndoor(c.pos[0], c.pos[2], c.pos[1])) c.swarmExpo = 0;
+          else c.swarmExpo = (c.swarmExpo ?? 0) + dt;
+          if ((c.swarmExpo ?? 0) < S.grace) continue;
+          c.devoured = 0.001;
+          onRoundEvent?.({ type: 'toast', text: i === ME ? '你被虫群吞没了…' : `${c.tag || '对手'}被虫群吞没了` });
+          continue;
+        }
+        if (dv >= 1) continue;
+        // being eaten: held where they stand, coming apart from the head down
+        c.devoured = Math.min(1, dv + dt / S.eat);
+        c.vel[0] = c.vel[2] = 0;
+        if (c.hp > 0) {
+          c.actionState = 'hitstun';
+          c.stateTimer = 0;
+          c.stateDuration = 0.3;
+        }
+        const cutY = c.pos[1] + 1.95 - (c.devoured ?? 0) * 2.2;
+        vfx.grains(vB.set(c.pos[0], cutY, c.pos[2]), 4, Math.random() < 0.5 ? '#2a2018' : '#c9a27a', wind, 0.28, 0.05);
+        if (Math.random() < 0.4) vfx.grains(vB.set(c.pos[0], cutY, c.pos[2]), 2, '#e8c08a', wind, 0.25, 0.035);
+        if ((c.devoured ?? 0) < 1) continue;
+        if (!aiOn) {
+          // practice: you come back
+          c.devoured = 0;
+          c.hp = c.maxHp;
+          continue;
+        }
+        c.hp = 0;
+        c.revived = 9;
+        koCheck(i, '#3a2a1a');
+      }
+    }
     /** out in the open (or up on the walls) a sandstorm pushes you along with the wind */
     function desertWind(c: CombatantState) {
       const D = mapRuntime.desert;
       if (D.sand < 0.05 || c.hp <= 0 || c.actionState === 'buried') return;
-      if (desertSheltered(c.pos[0], c.pos[2], c.pos[1])) return;
+      if (desertSheltered(c.pos[0], c.pos[2], c.pos[1]) || desertIndoor(c.pos[0], c.pos[2], c.pos[1])) return;
       const k = c.isBlocking ? 0.4 : 1;
       c.pos[0] += D.wind * D.sand * 1.6 * k * dt;
     }
@@ -3978,6 +4052,37 @@ function GameImpl({
       const D = mapRuntime.desert;
       A.cool -= dt;
       out.interact = false;
+      if (D.swarmWarn > 0 && (D.swarmLeft > 0 || D.swarm > 0.5)) {
+        // the swarm is coming: get under a roof and stay there
+        A.goal = -1;
+        if (desertIndoor(me.pos[0], me.pos[2], me.pos[1])) {
+          const fd = Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]);
+          if (fd > 3 || !desertIndoor(foe.pos[0], foe.pos[2], foe.pos[1])) {
+            out.move.set(0, 0, 0);
+            out.request = fd < 3 ? out.request : null;
+          }
+          return;
+        }
+        const K = DESERT.barracks;
+        const mx = (K.x0 + K.x1) / 2;
+        const mz = (K.z0 + DESERT.fort.half - DESERT.fort.wall) / 2 + 0.3;
+        const spots: [number, number][] = [[mx, mz], [-mx, mz], [mx, -mz], [-mx, -mz], [0, 18], [0, -18]];
+        let best = spots[0];
+        let bd = 1e9;
+        for (const sp of spots) {
+          const d = Math.hypot(sp[0] - me.pos[0], sp[1] - me.pos[2]);
+          if (d < bd) {
+            bd = d;
+            best = sp;
+          }
+        }
+        const st = desertSteer(desertNavRefs.current[i], me.pos[0], me.pos[1], me.pos[2], best[0], 0, best[1], dt);
+        out.move.set((st ? st.x : best[0]) - me.pos[0], 0, (st ? st.z : best[1]) - me.pos[2]);
+        if (out.move.lengthSq() > 0.01) out.move.normalize();
+        out.request = null;
+        out.block = false;
+        return;
+      }
       const dist = Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]) + Math.abs(foe.pos[1] - me.pos[1]);
       if (A.goal < 0 && A.cool <= 0 && isFree(me) && me.isGrounded) {
         A.cool = 5 + Math.random() * 4;
@@ -4112,6 +4217,7 @@ function GameImpl({
           }
         }
       if (!best) return false;
+      if (map.id === 'desert' && mapRuntime.desert.swarmWarn > 0) return false; // run for cover first
       // an enemy close by and swinging: deal with them first
       for (const f of fighters)
         if ((f.side ?? 0) !== (c.side ?? 0) && f.hp > 0 && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < (bd < 2.5 ? 2.2 : 5)) return false;

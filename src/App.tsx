@@ -7,7 +7,7 @@ import { usePlayground, usePlaygroundGameLifecycle } from './utils/usePlayground
 import { MenuOverlay, gameAudio, useIsMobile } from './utils/helper';
 import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
-import { MAPS, MAP_ORDER, MapId, mapRuntime } from './maps';
+import { MAPS, MAP_ORDER, MapId, mapRuntime, desertIndoor } from './maps';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSettings, QUALITY } from './settings';
 import type { CharacterClassId } from './types';
@@ -633,6 +633,9 @@ export default function App() {
     sandWarn: 0,
     beacon: 0,
     beaconT: 0,
+    swarmLeft: 0,
+    swarm: 0,
+    p1Indoor: false,
     fps: 0,
     ping: 0,
     p1Candle: 0,
@@ -721,6 +724,9 @@ export default function App() {
         sandWarn: mapIdRef.current === 'desert' ? mapRuntime.desert.warn : 0,
         beacon: mapIdRef.current === 'desert' && mapRuntime.desert.beaconSide >= 0 ? (mapRuntime.desert.beaconSide === (p1.side ?? 0) ? 1 : -1) : 0,
         beaconT: mapRuntime.desert.beaconT,
+        swarmLeft: mapIdRef.current === 'desert' ? mapRuntime.desert.swarmLeft : 0,
+        swarm: mapIdRef.current === 'desert' ? mapRuntime.desert.swarm : 0,
+        p1Indoor: mapIdRef.current === 'desert' && desertIndoor(p1.pos[0], p1.pos[2], p1.pos[1]),
         foeHidden: !!dummyScreenPosRef.current.hidden,
         p1Slip: mapIdRef.current === 'forest' ? p1.slip ?? 0 : 0,
         rain: mapIdRef.current === 'forest' ? mapRuntime.rain : 0,
@@ -1138,7 +1144,9 @@ export default function App() {
           if (hudMirror.p1Candle) meChips.push({ text: (hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭') + ' · F 放下', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
           else if (hudMirror.p1Shade) meChips.push({ text: '灯罩 · F 放下', tone: 'gold' });
           if (hudMirror.night > 0.55 && hudMirror.foeHidden) meChips.push({ text: '天黑 看不见对手', tone: 'slate' });
-          if (hudMirror.sand > 0.55) meChips.push({ text: '沙暴 · 远处看不清 · 进城躲风', tone: 'amber', pulse: true });
+          if (hudMirror.swarmLeft > 0) meChips.push({ text: hudMirror.p1Indoor ? `飞虫沙暴 ${Math.ceil(hudMirror.swarmLeft)}s · 你在屋里，安全` : `飞虫沙暴 ${Math.ceil(hudMirror.swarmLeft)}s · 快躲进营房或城门洞！`, tone: hudMirror.p1Indoor ? 'slate' : 'red', pulse: !hudMirror.p1Indoor });
+          else if (hudMirror.swarm > 0.5) meChips.push({ text: hudMirror.p1Indoor ? '虫群过境 · 别出屋' : '虫群过境！', tone: 'red', pulse: true });
+          if (hudMirror.sand > 0.55 && !(hudMirror.swarm > 0.5)) meChips.push({ text: '沙暴 · 远处看不清 · 进城躲风', tone: 'amber', pulse: true });
           else if (hudMirror.sandWarn > 0 && hudMirror.sandWarn < 1) meChips.push({ text: '沙暴将至', tone: 'amber' });
           if (hudMirror.beacon) meChips.push({ text: `${hudMirror.beacon > 0 ? '我方' : '敌方'}烽火 ${Math.ceil(hudMirror.beaconT)}s${hudMirror.beacon > 0 ? ' · 伤害 +12%' : ''}`, tone: hudMirror.beacon > 0 ? 'gold' : 'red', pulse: hudMirror.beacon < 0 });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });

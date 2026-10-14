@@ -223,6 +223,8 @@ export interface CombatantState {
   nearLadder?: boolean; // standing at the foot of a ladder (HUD hint)
   grip?: number; // 0..1 effective friction underfoot (青冥古林 weather)
   slip?: number; // 0..1 loss of balance; at 1 you fall
+  devoured?: number; // 大漠玉门关 飞虫沙暴: 0 untouched, 0..1 being eaten (dissolving from the head down), 1 gone
+  swarmExpo?: number; // seconds out in the open while the swarm is here
   beaconHold?: number; // 大漠玉门关: seconds of holding F at the beacon
   candle?: 0 | 1 | 2; // 青冥古林: 0 none, 1 carrying an unlit candle, 2 lit
   meditateT?: number; // 青冥寺: seconds left of sitting in meditation on a prayer cushion
