@@ -442,6 +442,30 @@ function GameImpl({
     };
   }, [gl, scene, map]);
 
+  // Compile every shader the map needs in the background (KHR_parallel_shader_compile) right after it loads,
+  // instead of all at once on the first frames it is drawn: that first-frame compile is the long freeze
+  // when a map opens, and the worst of it on weak GPUs.
+  useEffect(() => {
+    let alive = true;
+    const g = globalThis as any;
+    g.__TQ_SHADERS = 'compiling';
+    const t0 = performance.now();
+    const t = setTimeout(() => {
+      const cam = camera;
+      const r = gl as any;
+      if (!r.compileAsync) return;
+      r.compileAsync(scene, cam)
+        .then(() => {
+          if (alive) g.__TQ_SHADERS = `ready ${Math.round(performance.now() - t0)}ms`;
+        })
+        .catch(() => {});
+    }, 50);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [gl, scene, camera, map]);
+
   useEffect(() => {
     const controller = new CameraController(camera as THREE.PerspectiveCamera, gl.domElement);
     cameraControllerRef.current = controller;
