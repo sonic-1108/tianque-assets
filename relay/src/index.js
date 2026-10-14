@@ -15,6 +15,11 @@ export class Room {
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
   webSocketMessage(ws, msg) {
+    // a client timing its own round trip to the relay
+    if (typeof msg === 'string' && msg.startsWith('{"t":"echo"')) {
+      ws.send(msg);
+      return;
+    }
     const side = this.state.getTags(ws)[0];
     for (const s of this.state.getWebSockets(side === 'h' ? 'g' : 'h')) {
       try {

@@ -129,6 +129,8 @@ export class NetSession {
   private sLastKey = 0;
   /** host: send a keyframe next (someone just joined) */
   needKey = true;
+  /** round trip from this browser to our own relay and back (ms), to tell the network apart from the other player's machine */
+  relayRtt = 0;
   private lastInKey = '';
   /** how the data actually travels: 'lan' (same network), 'p2p' (direct over the internet), 'turn' (through a TURN server), 'relay' (public MQTT broker), '' unknown */
   path = '';
@@ -667,7 +669,18 @@ export class NetSession {
             res(cl);
           }
         };
-        ws.onmessage = (e) => this.relayReceive(cl, typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
+        ws.onmessage = (e) => {
+          if (typeof e.data === 'string' && e.data.startsWith('{"t":"echo"')) {
+            const rtt = performance.now() - JSON.parse(e.data).c;
+            this.relayRtt = this.relayRtt ? this.relayRtt + (rtt - this.relayRtt) * 0.3 : rtt;
+            return;
+          }
+          this.relayReceive(cl, typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
+        };
+        const echo = window.setInterval(() => {
+          if (ws.readyState !== 1) return window.clearInterval(echo);
+          ws.send(JSON.stringify({ t: 'echo', c: performance.now() }));
+        }, 1000);
         ws.onclose = () => {
           if (settled && !cl.closed) window.setTimeout(open, 1000); // dropped: reconnect
         };
