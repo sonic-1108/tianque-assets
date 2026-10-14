@@ -1253,7 +1253,7 @@ export default function App() {
             {online && hudMirror.ping > 0 && (
               <span className={hudMirror.ping > 200 ? ' text-red-400' : ''}>
                 {' '}· 延迟 {hudMirror.ping}ms
-                {net?.path === 'lan' ? '（局域网直连）' : net?.path === 'p2p' ? '（直连）' : net?.path === 'turn' ? '（TURN 中转）' : net?.path === 'relay' || net?.via === 'relay' ? '（服务器中转）' : ''}
+                {net?.path === 'lan' ? '（局域网直连）' : net?.path === 'p2p' ? '（直连）' : net?.path === 'turn' ? '（TURN 中转）' : net?.path === 'relay' || net?.via === 'relay' ? (net?.fastRelay ? '（天阙中转）' : '（公共服务器中转）') : ''}
                 {net?.role === 'guest' ? ` · 同步 ${net.snapRate}/秒` : ''}
               </span>
             )}

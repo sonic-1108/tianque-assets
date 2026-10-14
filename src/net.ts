@@ -495,10 +495,11 @@ export class NetSession {
       this.clockOff = this.clockOff === null || off < this.clockOff ? off : this.clockOff + (off - this.clockOff) * 0.01;
       if (this.lastArrive) {
         const gap = at - this.lastArrive;
-        this.jitter += (Math.abs(gap - (this.via === 'relay' ? 100 : 33)) - this.jitter) * 0.05;
+        this.jitter += (Math.abs(gap - (this.via === 'relay' && !this.fastRelay ? 100 : 33)) - this.jitter) * 0.05;
       }
       this.lastArrive = at;
-      this.interpDelay = Math.min(320, Math.max(this.via === 'relay' ? 140 : 45, (this.via === 'relay' ? 110 : 35) + this.jitter * 2.5));
+      const slow = this.via === 'relay' && !this.fastRelay;
+      this.interpDelay = Math.min(320, Math.max(slow ? 140 : this.via === 'relay' ? 60 : 45, (slow ? 110 : 35) + this.jitter * 2.5));
       this.snaps.push({ at, ts, msg: m });
       if (this.snaps.length > 12) {
         const old = this.snaps.shift()!;
@@ -540,7 +541,7 @@ export class NetSession {
       // the relay is a shared public broker that throttles busy clients (we measured ~5 messages a second getting
       // through, with half a second of queueing): controls go out only when they change, at most ~12 a second,
       // plus a refresh every quarter second; actions are never dropped
-      if (m.t === 'in' && !m.req) {
+      if (m.t === 'in' && !m.req && !this.fastRelay) {
         const now = performance.now();
         const key = `${m.mx},${m.mz},${Math.round(m.yaw * 20)},${m.blk},${m.int},${m.ult}`;
         if (now - this.lastIn < 80 || (key === this.lastInKey && now - this.lastIn < 250)) return;
@@ -584,9 +585,10 @@ export class NetSession {
         return false;
       }
       const mine = this.role === 'host' ? 'h' : 'g';
-      const brokers: (string | { url: string; username: string; password: string })[] = (globalThis as any).__TQ_RELAY || RELAY_BROKERS; // tests point this at a local broker
+      const own = (import.meta as any).env?.VITE_TQ_RELAY as string | undefined;
+      const brokers: (string | { url: string; username: string; password: string })[] = (globalThis as any).__TQ_RELAY || [...(own ? ['tq:' + own] : []), ...RELAY_BROKERS]; // tests point this at a local broker
       const tryOne = (b: string | { url: string; username: string; password: string }) =>
-        new Promise<any>((res) => {
+        typeof b === 'string' && b.startsWith('tq:') ? this.ownRelay(b.slice(3), mine) : new Promise<any>((res) => {
           const url = typeof b === 'string' ? b : b.url;
           const auth = typeof b === 'string' ? {} : { username: b.username, password: b.password };
           const cl = mqtt.connect(url, { ...auth, clean: true, connectTimeout: 7000, reconnectPeriod: 3000, keepalive: 20, clientId: 'tq_' + this.relayId + '_' + Math.random().toString(36).slice(2, 6) });
@@ -629,10 +631,60 @@ export class NetSession {
     })();
     return this.relayOpening;
   }
-  private relayReceive(client: any, payload: Uint8Array) {
+  /**
+   * Our own relay (a Cloudflare Worker, one room per code): a plain WebSocket dressed up with the few MQTT client
+   * calls the relay code uses. Nearby, unthrottled: the relay path runs at full rate on it.
+   */
+  private ownRelay(base: string, side: 'h' | 'g') {
+    return new Promise<any>((res) => {
+      const url = `${base.replace(/\/$/, '')}/r/${this.code}?side=${side}`;
+      const cl: any = { __tqName: '天阙中转', __fast: true, ws: null as WebSocket | null, closed: false };
+      cl.publish = (_topic: string, data: string) => {
+        if (cl.ws && cl.ws.readyState === 1) cl.ws.send(data);
+      };
+      cl.subscribe = () => {};
+      cl.on = () => {};
+      cl.end = () => {
+        cl.closed = true;
+        cl.ws?.close();
+      };
+      let settled = false;
+      const to = window.setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          cl.end();
+          res(null);
+        }
+      }, 6000);
+      const open = () => {
+        if (cl.closed) return;
+        const ws = new WebSocket(url);
+        cl.ws = ws;
+        ws.onopen = () => {
+          if (!settled) {
+            settled = true;
+            window.clearTimeout(to);
+            res(cl);
+          }
+        };
+        ws.onmessage = (e) => this.relayReceive(cl, typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
+        ws.onclose = () => {
+          if (settled && !cl.closed) window.setTimeout(open, 1000); // dropped: reconnect
+        };
+      };
+      open();
+    });
+  }
+  /** our own relay is in use (full rate) */
+  get fastRelay() {
+    if (this.role === 'guest') return this.via === 'relay' && !!this.relayOut?.__fast;
+    const rel = [...this.guests.values()].filter((g) => g.relay);
+    return rel.length > 0 && rel.every((g) => g.via?.__fast);
+  }
+  private relayReceive(client: any, payload: Uint8Array | string) {
     let m: any;
     try {
-      m = JSON.parse(new TextDecoder().decode(payload));
+      m = JSON.parse(typeof payload === 'string' ? payload : new TextDecoder().decode(payload));
     } catch {
       return;
     }
