@@ -613,12 +613,19 @@ function GameImpl({
         const dz = c.pull.z - c.pos[2];
         const d = Math.hypot(dx, dz);
         const step = Math.min(d, dt * 34);
+        let stuck = false;
         if (d > 0.05) {
-          c.pos[0] += (dx / d) * step;
-          c.pos[2] += (dz / d) * step;
+          const nx = c.pos[0] + (dx / d) * step;
+          const nz = c.pos[2] + (dz / d) * step;
+          // the chain drags them along the ground: a wall, a pillar or a cabin side stops them
+          stuck = solidAt(nx, c.pos[1] + 0.6, nz) || solidAt(nx, c.pos[1] + 1.4, nz) || (map.id === 'sea' && shipBlocked(nx, nz, c.pos[1]));
+          if (!stuck) {
+            c.pos[0] = nx;
+            c.pos[2] = nz;
+          }
         }
         c.vel[0] = c.vel[2] = 0;
-        if (d < 0.1 || c.pull.t <= 0) c.pull = undefined;
+        if (stuck || d < 0.1 || c.pull.t <= 0) c.pull = undefined;
       }
       if ((c.bellTimer ?? 0) > 0) {
         c.bellTimer = (c.bellTimer ?? 0) - dt;
@@ -805,9 +812,9 @@ function GameImpl({
         const y0 = c.pos[1];
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
-        if (map.id === 'sea' && c.vel[1] > 0) {
-          // a cabin's ceiling stops a jump
-          const ceil = shipCeilAt(c.pos[0], c.pos[2], y0);
+        if ((map.id === 'sea' || map.id === 'desert') && c.vel[1] > 0) {
+          // a cabin's (or barracks') ceiling stops a jump
+          const ceil = map.id === 'sea' ? shipCeilAt(c.pos[0], c.pos[2], y0) : desertIndoor(c.pos[0], c.pos[2], y0) ? desertCeil(c.pos[0], c.pos[2]) : 999;
           if (c.pos[1] + 1.85 > ceil) {
             c.pos[1] = Math.max(y0, ceil - 1.85);
             c.vel[1] = 0;
@@ -849,7 +856,7 @@ function GameImpl({
       ledgeGuard(c, px0, pz0);
       mountainWall(i, c, px0, pz0);
       if (map.id === 'sea') shipWall(i, c, px0, pz0);
-      else stepWall(c, px0, pz0);
+      else stepWall(c, px0, pz0, i);
       const free = c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || c.actionState === 'skill_2';
       if (!free || c.actionState === 'dodge') {
         const k = Math.exp(-4.5 * cdt);
@@ -2309,7 +2316,9 @@ function GameImpl({
       if (c.hp <= 0) return;
       const fwd = fwdOf(c.rotY).clone();
       // melee can't reach someone standing on a pillar above you (and vice versa)
-      const dist = Math.abs(foe.pos[1] - c.pos[1]) > 2.2 ? 99 : Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      let dist = Math.abs(foe.pos[1] - c.pos[1]) > 2.2 ? 99 : Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      // nor through a wall, a cabin side or a tree trunk
+      if (dist < 7.5 && !losClear(c.pos[0], c.pos[1] + 1.2, c.pos[2], foe.pos[0], foe.pos[1] + 1.2, foe.pos[2])) dist = 99;
       const inFront = (fwd.x * (foe.pos[0] - c.pos[0]) + fwd.z * (foe.pos[2] - c.pos[2])) / Math.max(0.001, dist) > 0.2;
       const cfg = phasesFor(c)[c.actionState];
       const active = !!cfg && c.stateTimer >= cfg.startup && c.stateTimer <= cfg.startup + cfg.active;
@@ -2473,7 +2482,7 @@ function GameImpl({
           c.hasHitCurrentMove = true;
           slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.3);
           controller?.addShake(slot === ME ? 1 : 0.7);
-          vfx.ultimateImpact(vB.set(c.pos[0] + fwd.x * 0.8, 0, c.pos[2] + fwd.z * 0.8));
+          vfx.ultimateImpact(vB.set(c.pos[0] + fwd.x * 0.8, fy(c.pos[0] + fwd.x * 0.8, c.pos[2] + fwd.z * 0.8, c.pos[1] + 0.3), c.pos[2] + fwd.z * 0.8));
           gameAudio.playUltImpact();
           
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,240,220,0.75)' });
@@ -2607,17 +2616,59 @@ function GameImpl({
       if (foe.hp > 0 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) < 2.6 && Math.abs(foe.pos[1] - gy) < 1.5)
         applyHit(slot, c, foe, 130, { heavy: true, launch: 7, state: 'launched', dur: 0.9, knock: 2, shake: 0.4 });
     }
-    /** move 影刃 to (x, z) if it's safe ground, landing on it */
-    function shadowTo(c: CombatantState, x: number, z: number) {
-      if (map.radius && Math.hypot(x, z) > map.radius - 0.8 && !map.terrain) return false;
+    /**
+     * Move 影刃 to (x, z) if it's a fair spot: inside the arena, not in a hazard or deep water, on a floor at about
+     * the height of the reference (the target for a blink behind them, yourself for a blink forward) rather than on
+     * top of a wall or down a cliff, with room to stand, and with nothing solid between the reference and there.
+     */
+    function shadowTo(c: CombatantState, x: number, z: number, from?: CombatantState) {
+      const o = from ?? c;
+      const oy = o.pos[1];
+      if (map.rect) {
+        if (Math.abs(x) > map.rect.hx - 0.6 || Math.abs(z) > map.rect.hz - 0.6) return false;
+      } else if (Math.hypot(x, z) > edgeR() - 0.8) return false;
       if (danger(x, z, 0)) return false;
-      const g = groundAt(x, z, c.pos[1] + 2);
-      if (g < c.pos[1] - 6) return false; // never blink off a cliff
+      if (map.id === 'forest' && waterDepth(x, z) > 0.9) return false;
+      const g = map.id === 'sea' ? shipFloorAt(x, z, oy + 0.7) : groundAt(x, z, oy + 0.7);
+      if (g > oy + 0.7 || g < oy - 3) return false; // not up onto a wall, never off a cliff
+      if (map.id === 'sea' && shipBlocked(x, z, g)) return false;
+      if (solidAt(x, g + 0.5, z) || solidAt(x, g + 1.5, z)) return false;
+      if (!losClear(o.pos[0], oy + 1.0, o.pos[2], x, g + 1.0, z)) return false;
+      const gy = g;
       c.pos[0] = x;
       c.pos[2] = z;
-      c.pos[1] = g;
+      c.pos[1] = gy;
       c.vel = [0, 0, 0];
       c.isGrounded = true;
+      return true;
+    }
+    /** is (x, y, z) inside something solid: ground, a wall, a deck, a pillar or trunk, a roof */
+    function solidAt(x: number, y: number, z: number) {
+      if (map.id === 'sea') {
+        if (shipSolidAt(x, y, z)) return true;
+      } else if (map.terrain) {
+        if (y < terrainHeight(map.id, x, z) - 0.05) return true;
+      }
+      if (map.id === 'desert') {
+        const cy = desertCeil(x, z);
+        if (y > cy && y < cy + 0.7) return true; // a barracks roof, the vault over a gate
+      }
+      for (const pl of map.pillars || []) {
+        const d = Math.hypot(x - pl.x, z - pl.z);
+        if (d >= Math.max(pl.r, 0.01)) continue;
+        if (pl.deck) return true; // a tree trunk, all the way up
+        if (y < (pl.h ?? 99) && y > (pl.y0 ?? -99)) return true;
+      }
+      return false;
+    }
+    /** nothing solid on the straight line between two points */
+    function losClear(ax: number, ay: number, az: number, bx: number, by: number, bz: number) {
+      const L = Math.hypot(bx - ax, by - ay, bz - az);
+      const n = Math.ceil(L / 0.3);
+      for (let k = 1; k < n; k++) {
+        const t = k / n;
+        if (solidAt(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t)) return false;
+      }
       return true;
     }
 
@@ -2670,9 +2721,13 @@ function GameImpl({
           const z0 = c.pos[2];
           start('skill_1');
           let moved = false;
-          if (foeOk && fd < 10) {
+          if (foeOk && fd < 10 && losClear(c.pos[0], c.pos[1] + 1.2, c.pos[2], foe.pos[0], foe.pos[1] + 1.2, foe.pos[2])) {
             const ff = fwdOf(foe.rotY);
-            moved = shadowTo(c, foe.pos[0] - ff.x * 1.3, foe.pos[2] - ff.z * 1.3) || shadowTo(c, foe.pos[0] + ff.z * 1.3, foe.pos[2] - ff.x * 1.3);
+            moved =
+              shadowTo(c, foe.pos[0] - ff.x * 1.3, foe.pos[2] - ff.z * 1.3, foe) ||
+              shadowTo(c, foe.pos[0] + ff.z * 1.3, foe.pos[2] - ff.x * 1.3, foe) ||
+              shadowTo(c, foe.pos[0] - ff.z * 1.3, foe.pos[2] + ff.x * 1.3, foe) ||
+              shadowTo(c, foe.pos[0] + ff.x * 1.3, foe.pos[2] + ff.z * 1.3, foe);
             if (moved) {
               c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
               intent.faceYaw = c.rotY; // and stays facing them
@@ -2718,7 +2773,7 @@ function GameImpl({
           const along = f.x * (foe.pos[0] - c.pos[0]) + f.z * (foe.pos[2] - c.pos[2]);
           const across = Math.abs(f.x * (foe.pos[2] - c.pos[2]) - f.z * (foe.pos[0] - c.pos[0]));
           // generous aim: anyone within about 35 degrees of where you're facing
-          const caught = foeOk && along > 0.5 && along < 13 && across < Math.max(1.6, along * 0.7);
+          const caught = foeOk && along > 0.5 && along < 13 && across < Math.max(1.6, along * 0.7) && losClear(c.pos[0], c.pos[1] + 1.25, c.pos[2], foe.pos[0], foe.pos[1] + 1.1, foe.pos[2]);
           const hand = vC.set(c.pos[0] + f.x * 0.4, c.pos[1] + 1.25, c.pos[2] + f.z * 0.4).clone();
           const end = caught ? new THREE.Vector3(foe.pos[0], foe.pos[1] + 1.1, foe.pos[2]) : hand.clone().addScaledVector(f, 13);
           if (caught) {
@@ -2739,7 +2794,7 @@ function GameImpl({
           if (!paySkill(4, 'ultimate', 'R')) return false;
           start('ultimate');
           c.shadowHits = 0;
-          c.ultTarget = foeOk && fd < 12;
+          c.ultTarget = foeOk && fd < 12 && Math.abs(foe.pos[1] - c.pos[1]) < 4 && losClear(c.pos[0], c.pos[1] + 1.2, c.pos[2], foe.pos[0], foe.pos[1] + 1.2, foe.pos[2]);
           c.dodgeIframeTimer = phasesFor(c).ultimate!.totalDuration;
           c.stealthT = 0;
           shadowPuff(c.pos[0], c.pos[1], c.pos[2], color);
@@ -2799,7 +2854,9 @@ function GameImpl({
           const x0 = c.pos[0];
           const y0 = c.pos[1];
           const z0 = c.pos[2];
-          if (!shadowTo(c, foe.pos[0] + Math.cos(a) * 1.6, foe.pos[2] + Math.sin(a) * 1.6)) shadowTo(c, foe.pos[0] - Math.cos(a) * 1.6, foe.pos[2] - Math.sin(a) * 1.6);
+          // round the target; where a wall or an edge is in the way, the next angle that works
+          let ok = false;
+          for (let k = 0; k < 8 && !ok; k++) ok = shadowTo(c, foe.pos[0] + Math.cos(a + k * 0.8) * 1.6, foe.pos[2] + Math.sin(a + k * 0.8) * 1.6, foe);
           c.rotY = c.targetRotY = yawTo(c.pos, foe.pos);
           vfx.dustPuff(vB.set(x0, y0 + 0.9, z0), 6, 0.4, 1.2, 0.7, '#1e1b2e');
           const f2 = fwdOf(c.rotY);
@@ -2936,7 +2993,9 @@ function GameImpl({
           const lead = last ? 0 : 0.25;
           const tx = foe.pos[0] + foe.vel[0] * lead + (last ? 0 : (Math.random() - 0.5) * 1.6);
           const tz = foe.pos[2] + foe.vel[2] * lead + (last ? 0 : (Math.random() - 0.5) * 1.6);
-          const ty = fy(tx, tz);
+          const ty = fy(tx, tz, foe.pos[1] + 0.3);
+          // under a roof (a cabin, a barracks, the gate vault) the palm comes down on the roof instead
+          const covered = !losClear(tx, ty + 1.2, tz, tx, ty + 12, tz);
           const target = new THREE.Vector3(tx, ty, tz);
           vfx.palmStrike(target, last ? 1.6 : 1.0, 0.32);
           vfx.later(0.32, () => {
@@ -2945,7 +3004,7 @@ function GameImpl({
             if (last) vfx.rocks(new THREE.Vector3(tx, ty, tz), 12, 7, 0.12);
             gameAudio.playSlam();
             controller?.addShake(last ? 0.7 : 0.18);
-            if (round.over || c.hp <= 0 || foe.hp <= 0) return;
+            if (round.over || c.hp <= 0 || foe.hp <= 0 || covered) return;
             const hitR = last ? 3.4 : 2.6;
             if (Math.hypot(foe.pos[0] - tx, foe.pos[2] - tz) < hitR && foe.pos[1] - ty < 3) {
               if (last) applyHit(slot, c, foe, 190, { heavy: true, crit: true, knock: 4, launch: 6, state: 'knockdown', dur: 1.1, unblockable: true });
@@ -3174,6 +3233,12 @@ function GameImpl({
         g.age += step;
         const tgt = new THREE.Vector3(def.pos[0], def.pos[1] + 1.15, def.pos[2]);
         glyphSteer(g.pos, g.vel, tgt, g.age, step);
+        if (g.age > 0.15 && solidAt(g.pos.x, g.pos.y, g.pos.z)) {
+          // the word breaks on a wall
+          vfx.sparkBurst(vB.copy(g.pos), 10, '#ffe9a8', 3, 0.05);
+          list.splice(n, 1);
+          continue;
+        }
         if (g.age > 2.4 || def.hp <= 0 || owner.hp <= 0) {
           list.splice(n, 1);
           continue;
@@ -3262,6 +3327,12 @@ function GameImpl({
             p.pos.y = THREE.MathUtils.lerp(baseY, P.ty, Math.sin(P.u * Math.PI));
             p.vel.copy(p.pos).sub(prev).multiplyScalar(2 / Math.max(1e-4, step));
             p.back = P.u >= 0.5;
+            if (P.u > 0.04 && solidAt(p.pos.x, p.pos.y, p.pos.z)) {
+              // it clangs off a wall and drops
+              vfx.sparkBurst(vB.copy(p.pos), 12, '#e5e7eb', 4, 0.05);
+              dead = true;
+              break;
+            }
             if (p.back && P.u > 0.85 && p.pos.distanceTo(vB.set(owner.pos[0], owner.pos[1] + 1.2, owner.pos[2])) < 1.0) {
               dead = true;
               break;
@@ -3284,7 +3355,7 @@ function GameImpl({
               vfx.dustPuff(vB.copy(p.pos), 2, 0.1, 0.8, 0.25);
               break;
             }
-            let wall = map.id === 'sea' && shipSolidAt(p.pos.x, p.pos.y, p.pos.z);
+            let wall = solidAt(p.pos.x, p.pos.y, p.pos.z);
             for (const pl of pillars) {
               if (p.pos.y < (pl.deck ? 99 : pl.h ?? 99) && p.pos.y > (pl.y0 ?? -99) && Math.hypot(p.pos.x - pl.x, p.pos.z - pl.z) < pl.r) {
                 wall = true;
@@ -3746,7 +3817,14 @@ function GameImpl({
     }
 
     /** 青冥古林: a walking fighter climbs stairs; a waist-high ledge (the temple podium's sides) gets a small hop, higher ones block */
-    function stepWall(c: CombatantState, px0: number, pz0: number) {
+    function stepWall(c: CombatantState, px0: number, pz0: number, i = -1) {
+      const sp0 = Math.hypot(c.vel[0], c.vel[2]);
+      const vx0 = c.vel[0];
+      const vz0 = c.vel[2];
+      const splat = () => {
+        // knocked into a wall face: the same crunch as a pillar
+        if (i >= 0 && sp0 > 0.01) wallSplat(i, c, sp0, c.pos[0] + (vx0 / sp0) * 0.5, c.pos[2] + (vz0 / sp0) * 0.5);
+      };
       if ((map.id !== 'forest' && map.id !== 'desert') || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
       if (!c.isGrounded) {
@@ -3754,6 +3832,7 @@ function GameImpl({
         if (map.id !== 'desert') return;
         const above = (x: number, z: number) => terrainHeight(map.id, x, z) > c.pos[1] + 0.25;
         if (!above(c.pos[0], c.pos[2])) return;
+        splat();
         if (!above(c.pos[0], pz0)) {
           c.pos[2] = pz0;
           c.vel[2] = 0;
@@ -3779,6 +3858,7 @@ function GameImpl({
         c.actionState = 'jump';
         return;
       }
+      splat();
       if (!tooHigh(c.pos[0], pz0)) {
         c.pos[2] = pz0;
         c.vel[2] = 0;
