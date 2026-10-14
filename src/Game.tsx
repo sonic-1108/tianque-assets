@@ -481,7 +481,7 @@ function GameImpl({
     const t0 = performance.now();
     const warm = () => {
       const r = gl as any;
-      if (!r.compileAsync || !alive) return;
+      if (!r.compileAsync || !alive || g.__TQ_NOWARM) return; // tests on a software GPU skip it
       // effects that only appear in a fight (palms, glyphs, rings, trails) sit hidden in pools; compile ignores
       // hidden objects, so show everything for the moment it takes to collect the materials, then hide it again
       // (no frame is drawn in between). Otherwise each effect's first use froze the game while it compiled.
@@ -523,7 +523,8 @@ function GameImpl({
   // ==========================================================
   // MAIN LOOP
   // ==========================================================
-  useFrame((_, delta) => {
+  // tests: __TQ_TURBO = n runs the whole tick n times a frame (the software GPU in CI draws ~1 frame a second)
+  const mainTick = (delta: number) => {
     if (gameState.status !== 'PLAYING') return;
     const tqT0 = performance.now();
 
@@ -4841,6 +4842,7 @@ function GameImpl({
           c.stateDuration = 99;
         }
         if (c.pos[1] < -6.5) ringOut(i);
+        pillarPush(i, c, speed); // 天阙之巅's jade posts are solid too
         return;
       }
 
@@ -4880,6 +4882,11 @@ function GameImpl({
         }
         if (map.id === 'rooftop' && c.pos[1] < -3.5) courtyardFall(i);
       }
+      pillarPush(i, c, speed);
+      void knocked;
+    }
+
+    function pillarPush(i: number, c: CombatantState, speed: number) {
       for (const pl of map.pillars || []) {
         if (!pl.deck && c.pos[1] >= (pl.h ?? 99) - 0.45) continue; // standing on (or above) it
         if (c.pos[1] + 1.75 < (pl.y0 ?? -99)) continue; // under the deck it stands on
@@ -4900,7 +4907,6 @@ function GameImpl({
           }
         }
       }
-      void knocked;
     }
 
     function wallSplat(i: number, c: CombatantState, speed: number, wx: number, wz: number) {
@@ -6524,6 +6530,10 @@ function GameImpl({
       if (out.move.lengthSq() > 1) out.move.normalize();
       out.request = ai.request;
     }
+  };
+  useFrame((_, delta) => {
+    const n = Math.max(1, Math.min(20, (globalThis as any).__TQ_TURBO | 0 || 1));
+    for (let k = 0; k < n; k++) mainTick(n > 1 ? 0.033 : delta);
   });
 
   return (
