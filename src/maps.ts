@@ -459,8 +459,8 @@ export const MAPS = {
     icon: '🌊',
     mechanics: [
       '两艘五层楼船并排漂在海上，两队各占一艘：甲板下有货舱，船尾高塔四层，两舷楼梯上下',
-      '主甲板船尾前有船舵：站过去按住 F 把船往对面开，两船贴上就能翻过船舷跳到对方船上开打；贴着的时候按住 F 是把船开远',
-      '掉进两船之间的海里：掉 120 血，被捞回自己船上',
+      '主甲板船尾大舱前有船舵：站过去按 F 下令「接舷」，两艘船自己靠拢，贴上后放下两块跳板，走过去就能打到对方船上；再按 F 下令「离舷」，收起跳板把船分开（两队都能下令）',
+      '从跳板边上掉进海里：掉 120 血，被捞回自己船上',
       '货舱里有一桌饭菜，按 F 吃一口回复已损失气血的 10%',
       '每艘船船头楼和船尾高塔各一台床弩，按 F 抢占射击，能转过来打对面的船，箭能把人钉住',
       '巨浪会拍上主甲板把人冲走；躲进船舱或站上高处就不怕',
@@ -901,6 +901,8 @@ export const mapRuntime = {
   /** 怒海战船: world x of each ship (the helms move them), and how hard each helm is being worked (0..1) */
   shipX: [-24, 24] as [number, number],
   helm: [0, 0] as [number, number],
+  /** boarding: mode 0 apart, 1 closing, 2 alongside, 3 casting off; plank 0..1 how far the planks are down */
+  board: { mode: 0, plank: 0 },
   /** crossbow bolts in flight or stuck in the planks (t: seconds left; stuck: embedded) */
   bolts: [] as { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; stuck: boolean; slot: number }[],
   /** where the local player is (scenery uses it to show F markers near things you can use) */
@@ -1378,7 +1380,17 @@ for (const p of MAPS.sea.pillars || []) if (p.h !== undefined) p.y0 = shipFloorA
 // (ship-local coordinates above); a ship sits at world x = mapRuntime.shipX[k]. The helms close or open the gap.
 // Every query below takes world coordinates and asks the ship whose side of the gap the point is on.
 // ----------------------------------------------------------------------
-export const SHIP_GAP = { start: 48, min: 26.1, max: 56, speed: 1.7 }; // min: the hulls (12.9 m half beam) just touching
+export const SHIP_GAP = { start: 46, min: 26.4, max: 46, speed: 2.2 }; // min: the hulls (12.9 m half beam) just touching
+/** boarding planks (跳板) dropped across when the ships lie alongside: centre z of each, half width */
+export const SHIP_PLANKS = { z: [-11, -2], half: 1.1 };
+/** standing on a boarding plank (planks down), or on the strip of deck edge where one lands */
+export function inPlank(x: number, z: number) {
+  const B = mapRuntime.board;
+  if (B.plank < 0.95) return false;
+  const X = mapRuntime.shipX;
+  if (x < X[0] + SHIP_LAYOUT.W - 1.4 || x > X[1] - SHIP_LAYOUT.W + 1.4) return false;
+  return SHIP_PLANKS.z.some((pz) => Math.abs(z - pz) < SHIP_PLANKS.half - 0.15);
+}
 /** the helm (船舵) on each ship: on the main deck just forward of the great cabin (ship-local) */
 export const SHIP_HELM = { x: 0, z: 11.4, r: 0.55 };
 export function shipOf(x: number) {
@@ -1387,12 +1399,14 @@ export function shipOf(x: number) {
 }
 /** is (x, z) over a ship's hull (rather than open water between or beside them) */
 export function overShip(x: number, z: number) {
+  if (inPlank(x, z)) return true;
   const k = shipOf(x);
   return Math.abs(x - mapRuntime.shipX[k]) < SHIP_LAYOUT.W + 0.2 && z > -52 && z < 41;
 }
 export function shipFloorAt(x: number, z: number, y: number) {
   const k = shipOf(x);
-  return shipFloorAtL(x - mapRuntime.shipX[k], z, y);
+  const f = shipFloorAtL(x - mapRuntime.shipX[k], z, y);
+  return inPlank(x, z) && y >= -0.6 ? Math.max(f, 0.08) : f;
 }
 export function shipCeilAt(x: number, z: number, y: number) {
   const k = shipOf(x);

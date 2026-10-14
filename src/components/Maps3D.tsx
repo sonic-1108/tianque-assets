@@ -10,7 +10,7 @@ import { DesertMap } from './maps/Desert';
 import { useSettings } from '../settings';
 import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray, StormSky } from './maps/Ocean';
 import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
-import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, SHIP_HELM, SEA_PILLARS_LOCAL, shipFloorAtL, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
+import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, SHIP_HELM, SHIP_PLANKS, SEA_PILLARS_LOCAL, shipFloorAtL, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -1016,6 +1016,62 @@ function Helm({ k }: { k: number }) {
   );
 }
 
+/** 跳板: boarding planks hinged on ship 0's rail, standing up while apart, swung down across the gap alongside; grapnel lines between the rails */
+function BoardingPlanks() {
+  const pivots = useRef<(THREE.Group | null)[]>([]);
+  const boards = useRef<(THREE.Mesh | null)[]>([]);
+  const lines = useRef<THREE.LineSegments>(null);
+  const lineGeo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6 * 6), 3));
+    return g;
+  }, []);
+  useFrame(() => {
+    const X = mapRuntime.shipX;
+    const B = mapRuntime.board;
+    const W = SHIP_LAYOUT.W;
+    const x0 = X[0] + W - 1.0;
+    const len = X[1] - W + 1.0 - x0;
+    SHIP_PLANKS.z.forEach((pz, i) => {
+      const p = pivots.current[i];
+      const b = boards.current[i];
+      if (!p || !b) return;
+      p.position.set(x0, 0.08, pz);
+      // stowed: standing up against the rail (3 m tall); down: spanning the gap
+      const L = B.plank > 0.01 ? len : 3;
+      b.scale.set(L, 1, 1);
+      b.position.set(L / 2, 0.06, 0);
+      p.rotation.z = (1 - B.plank) * (Math.PI / 2);
+    });
+    const ln = lines.current;
+    if (ln) {
+      ln.visible = B.mode === 2 || (B.mode === 1 && X[1] - X[0] < 34);
+      const a = lineGeo.attributes.position as THREE.BufferAttribute;
+      [-20, -7, 6].forEach((z, k) => {
+        a.setXYZ(k * 2, X[0] + W - 0.2, 1.0, z);
+        a.setXYZ(k * 2 + 1, X[1] - W + 0.2, 1.0 + (X[1] - X[0] - 26) * 0.02, z + 0.4);
+      });
+      a.needsUpdate = true;
+      lineGeo.setDrawRange(0, 6);
+    }
+  });
+  return (
+    <group>
+      {SHIP_PLANKS.z.map((_, i) => (
+        <group key={i} ref={(el) => (pivots.current[i] = el)}>
+          <mesh ref={(el) => (boards.current[i] = el)} castShadow receiveShadow>
+            <boxGeometry args={[1, 0.12, SHIP_PLANKS.half * 2]} />
+            <meshStandardMaterial color="#6b4a2c" roughness={0.85} />
+          </mesh>
+        </group>
+      ))}
+      <lineSegments ref={lines} geometry={lineGeo} frustumCulled={false}>
+        <lineBasicMaterial color="#2a1c10" />
+      </lineSegments>
+    </group>
+  );
+}
+
 function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
@@ -1184,6 +1240,7 @@ function SeaMap() {
       </group>
       ))}
       <Bolts rt={mapRuntime} />
+      <BoardingPlanks />
       <Rain hideUnder={(x, y, z) => shipCeilAt(x, z, y - 1.2) < 99} />
     </group>
   );

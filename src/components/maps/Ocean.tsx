@@ -314,23 +314,27 @@ function softDot() {
  * Runs off mapRuntime.waveRise / waveSide, so it plays the same on every screen.
  */
 export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, number] }) {
-  const N = 3600;
+  // three parts: a sheet of green water that rears over the rail and curls down onto the deck, the shallow
+  // flood it leaves (a real surface: a rolling front, ripples, foam, sky glinting off it) sloshing rail to rail,
+  // and the spray flung inboard
+  const N = 2000;
+  const L = deckZ[1] - deckZ[0];
+  const zc = (deckZ[0] + deckZ[1]) / 2;
   const spray = useMemo(() => {
     const g = new THREE.BufferGeometry();
-    const a0 = new Float32Array(N * 3); // along the side z, height, outward offset
+    const a0 = new Float32Array(N * 3);
     const vel = new Float32Array(N * 3);
-    const seed = new Float32Array(N * 2); // delay, size
+    const seed = new Float32Array(N * 2);
     for (let i = 0; i < N; i++) {
-      a0[i * 3] = (Math.random() * 2 - 1) * 42 - 4;
-      a0[i * 3 + 1] = -1 + Math.random() * 3.5;
-      a0[i * 3 + 2] = Math.random() * 1.5;
-      const up = 9 + Math.random() * 15;
-      vel[i * 3] = 5 + Math.random() * 18; // inboard
-      vel[i * 3 + 1] = up;
+      a0[i * 3] = zc + (Math.random() * 2 - 1) * L * 0.55;
+      a0[i * 3 + 1] = 0.6 + Math.random() * 3.5;
+      a0[i * 3 + 2] = Math.random() * 1.2;
+      vel[i * 3] = 4 + Math.random() * 14;
+      vel[i * 3 + 1] = 6 + Math.random() * 11;
       vel[i * 3 + 2] = (Math.random() - 0.5) * 3;
       const surge = i % 6 < 3 ? 0 : i % 6 < 5 ? 1 : 2;
-      seed[i * 2] = [0, 1.9, 3.8][surge] + Math.random() * 0.6;
-      seed[i * 2 + 1] = 0.5 + Math.random() * 1.6;
+      seed[i * 2] = [0.25, 1.9, 3.8][surge] + Math.random() * 0.5;
+      seed[i * 2 + 1] = 0.8 + Math.random() * 1.8;
     }
     g.setAttribute('position', new THREE.BufferAttribute(a0, 3));
     g.setAttribute('aVel', new THREE.BufferAttribute(vel, 3));
@@ -347,60 +351,134 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
           float t = uT - aSeed.x;
           vA = 0.0;
           vec3 p = vec3(0.0, -50.0, 0.0);
-          if (t > 0.0 && t < 2.2) {
-            // thrown up and inboard over the rail, drag slows them, gravity brings them down on the deck
-            float drag = (1.0 - exp(-1.6 * t)) / 1.6;
-            p.x = uSide * (uBeam + 0.6 + position.z) - uSide * aVel.x * drag;
+          if (t > 0.0 && t < 1.8) {
+            float drag = (1.0 - exp(-1.8 * t)) / 1.8;
+            p.x = uSide * (uBeam + 0.4 + position.z) - uSide * aVel.x * drag;
             p.y = position.y + aVel.y * drag - 0.5 * 11.0 * t * t;
             p.z = position.x + aVel.z * drag;
-            p.y = max(p.y, 0.05);
-            vA = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(1.1, 2.2, t));
+            p.y = max(p.y, 0.1);
+            vA = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.8, 1.8, t));
           }
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          float grow = 1.0 + max(t, 0.0) * 2.4; // droplets spread into mist
-          gl_PointSize = aSeed.y * grow * uScale / max(-mv.z, 0.5);
+          gl_PointSize = aSeed.y * (1.0 + max(t, 0.0) * 3.0) * uScale / max(-mv.z, 0.5);
         }`,
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap; uniform float uLightning; varying float vA;
         void main(){
-          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.7;
+          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.55;
           if (a < 0.01) discard;
-          gl_FragColor = vec4(vec3(0.72, 0.8, 0.85) + uLightning * 0.4, a);
+          gl_FragColor = vec4(vec3(0.82, 0.88, 0.9) + uLightning * 0.4, a);
         }`,
     });
     return { g, m };
-  }, [beam]);
-  const wash = useMemo(() => {
-    const m = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 }, uFbm: { value: fbmTexture() } },
-      vertexShader: /* glsl */ `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: /* glsl */ `
-        uniform float uT; uniform float uSide; uniform float uBeam; uniform float uTime; uniform float uLightning; varying vec2 vP;
-        ${NOISE}
-        void main(){
-          if (uT < 0.15 || uT > 7.0) discard;
-          float t = uT - 0.15;
-          // the leading edge races across from the side the wave came over, then the water sloshes from rail to rail
-          // as she rolls (fresh surges at 1.9 s and 3.8 s), and finally thins out and drains through the scuppers
-          float front = uSide * uBeam - uSide * min(t, 1.6) * 16.0;
-          float slosh = t > 1.6 ? sin((t - 1.6) * 1.7) * 7.0 * (1.0 - smoothstep(2.0, 6.5, t)) : 0.0;
-          float behind = (vP.x - front - uSide * slosh) * uSide; // > 0: already covered
-          float edge = smoothstep(-0.6, 0.6, behind) * (t > 1.6 ? 0.55 : 1.0) + (t > 1.6 ? 0.45 : 0.0);
-          float surge = exp(-pow((t - 1.9) * 2.2, 2.0)) + exp(-pow((t - 3.8) * 2.2, 2.0));
-          float thin = (1.0 - smoothstep(4.5, 6.8, t)) * (0.75 + 0.25 * surge);
-          vec2 flow = vec2(vP.x + uSide * t * 6.0 - slosh, vP.y * 1.6);
-          float f = fbm(flow * 0.7 + uTime * 0.6);
-          float foam = smoothstep(0.35, 0.75, f + (1.0 - smoothstep(0.0, 1.6, behind)) * 0.35 + surge * 0.3);
-          float a = edge * thin * (0.3 + foam * 0.6);
-          if (a < 0.01) discard;
-          gl_FragColor = vec4(mix(vec3(0.25, 0.4, 0.45), vec3(0.75, 0.82, 0.86), foam) + uLightning * 0.3, a);
-        }`,
-    });
-    return m;
-  }, [beam]);
+  }, [beam, L, zc]);
+  // the curling sheet: u runs from the sea up over the rail to the lip, v along the ship
+  const sheet = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 }, uLen: { value: L }, uZc: { value: zc } },
+        vertexShader: /* glsl */ `
+          uniform float uT, uSide, uBeam, uTime, uLen, uZc;
+          varying float vU; varying float vA; varying vec3 vW; varying float vF;
+          ${NOISE}
+          void main(){
+            float u = uv.x; float v = uv.y;
+            float t = uT;
+            float z = uZc + (v - 0.5) * uLen;
+            // how high this stretch of the wave stands (irregular along the ship)
+            float k = 0.7 + 0.5 * noise(vec2(z * 0.08, 3.0));
+            float rise = sin(clamp(t / 0.7, 0.0, 1.0) * 1.5708);
+            float fall = 1.0 - smoothstep(0.75, 1.45, t);
+            float H = 4.6 * k * rise * fall;
+            float reach = (1.2 + max(t - 0.35, 0.0) * 10.0) * k;
+            // profile: up from below the rail, arching over and curling down at the lip
+            float ang = u * 2.6;
+            float x = uSide * (uBeam + 0.8) - uSide * (sin(ang) * 0.5 + 0.5 - 0.5) * reach * 1.4 - uSide * u * reach * 0.6;
+            float y = -1.0 + sin(ang * 0.9) * H + u * 0.6;
+            y = max(y, 0.08);
+            vec3 p = vec3(x, y, z + sin(u * 3.0 + uTime * 2.0) * 0.3);
+            vU = u;
+            vF = noise(vec2(z * 0.4 - uTime * 1.5, u * 6.0 - uTime * 2.0));
+            vA = (t >= 0.0 && t < 1.5) ? smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(1.0, 1.5, t)) : 0.0;
+            vec4 w = modelMatrix * vec4(p, 1.0);
+            vW = w.xyz;
+            gl_Position = projectionMatrix * viewMatrix * w;
+          }`,
+        fragmentShader: /* glsl */ `
+          uniform float uLightning; varying float vU; varying float vA; varying vec3 vW; varying float vF;
+          void main(){
+            if (vA < 0.01) discard;
+            vec3 N = normalize(cross(dFdx(vW), dFdy(vW)));
+            vec3 V = normalize(cameraPosition - vW);
+            float fres = pow(1.0 - abs(dot(N, V)), 3.0);
+            // deep green water low in the sheet, white foam toward the lip
+            float foam = smoothstep(0.45, 0.95, vU + vF * 0.35);
+            vec3 water = mix(vec3(0.05, 0.2, 0.22), vec3(0.15, 0.38, 0.4), vU);
+            vec3 col = mix(water, vec3(0.86, 0.92, 0.95), foam) + fres * vec3(0.35, 0.45, 0.55) + uLightning * 0.35;
+            float a = vA * mix(0.6, 0.92, foam) * (0.75 + fres * 0.25);
+            gl_FragColor = vec4(col, a);
+          }`,
+      }),
+    [beam, L, zc]
+  );
+  // the flood on deck: a displaced surface, so the rolling front and ripples catch the light
+  const wash = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 } },
+        vertexShader: /* glsl */ `
+          uniform float uT, uSide, uBeam, uTime;
+          varying vec3 vW; varying float vD; varying float vFoam;
+          ${NOISE}
+          float depthAt(float x, float t){
+            // the front races across from the side the wave came over, then the water sloshes rail to rail
+            float front = uSide * uBeam - uSide * min(t, 1.4) * 17.0;
+            float slosh = t > 1.4 ? sin((t - 1.4) * 1.8) * 7.0 * (1.0 - smoothstep(2.0, 6.5, t)) : 0.0;
+            float behind = (x - front - uSide * slosh) * uSide;
+            float cover = smoothstep(-0.5, 0.5, behind) * (t > 1.4 ? 0.5 : 1.0) + (t > 1.4 ? 0.5 : 0.0);
+            float surge = exp(-pow((t - 1.9) * 2.4, 2.0)) + exp(-pow((t - 3.8) * 2.4, 2.0));
+            float thin = 1.0 - smoothstep(4.0, 6.8, t);
+            float bore = exp(-pow(behind / 0.7, 2.0)) * (t < 1.6 ? 0.45 : 0.15);
+            return (cover * (0.16 + surge * 0.12) + bore) * thin;
+          }
+          void main(){
+            vec3 p = position;
+            float t = uT - 0.2;
+            float d = t > 0.0 ? depthAt(p.x, t) : 0.0;
+            // (the plane is laid flat: its local z is up, its local y runs along the ship)
+            float rip = (noise(p.xy * 1.3 + vec2(uSide * uTime * 3.0, uTime)) - 0.5) * 0.08 * step(0.01, d);
+            p.z += d + rip;
+            vD = d;
+            vFoam = noise(vec2(p.x * 0.9 + uSide * t * 5.0, p.y * 1.4 + uTime * 0.5)) + exp(-pow(d - 0.4, 2.0) * 30.0) * 0.4;
+            vec4 w = modelMatrix * vec4(p, 1.0);
+            vW = w.xyz;
+            gl_Position = projectionMatrix * viewMatrix * w;
+          }`,
+        fragmentShader: /* glsl */ `
+          uniform float uLightning; varying vec3 vW; varying float vD; varying float vFoam;
+          void main(){
+            if (vD < 0.015) discard;
+            vec3 N = normalize(cross(dFdx(vW), dFdy(vW)));
+            if (N.y < 0.0) N = -N;
+            vec3 V = normalize(cameraPosition - vW);
+            float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+            vec3 L = normalize(vec3(0.2, 0.8, -0.4));
+            float spec = pow(max(dot(reflect(-L, N), V), 0.0), 60.0);
+            float foam = smoothstep(0.55, 0.95, vFoam) * smoothstep(0.02, 0.2, vD);
+            vec3 col = mix(vec3(0.08, 0.2, 0.22), vec3(0.2, 0.34, 0.36), smoothstep(0.0, 0.4, vD));
+            col = mix(col, vec3(0.85, 0.9, 0.92), foam) + fres * vec3(0.4, 0.5, 0.6) + spec * 0.8 + uLightning * 0.3;
+            float a = smoothstep(0.015, 0.08, vD) * (0.55 + foam * 0.3 + fres * 0.15);
+            gl_FragColor = vec4(col, a);
+          }`,
+      }),
+    [beam]
+  );
   const st = useRef({ t: -1, last: 0, side: 1 });
   useFrame((s, dt) => {
     const c = st.current;
@@ -413,22 +491,24 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
       c.t += Math.min(dt, 0.05);
       if (c.t > 7.2) c.t = -1;
     }
-    const u = spray.m.uniforms;
-    u.uT.value = c.t;
-    u.uSide.value = c.side;
-    u.uLightning.value = mapRuntime.lightning;
-    u.uScale.value = s.size.height * 0.5;
-    const w = wash.uniforms;
-    w.uT.value = c.t;
-    w.uSide.value = c.side;
-    w.uTime.value = s.clock.elapsedTime;
-    w.uLightning.value = mapRuntime.lightning;
+    const force = (globalThis as any).__TQ_WAVE_T; // preview / tests: show a moment of the crash
+    if (typeof force === 'number') c.t = force;
+    for (const m of [spray.m, sheet, wash]) {
+      m.uniforms.uT.value = c.t;
+      m.uniforms.uSide.value = c.side;
+      m.uniforms.uLightning.value = mapRuntime.lightning;
+      if (m.uniforms.uTime) m.uniforms.uTime.value = s.clock.elapsedTime;
+    }
+    spray.m.uniforms.uScale.value = s.size.height * 0.5;
   });
   return (
     <group>
       <points geometry={spray.g} material={spray.m} frustumCulled={false} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, (deckZ[0] + deckZ[1]) / 2]} material={wash} frustumCulled={false}>
-        <planeGeometry args={[beam * 2, deckZ[1] - deckZ[0], 1, 1]} />
+      <mesh material={sheet} frustumCulled={false}>
+        <planeGeometry args={[1, 1, 18, 60]} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, zc]} material={wash} frustumCulled={false}>
+        <planeGeometry args={[beam * 2, L, 64, 96]} />
       </mesh>
     </group>
   );

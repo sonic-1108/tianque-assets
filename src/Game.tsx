@@ -17,7 +17,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -1239,7 +1239,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -3784,6 +3784,7 @@ function GameImpl({
       round.over = false;
       if (map.id === 'sea') {
         mapRuntime.shipX = [-SHIP_GAP.start / 2, SHIP_GAP.start / 2];
+        mapRuntime.board = { mode: 0, plank: 0 };
         syncShips();
       }
       fighters.forEach((c, k) => {
@@ -4845,7 +4846,18 @@ function GameImpl({
 
       if (map.rect) {
         const { hx, hz } = map.rect;
-        if (Math.abs(c.pos[0]) > hx - 0.3) {
+        if (map.id === 'sea') {
+          // the bulwarks: nobody leaves their ship sideways, except across a boarding plank
+          const k = shipOf(c.pos[0]);
+          const lx = c.pos[0] - mapRuntime.shipX[k];
+          const lim = 11.8 - 0.3;
+          if (Math.abs(lx) > lim && !(inPlank(c.pos[0], c.pos[2]) && c.pos[1] > -0.5)) {
+            const sx = Math.sign(lx);
+            c.pos[0] = mapRuntime.shipX[k] + sx * lim;
+            wallSplat(i, c, speed, mapRuntime.shipX[k] + sx * (lim + 0.6), c.pos[2]);
+            c.vel[0] = 0;
+          }
+        } else if (Math.abs(c.pos[0]) > hx - 0.3) {
           const sx = Math.sign(c.pos[0]);
           c.pos[0] = sx * (hx - 0.3);
           wallSplat(i, c, speed, sx * (hx + 0.3), c.pos[2]);
@@ -5730,14 +5742,17 @@ function GameImpl({
         const k = shipOf(c.pos[0]);
         const hx = mapRuntime.shipX[k] + SHIP_HELM.x;
         if (Math.hypot(c.pos[0] - hx, c.pos[2] - SHIP_HELM.z) < 1.6 && Math.abs(c.pos[1]) < 0.6) {
-          const gap = mapRuntime.shipX[1] - mapRuntime.shipX[0];
-          const docked = gap <= SHIP_GAP.min + 0.05;
-          c.interactHint = docked ? '按住 F 掌舵 · 把船开远' : '按住 F 掌舵 · 把船开向对面';
-          if (intent.interact) {
-            helmHold.current[k] = docked ? -1 : 1;
-            c.vel[0] = c.vel[2] = 0;
-            intent.move.set(0, 0, 0);
-            c.rotY = c.targetRotY = yawTo(c.pos, [mapRuntime.shipX[1 - k], 0, c.pos[2]]);
+          const Bd = mapRuntime.board;
+          const closing = Bd.mode === 1 || Bd.mode === 2;
+          c.interactHint = closing ? 'F 下令离舷 · 收跳板、把船分开' : 'F 下令接舷 · 两船靠拢、放跳板';
+          if (pressed && !round.over) {
+            Bd.mode = closing ? 3 : 1;
+            mapRuntime.helm[k] = 1;
+            c.rotY = c.targetRotY = yawTo(c.pos, [hx, 0, SHIP_HELM.z - 1]);
+            vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), closing ? '离舷！' : '接舷！', true, '#fde68a');
+            gameAudio.playGong();
+            onRoundEvent?.({ type: 'toast', text: `${i === ME ? '你' : c.tag || '有人'}下令${closing ? '离舷：收起跳板，两船分开' : '接舷：两船靠拢，贴上就放跳板'}` });
+            return true;
           }
           return false;
         }
@@ -6011,31 +6026,40 @@ function GameImpl({
       // the enemy is on the other ship: sail over (the helm) or, alongside, go over the rail at them
       const kMe = shipOf(me.pos[0]);
       const kFoe = shipOf(foe.pos[0]);
-      if (S.goal < 0 && kMe !== kFoe && overShip(foe.pos[0], foe.pos[2])) {
+      if (S.goal < 0 && kMe !== kFoe && overShip(foe.pos[0], foe.pos[2]) && !inPlank(me.pos[0], me.pos[2])) {
         const X = mapRuntime.shipX;
-        const docked = X[1] - X[0] <= SHIP_GAP.min + 0.05;
+        const Bd = mapRuntime.board;
         const dirX = Math.sign(X[kFoe] - X[kMe]);
-        if (!docked) {
-          tx = X[kMe] + SHIP_HELM.x - dirX * 0.9;
+        if (Bd.mode === 0 || Bd.mode === 3) {
+          // order the ships together
+          tx = X[kMe] + SHIP_HELM.x;
           ty = 0;
-          tz = SHIP_HELM.z;
-          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.0 && Math.abs(me.pos[1]) < 0.6) {
+          tz = SHIP_HELM.z - 1.0;
+          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.2 && Math.abs(me.pos[1]) < 0.6) {
             out.move.set(0, 0, 0);
             out.request = null;
-            out.interact = true; // hold the helm
+            out.interact = !me.intPrev;
             return;
           }
         } else {
-          tx = X[kMe] + dirX * (SHIP_LAYOUT.W - 1.0);
+          // to the nearest plank's foot, then straight across it once it's down
+          const pz = SHIP_PLANKS.z.reduce((a, b) => (Math.abs(b - foe.pos[2]) + Math.abs(b - me.pos[2]) < Math.abs(a - foe.pos[2]) + Math.abs(a - me.pos[2]) ? b : a));
+          tx = X[kMe] + dirX * 10.5;
           ty = 0;
-          tz = THREE.MathUtils.clamp(foe.pos[2], -24, 10);
-          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.8 && Math.abs(me.pos[1]) < 0.6) {
-            out.move.set(dirX, 0, 0);
-            out.request = me.isGrounded ? 'jump' : null;
+          tz = pz;
+          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.2 && Math.abs(me.pos[1]) < 0.6 && Bd.plank >= 0.95) {
+            out.move.set(dirX, 0, (pz - me.pos[2]) * 0.6).normalize();
+            out.request = null;
             out.block = false;
             return;
           }
         }
+      }
+      // halfway over a plank: keep going
+      if (inPlank(me.pos[0], me.pos[2]) && shipOf(foe.pos[0]) !== kMe) {
+        out.move.set(Math.sign(mapRuntime.shipX[kFoe] - mapRuntime.shipX[kMe]), 0, 0);
+        out.request = null;
+        return;
       }
       // walk the ship's floor graph: stairs, doors, the hatch, round the crates and the hatch rail
       const st = shipSteerW(Math.max(0, slotOf(me)), me, tx, ty, tz, S.goal >= 0);
@@ -6058,31 +6082,47 @@ function GameImpl({
       const w = waveRef.current;
       const lt = lightningRef.current;
       {
-        // the helms (orders were given while the fighters acted last frame)
-        const H = helmHold.current;
+        // boarding orders: close in (both ships steer together, easing in at the end), drop the planks;
+        // cast off: planks up first, then the ships draw apart
+        const Bd = mapRuntime.board;
         const X = mapRuntime.shipX;
-        for (let k = 0; k < 2; k++) {
-          mapRuntime.helm[k] = H[k] ? 1 : Math.max(0, mapRuntime.helm[k] - dt * 2);
-          if (!H[k] || round.over) continue;
-          const gap = X[1] - X[0];
-          const want = H[k] > 0 ? SHIP_GAP.min : SHIP_GAP.max;
-          const step = Math.min(Math.abs(want - gap), SHIP_GAP.speed * dt) * Math.sign(want - gap);
-          // each ship moves itself: ship 0 toward +x to close, ship 1 toward -x
-          const dx = k === 0 ? step : -step;
-          if (!dx) continue;
-          const wasDocked = gap <= SHIP_GAP.min + 0.05;
-          X[k] += dx;
-          // everyone and everything aboard goes with her
-          for (const c of fighters) if (shipOf(c.pos[0]) === k && overShip(c.pos[0], c.pos[2]) && c.pos[1] > -6) c.pos[0] += dx;
-          for (const b of mapRuntime.bolts) if (b.stuck && shipOf(b.x) === k) b.x += dx;
-          const nowGap = X[1] - X[0];
-          if (!wasDocked && nowGap <= SHIP_GAP.min + 0.05) {
-            onRoundEvent?.({ type: 'toast', text: '两船靠上了！翻过船舷跳过去开打' });
-            controller?.addShake(0.5);
+        for (let k = 0; k < 2; k++) mapRuntime.helm[k] = Math.max(0, mapRuntime.helm[k] - dt * 0.5);
+        let move = 0;
+        const gap = X[1] - X[0];
+        if (Bd.mode === 1) {
+          const left = gap - SHIP_GAP.min;
+          move = -Math.min(left, SHIP_GAP.speed * dt * Math.min(1, 0.25 + left / 6)); // gap change (negative: closing)
+          if (left <= 0.01) {
+            Bd.mode = 2;
+            onRoundEvent?.({ type: 'toast', text: '两船靠上了，跳板放下！冲过去' });
+            controller?.addShake(0.45);
             gameAudio.playSlam();
           }
+        } else if (Bd.mode === 2) {
+          Bd.plank = Math.min(1, Bd.plank + dt / 1.2);
+        } else if (Bd.mode === 3) {
+          if (Bd.plank > 0) Bd.plank = Math.max(0, Bd.plank - dt / 0.8);
+          else {
+            move = Math.min(SHIP_GAP.max - gap, SHIP_GAP.speed * 0.8 * dt);
+            if (SHIP_GAP.max - gap <= 0.01) Bd.mode = 0;
+          }
         }
-        H[0] = H[1] = 0;
+        if (move) {
+          // each ship takes half; everyone and everything aboard goes with her
+          for (let k = 0; k < 2; k++) {
+            const dx = (k === 0 ? -move : move) / 2;
+            for (const c of fighters) if (shipOf(c.pos[0]) === k && c.pos[1] > -6) c.pos[0] += dx;
+            for (const b of mapRuntime.bolts) if (b.stuck && shipOf(b.x) === k) b.x += dx;
+            X[k] += dx;
+          }
+        }
+        // someone standing on a plank as it's raised slides back onto their own deck
+        if (Bd.mode === 3 && Bd.plank < 0.95)
+          for (const c of fighters) {
+            const k = shipOf(c.pos[0]);
+            const lx = c.pos[0] - X[k];
+            if (Math.abs(lx) > 11.6) c.pos[0] = X[k] + Math.sign(lx) * 11.5;
+          }
         syncShips();
       }
       // overboard into the water between (or beside) the ships: hauled back aboard your own ship, bruised
