@@ -33,11 +33,15 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           api=https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain
-          sub=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" $api | jq -r '.result.subdomain // empty')
+          resp=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" $api)
+          sub=$(echo "$resp" | jq -r '.result.subdomain // empty')
+          echo "::notice::subdomain lookup: $(echo "$resp" | jq -c '{success, errors}' | cut -c1-300) · account id length ${#CLOUDFLARE_ACCOUNT_ID}"
           if [ -z "$sub" ]; then
             # first time: give the account a workers.dev subdomain
             for name in tianque-$(echo $CLOUDFLARE_ACCOUNT_ID | cut -c1-6) tianque-$RANDOM$RANDOM; do
-              sub=$(curl -s -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data "{\"subdomain\":\"$name\"}" $api | jq -r '.result.subdomain // empty')
+              resp=$(curl -s -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data "{\"subdomain\":\"$name\"}" $api)
+              sub=$(echo "$resp" | jq -r '.result.subdomain // empty')
+              echo "::notice::register $name: $(echo "$resp" | jq -c '{success, errors}' | cut -c1-300)"
               [ -n "$sub" ] && break
             done
           fi
