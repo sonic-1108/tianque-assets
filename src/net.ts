@@ -99,7 +99,7 @@ export class NetSession {
   peer: Peer | null = null;
   conn: DataConnection | null = null;
   /** host: everyone who has joined, by connection id (their controls, pick, name, line) */
-  guests = new Map<string, { id: string; conn: DataConnection | null; relay: boolean; remote: RemoteInput; cls: CharacterClassId | null; name: string; pingMs: number; heard: number }>();
+  guests = new Map<string, { id: string; conn: DataConnection | null; relay: boolean; remote: RemoteInput; cls: CharacterClassId | null; name: string; pingMs: number; heard: number; via?: any }>();
   /** host: someone joined or left */
   onGuests: (() => void) | null = null;
   /** host: the first guest's controls (kept for older code paths) */
@@ -494,7 +494,7 @@ export class NetSession {
       this.clockOff = this.clockOff === null || off < this.clockOff ? off : this.clockOff + (off - this.clockOff) * 0.01;
       if (this.lastArrive) {
         const gap = at - this.lastArrive;
-        this.jitter += (Math.abs(gap - 33) - this.jitter) * 0.05;
+        this.jitter += (Math.abs(gap - (this.via === 'relay' ? 48 : 33)) - this.jitter) * 0.05;
       }
       this.lastArrive = at;
       this.interpDelay = Math.min(220, Math.max(this.via === 'relay' ? 70 : 45, 35 + this.jitter * 2.5));
@@ -554,8 +554,13 @@ export class NetSession {
   private relaySend(m: NetMessage | RelayCtl | any, client = this.relayOut) {
     try {
       if (this.role === 'host' && !client) {
-        // every broker a relayed guest might be on
-        for (const c of this.relays) c.publish(this.topic('g'), JSON.stringify(m), { qos: 0 });
+        // the brokers relayed guests are on (all of them while someone hasn't picked one yet)
+        const used = new Set<any>();
+        let unknown = false;
+        for (const g of this.guests.values()) if (g.relay) g.via ? used.add(g.via) : (unknown = true);
+        const targets = unknown || !used.size ? this.relays : [...used];
+        const data = JSON.stringify(m);
+        for (const c of targets) c.publish(this.topic('g'), data, { qos: 0 });
         return;
       }
       client?.publish(this.topic(this.role === 'host' ? 'g' : 'h'), JSON.stringify(m), { qos: 0 });
@@ -599,13 +604,21 @@ export class NetSession {
         this.relayState = this.relays.length ? `中转待命 ${this.relays.length} 条` : '中转服务器都连不上，只能直连';
         this.changed();
       } else {
-        for (const url of brokers) {
-          const cl = await tryOne(url);
-          if (cl) {
-            this.relays = [cl];
-            break;
-          }
-        }
+        // every broker at once: we knock on all of them and keep the one the host's answer comes back on first,
+        // which is the quickest round trip (the old way took the first in the list, often one in Europe)
+        const first = await new Promise<any>((res) => {
+          let left = brokers.length;
+          brokers.forEach((b) =>
+            tryOne(b).then((cl) => {
+              if (cl && this.via === 'relay') cl.end(true); // already settled on another
+              else if (cl) {
+                this.relays.push(cl);
+                res(cl);
+              } else if (--left === 0) res(null);
+            })
+          );
+        });
+        if (!first) return false;
       }
       return this.relays.length > 0;
     })();
@@ -632,6 +645,7 @@ export class NetSession {
       const from = m._from as string | undefined;
       if (!from || !this.guests.get(from)?.relay) return;
       this.guests.get(from)!.heard = performance.now();
+      this.guests.get(from)!.via = client; // the broker this guest chose
       if (m.t === 'rp') return;
       if (m.t === 'bye') return void this.dropGuest(from);
       delete m._from;
@@ -643,6 +657,9 @@ export class NetSession {
       this.relayOut = client;
       this.relayHeard = performance.now();
       this.via = 'relay';
+      for (const cl of this.relays) if (cl !== client) cl.end(true);
+      this.relays = [client];
+      this.relayState = `中转：${client.__tqName}`;
       window.clearTimeout(this.joinTimer);
       try {
         this.conn?.close();

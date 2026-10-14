@@ -1161,7 +1161,7 @@ function GameImpl({
       });
     }
 
-    if (net?.role === 'host' && net.status === 'connected' && nowMs - netSendRef.current > 33) {
+    if (net?.role === 'host' && net.status === 'connected' && nowMs - netSendRef.current > (net.path === 'relay' ? 48 : 33)) {
       netSendRef.current = nowMs;
       net.send({
         t: 's',
