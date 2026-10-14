@@ -257,7 +257,7 @@ function GameImpl({
   // ---- automatic quality: keep the frame rate up on laptops (retina screens render 4x the pixels)
   const setDpr = (d: number) => onAutoDpr?.(d);
   const [perfTier, setPerfTier] = useState(0); // 0 everything, 1 no ambient occlusion, 2 also no MSAA
-  const perf = useRef({ frames: 0, t0: 0, dpr: 1, max: 1, slow: 0, fast: 0, tier: 0 });
+  const perf = useRef({ frames: 0, t0: 0, dpr: 1, max: 1, slow: 0, fast: 0, tier: 0, raisedAt: 0 });
   useEffect(() => {
     const P = perf.current;
     P.max = Math.min(window.devicePixelRatio || 1, QUALITY[quality].dpr[1]);
@@ -290,6 +290,11 @@ function GameImpl({
     } else P.slow = P.fast = 0;
     if (P.slow >= 2) {
       P.slow = 0;
+      // a step up that made it slow again: settle at the lower resolution for good. Every resolution change
+      // reallocates the render targets (a visible hitch), so going up and down every few seconds was itself
+      // the stutter people saw.
+      if (P.raisedAt && now - P.raisedAt < 20000) P.max = Math.max(1, P.dpr - 0.25);
+      P.raisedAt = 0;
       if (P.tier === 0 && quality === 'high') setPerfTier((P.tier = 1));
       else if (P.dpr > 1.01) setDpr((P.dpr = Math.max(1, P.dpr - 0.25)));
       else if (quality !== 'low') {
@@ -298,8 +303,9 @@ function GameImpl({
         onRoundEvent?.({ type: 'toast', text: `画面有点卡，已自动把画质调到「${quality === 'high' ? '中' : '低'}」（设置里可改回）` });
       } else if (P.dpr > 0.76) setDpr((P.dpr = Math.max(0.75, P.dpr - 0.25)));
       else if (P.tier < 2) setPerfTier((P.tier = 2));
-    } else if (P.fast >= 8 && P.dpr < P.max - 0.01) {
+    } else if (P.fast >= 15 && P.dpr < P.max - 0.01) {
       P.fast = 0;
+      P.raisedAt = now;
       setDpr((P.dpr = Math.min(P.max, P.dpr + 0.25)));
     }
     (globalThis as any).__TQ_PERF = { fps: Math.round(fps), dpr: P.dpr, tier: P.tier };
@@ -468,19 +474,35 @@ function GameImpl({
     const g = globalThis as any;
     g.__TQ_SHADERS = 'compiling';
     const t0 = performance.now();
-    const t = setTimeout(() => {
-      const cam = camera;
+    const warm = () => {
       const r = gl as any;
-      if (!r.compileAsync) return;
-      r.compileAsync(scene, cam)
-        .then(() => {
-          if (alive) g.__TQ_SHADERS = `ready ${Math.round(performance.now() - t0)}ms`;
-        })
-        .catch(() => {});
-    }, 50);
+      if (!r.compileAsync || !alive) return;
+      // effects that only appear in a fight (palms, glyphs, rings, trails) sit hidden in pools; compile ignores
+      // hidden objects, so show everything for the moment it takes to collect the materials, then hide it again
+      // (no frame is drawn in between). Otherwise each effect's first use froze the game while it compiled.
+      const hidden: THREE.Object3D[] = [];
+      scene.traverse((o) => {
+        if (!o.visible) {
+          hidden.push(o);
+          o.visible = true;
+        }
+      });
+      let p: Promise<unknown>;
+      try {
+        p = r.compileAsync(scene, camera);
+      } finally {
+        for (const o of hidden) o.visible = false;
+      }
+      p.then(() => {
+        if (alive) g.__TQ_SHADERS = `ready ${Math.round(performance.now() - t0)}ms`;
+      }).catch(() => {});
+    };
+    const t = setTimeout(warm, 50);
+    const t2 = setTimeout(warm, 8000); // again once the character models are in
     return () => {
       alive = false;
       clearTimeout(t);
+      clearTimeout(t2);
     };
   }, [gl, scene, camera, map]);
 
@@ -2322,7 +2344,10 @@ function GameImpl({
         const prim = foes[i];
         const pi = slotOf(prim);
         // teammates can't hurt each other: only the other side is in the way
-        const others = fighters.filter((f, j) => j !== i && j !== pi && f.hp > 0 && (f.side ?? 0) !== (c.side ?? 0) && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < 14);
+        // (only while attacking: cloning every fighter twice a frame made a lot of garbage, and GC pauses are hitches)
+        const st = c.actionState;
+        const attacking = st.startsWith('attack') || st.startsWith('skill') || st === 'ultimate' || st === 'jump' || st === 'dodge' || (c.burrowT ?? 0) > 0;
+        const others = !attacking ? [] : fighters.filter((f, j) => j !== i && j !== pi && f.hp > 0 && (f.side ?? 0) !== (c.side ?? 0) && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < 14);
         const before = others.length ? structuredClone(c) : null;
         c.hasHitCurrentMove = !!(H.mask & (1 << pi));
         resolveAttacks(i, c, prim);
