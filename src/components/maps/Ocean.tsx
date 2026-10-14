@@ -334,7 +334,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
       vel[i * 3 + 2] = (Math.random() - 0.5) * 3;
       const surge = i % 6 < 3 ? 0 : i % 6 < 5 ? 1 : 2;
       seed[i * 2] = [0.25, 1.9, 3.8][surge] + Math.random() * 0.5;
-      seed[i * 2 + 1] = 0.8 + Math.random() * 1.8;
+      seed[i * 2 + 1] = i % 5 === 0 ? 0.3 + Math.random() * 0.3 : 0.1 + Math.random() * 0.2;
     }
     g.setAttribute('position', new THREE.BufferAttribute(a0, 3));
     g.setAttribute('aVel', new THREE.BufferAttribute(vel, 3));
@@ -351,22 +351,22 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
           float t = uT - aSeed.x;
           vA = 0.0;
           vec3 p = vec3(0.0, -50.0, 0.0);
-          if (t > 0.0 && t < 1.8) {
+          if (t > 0.0 && t < 1.4) {
             float drag = (1.0 - exp(-1.8 * t)) / 1.8;
             p.x = uSide * (uBeam + 0.4 + position.z) - uSide * aVel.x * drag;
             p.y = position.y + aVel.y * drag - 0.5 * 11.0 * t * t;
             p.z = position.x + aVel.z * drag;
             p.y = max(p.y, 0.1);
-            vA = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.8, 1.8, t));
+            vA = smoothstep(0.0, 0.08, t) * (1.0 - smoothstep(0.5, 1.4, t)) * (aSeed.y > 0.45 ? 0.45 : 1.0);
           }
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = aSeed.y * (1.0 + max(t, 0.0) * 3.0) * uScale / max(-mv.z, 0.5);
+          gl_PointSize = min(aSeed.y * (1.0 + max(t, 0.0) * 1.2) * uScale / max(-mv.z, 0.5), 90.0);
         }`,
       fragmentShader: /* glsl */ `
         uniform sampler2D uMap; uniform float uLightning; varying float vA;
         void main(){
-          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.55;
+          float a = texture2D(uMap, gl_PointCoord).a * vA * 0.5;
           if (a < 0.01) discard;
           gl_FragColor = vec4(vec3(0.82, 0.88, 0.9) + uLightning * 0.4, a);
         }`,
@@ -380,7 +380,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
         transparent: true,
         depthWrite: false,
         side: THREE.DoubleSide,
-        uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 }, uLen: { value: L }, uZc: { value: zc } },
+        uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 }, uLen: { value: L }, uZc: { value: zc }, uFbm: { value: fbmTexture() } },
         vertexShader: /* glsl */ `
           uniform float uT, uSide, uBeam, uTime, uLen, uZc;
           varying float vU; varying float vA; varying vec3 vW; varying float vF;
@@ -412,6 +412,9 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
           uniform float uLightning; varying float vU; varying float vA; varying vec3 vW; varying float vF;
           void main(){
             if (vA < 0.01) discard;
+            // the lip tears into ragged fingers
+            float rag = vU > 0.7 ? smoothstep(0.25, 0.6, vF + (1.0 - vU) * 1.6) : 1.0;
+            if (rag < 0.05) discard;
             vec3 N = normalize(cross(dFdx(vW), dFdy(vW)));
             vec3 V = normalize(cameraPosition - vW);
             float fres = pow(1.0 - abs(dot(N, V)), 3.0);
@@ -419,7 +422,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             float foam = smoothstep(0.45, 0.95, vU + vF * 0.35);
             vec3 water = mix(vec3(0.05, 0.2, 0.22), vec3(0.15, 0.38, 0.4), vU);
             vec3 col = mix(water, vec3(0.86, 0.92, 0.95), foam) + fres * vec3(0.35, 0.45, 0.55) + uLightning * 0.35;
-            float a = vA * mix(0.6, 0.92, foam) * (0.75 + fres * 0.25);
+            float a = vA * rag * mix(0.5, 0.85, foam) * (0.6 + 0.4 * vF);
             gl_FragColor = vec4(col, a);
           }`,
       }),
@@ -431,7 +434,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
       new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
-        uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 } },
+        uniforms: { uT: { value: -1 }, uSide: { value: 1 }, uBeam: { value: beam }, uTime: { value: 0 }, uLightning: { value: 0 }, uFbm: { value: fbmTexture() } },
         vertexShader: /* glsl */ `
           uniform float uT, uSide, uBeam, uTime;
           varying vec3 vW; varying float vD; varying float vFoam;
@@ -442,6 +445,9 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             float slosh = t > 1.4 ? sin((t - 1.4) * 1.8) * 7.0 * (1.0 - smoothstep(2.0, 6.5, t)) : 0.0;
             float behind = (x - front - uSide * slosh) * uSide;
             float cover = smoothstep(-0.5, 0.5, behind) * (t > 1.4 ? 0.5 : 1.0) + (t > 1.4 ? 0.5 : 0.0);
+            // as it drains it breaks into runnels and puddles
+            float pud = smoothstep(0.1 + smoothstep(2.5, 6.5, t) * 0.4, 0.6, noise(vec2(x * 0.35, uTime * 0.05) + vec2(0.0, uTime * 0.0)) * 0.5 + noise(vec2(x * 0.7 + 3.0, uTime * 0.1)) * 0.5);
+            cover *= t > 1.4 ? mix(1.0, pud, smoothstep(1.6, 3.0, t)) : 1.0;
             float surge = exp(-pow((t - 1.9) * 2.4, 2.0)) + exp(-pow((t - 3.8) * 2.4, 2.0));
             float thin = 1.0 - smoothstep(4.0, 6.8, t);
             float bore = exp(-pow(behind / 0.7, 2.0)) * (t < 1.6 ? 0.45 : 0.15);
@@ -450,12 +456,12 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
           void main(){
             vec3 p = position;
             float t = uT - 0.2;
-            float d = t > 0.0 ? depthAt(p.x, t) : 0.0;
+            float d = t > 0.0 ? depthAt(p.x, t) * mix(1.0, smoothstep(0.12, 0.5, noise(p.xy * 0.45)), smoothstep(2.0, 5.0, t)) : 0.0;
             // (the plane is laid flat: its local z is up, its local y runs along the ship)
             float rip = (noise(p.xy * 1.3 + vec2(uSide * uTime * 3.0, uTime)) - 0.5) * 0.08 * step(0.01, d);
             p.z += d + rip;
             vD = d;
-            vFoam = noise(vec2(p.x * 0.9 + uSide * t * 5.0, p.y * 1.4 + uTime * 0.5)) + exp(-pow(d - 0.4, 2.0) * 30.0) * 0.4;
+            vFoam = noise(vec2(p.x * 2.4 + uSide * t * 6.0, p.y * 3.2 + uTime * 0.6)) * 0.6 + noise(vec2(p.x * 5.0 - uTime, p.y * 6.0)) * 0.4 + exp(-pow(d - 0.4, 2.0) * 30.0) * 0.4;
             vec4 w = modelMatrix * vec4(p, 1.0);
             vW = w.xyz;
             gl_Position = projectionMatrix * viewMatrix * w;
@@ -471,9 +477,12 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             vec3 L = normalize(vec3(0.2, 0.8, -0.4));
             float spec = pow(max(dot(reflect(-L, N), V), 0.0), 60.0);
             float foam = smoothstep(0.55, 0.95, vFoam) * smoothstep(0.02, 0.2, vD);
-            vec3 col = mix(vec3(0.08, 0.2, 0.22), vec3(0.2, 0.34, 0.36), smoothstep(0.0, 0.4, vD));
-            col = mix(col, vec3(0.85, 0.9, 0.92), foam) + fres * vec3(0.4, 0.5, 0.6) + spec * 0.8 + uLightning * 0.3;
-            float a = smoothstep(0.015, 0.08, vD) * (0.55 + foam * 0.3 + fres * 0.15);
+            vec3 col = mix(vec3(0.05, 0.12, 0.13), vec3(0.12, 0.24, 0.25), smoothstep(0.0, 0.4, vD));
+            // lacy foam: thin bright veins rather than a solid sheet
+            float lace = (1.0 - smoothstep(0.0, 0.035, abs(vFoam - 0.6))) * 0.45;
+            foam = max(foam * 0.6, lace * smoothstep(0.02, 0.12, vD));
+            col = mix(col, vec3(0.72, 0.8, 0.82), foam) + fres * vec3(0.12, 0.16, 0.2) + spec * 0.9 + uLightning * 0.3;
+            float a = smoothstep(0.015, 0.08, vD) * (0.24 + smoothstep(0.1, 0.4, vD) * 0.18 + foam * 0.35 + spec * 0.3);
             gl_FragColor = vec4(col, a);
           }`,
       }),
