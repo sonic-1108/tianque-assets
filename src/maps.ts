@@ -823,8 +823,8 @@ MAPS.desert = {
     '关城有南北两道城门；西墙塌了一段，跳一下就能翻过去；东西两面城墙内侧各有两条马道上城头',
     '城头一圈走道连着四角的角楼，居高临下；外侧有垛口挡着，被打出城墙会摔进沙里',
     '正中是烽火台：站上台顶按住 F 点燃烽火，己方 25 秒内伤害 +12%，沙暴里也能看清每个敌人；敌人站上去按住 F 能把火踩灭',
-    '城里东西各一口井：F 喝水，回复已损失气血 10%',
-    '沙暴：大约一分半一次，起风前天边先发黄。沙暴里看不清远处的人，城外和城头会被风吹着走，躲进城里就没事',
+    '城里东西各一口井：F 摇辘轳把水桶放下去打水，提上来捧着喝，回复已损失气血 10%（动一下或挨打就中断）',
+    '沙暴：大约一分半一次，起风前天边先发黄。沙暴里看不清远处的人，城外和城头会被风吹着走；在外面待满 3 秒开始掉血（每秒 30），躲进城里或屋里就没事',
     '东西两头各有一座雅丹土台，顺着沙坡爬上去；风蚀的土柱和枯胡杨挡路也挡暗器',
     '飞虫沙暴：每局有五分之一的机会来一次。天边黑压压一片涌过来时只有 12 秒，必须躲进屋里（城墙内侧的四间营房，或者城门洞底下）。留在外面的人会被虫群吃掉：从头开始化成沙粒随风散去，当场倒下，队友也扶不起来',
   ],
@@ -898,7 +898,7 @@ export const mapRuntime = {
   /** 大漠玉门关: sandstorm 0..1, warning glow on the horizon 0..1, wind along x (+1 / -1); the beacon: lit by side (-1 none), seconds left, cooldown */
   /** the local player's side (scenery colours the beacon flag ours / theirs) */
   viewSide: 0,
-  desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0 },
+  desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0, wells: [] as { t: number; x: number; y: number; z: number; yaw: number }[] },
 };
 
 // ----------------------------------------------------------------------

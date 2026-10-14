@@ -225,6 +225,10 @@ export interface CombatantState {
   slip?: number; // 0..1 loss of balance; at 1 you fall
   devoured?: number; // 大漠玉门关 飞虫沙暴: 0 untouched, 0..1 being eaten (dissolving from the head down), 1 gone
   swarmExpo?: number; // seconds out in the open while the swarm is here
+  sandExpo?: number; // 大漠玉门关: seconds caught out in a thick sandstorm
+  mantraTgt?: number; // 六字真言: who the words are hunting (-1 nobody in reach)
+  drinkWell?: number; // 大漠玉门关: drawing water at well n (1-based), 0 not
+  drinkT?: number; // seconds into it
   beaconHold?: number; // 大漠玉门关: seconds of holding F at the beacon
   candle?: 0 | 1 | 2; // 青冥古林: 0 none, 1 carrying an unlit candle, 2 lit
   meditateT?: number; // 青冥寺: seconds left of sitting in meditation on a prayer cushion

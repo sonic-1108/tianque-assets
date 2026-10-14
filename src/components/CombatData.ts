@@ -373,8 +373,8 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     skills: [
       { id: 'vajra_palm', name: '金刚掌', key: '1', description: '向前疾冲一步推出金色掌印（160伤害），把对手震飞一大段距离；撞上墙壁或柱子会额外眩晕。5% 几率暴击：伤害翻倍（320），震得更远。', mpCost: 20, cooldown: 5, icon: '✋' },
       { id: 'zen_domain', name: '禅定结界', key: '2', description: '在脚下展开半径4.5米的金色法阵，持续5秒。对手在阵中移动减速一半，翻滚多耗体力。', mpCost: 25, cooldown: 11, icon: '☸️' },
-      { id: 'six_syllable_mantra', name: '六字真言', key: '3', description: '合掌一念，身边先震出一圈音波（近身打断施法），随后唵嘛呢叭咪吽六个金字依次飞出、自动追踪对手。前五字各32伤害并让人僵一下；最后一个「吽」字无视格挡和霸体，90伤害并「封印」对手2.2秒，期间放不了任何技能和大招。翻滚可以躲字。', mpCost: 25, cooldown: 9, icon: '📿' },
-      { id: 'golden_bell_shield', name: '金钟罩', key: '4', description: '金钟罩身4秒：受到的伤害降低65%，不会被打断，近身打你的人会被反震三成伤害。罩子散去时会有半秒气竭硬直。', mpCost: 30, cooldown: 14, icon: '🔔' },
+      { id: 'six_syllable_mantra', name: '六字真言', key: '3', description: '合掌一念，身边先震出一圈音波（近身打断施法），随后唵嘛呢叭咪吽六个金字依次飞出，锁定 10 米内看得见的敌人里血最少的那个追过去（10 米内没人就飞出去散掉）。前五字各32伤害并让人僵一下；最后一个「吽」字无视格挡和霸体，90伤害并「封印」对手2.2秒，期间放不了任何技能和大招。翻滚可以躲字。', mpCost: 25, cooldown: 9, icon: '📿' },
+      { id: 'golden_bell_shield', name: '金钟罩', key: '4', description: '金钟罩身4秒：受到的伤害降低65%，不会被打断，近身打你的人会被反震三成伤害；万佛朝宗的掌印拍不进金钟罩。罩子散去时会有半秒气竭硬直。', mpCost: 30, cooldown: 14, icon: '🔔' },
       { id: 'ten_thousand_buddhas', name: '万佛朝宗', key: 'R', description: '盘坐结印，身后浮现金佛法相，九道巨大掌印从天而降追着对手拍下，最后一掌把人拍倒。施法期间霸体。', mpCost: 60, cooldown: 24, icon: '🧘', isSuper: true },
     ],
   },

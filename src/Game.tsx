@@ -1,5 +1,6 @@
 import { shipSteer, newNavState, shipGraph } from './shipNav';
 import { desertSteer, newDesertNav } from './desertNav';
+import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
@@ -3054,7 +3055,24 @@ function GameImpl({
           const ang = (shots - 2.5) * 0.55;
           const from = new THREE.Vector3(c.pos[0], c.pos[1] + 2.0 + Math.cos(ang) * 0.35, c.pos[2]).addScaledVector(side, Math.sin(ang) * 1.1).addScaledVector(fwd, -0.3);
           const vel = side.clone().multiplyScalar(Math.sin(ang) * 6).addScaledVector(fwd, 2.5).add(new THREE.Vector3(0, 2.2 + Math.cos(ang) * 1.5, 0));
-          glyphRef.current.push({ idx: shots, slot, tgt: slotOf(foe), pos: from.clone(), vel: vel.clone(), age: 0 });
+          if (shots === 0) {
+            // 六字真言 locks on to the weakest enemy within 10 m that can be seen; nobody in reach: the words fly out and fade
+            let best = -1;
+            let bestHp = 1e9;
+            for (let j = 0; j < N; j++) {
+              const f = fighters[j];
+              if (f === c || f.hp <= 0 || sideOf(f) === sideOf(c)) continue;
+              if (Math.hypot(f.pos[0] - c.pos[0], f.pos[1] - c.pos[1], f.pos[2] - c.pos[2]) > 10) continue;
+              if (!losClear(c.pos[0], c.pos[1] + 1.4, c.pos[2], f.pos[0], f.pos[1] + 1.2, f.pos[2])) continue;
+              if (f.hp < bestHp) {
+                bestHp = f.hp;
+                best = j;
+              }
+            }
+            c.mantraTgt = best;
+            if (best >= 0 && best !== slotOf(foe)) vfx.ring(vA.set(fighters[best].pos[0], fighters[best].pos[1] + 0.05, fighters[best].pos[2]), 1.2, '#fde68a', 0.5, 0.1, 0.2);
+          }
+          glyphRef.current.push({ idx: shots, slot, tgt: c.mantraTgt ?? slotOf(foe), pos: from.clone(), vel: vel.clone(), age: 0 });
           vfx.glyph(shots, from, vel, slotOf(foe));
           if (shots === 0 || shots === 5) gameAudio.playPowerupChime();
           if (shots === 5) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.8, c.pos[2]), '唵嘛呢叭咪吽', true, '#fde68a');
@@ -3084,6 +3102,12 @@ function GameImpl({
             controller?.addShake(last ? 0.7 : 0.18);
             if (round.over || c.hp <= 0 || foe.hp <= 0 || covered) return;
             const hitR = last ? 3.4 : 2.6;
+            if ((foe.bellTimer ?? 0) > 0 && Math.hypot(foe.pos[0] - tx, foe.pos[2] - tz) < hitR) {
+              // 金钟罩 holds against the falling palms
+              vfx.damageNumber(new THREE.Vector3(foe.pos[0], foe.pos[1] + 2.6, foe.pos[2]), last ? '金钟罩挡下' : '挡', true, '#fde68a');
+              vfx.ring(new THREE.Vector3(foe.pos[0], foe.pos[1] + 1.2, foe.pos[2]), 1.4, '#fde68a', 0.3, 0.12, 0.2);
+              return;
+            }
             if (Math.hypot(foe.pos[0] - tx, foe.pos[2] - tz) < hitR && foe.pos[1] - ty < 3) {
               if (last) applyHit(slot, c, foe, 190, { heavy: true, crit: true, knock: 4, launch: 6, state: 'knockdown', dur: 1.1, unblockable: true });
               else applyHit(slot, c, foe, 52, { knock: 1.2, dur: 0.3, noMark: true });
@@ -3307,8 +3331,18 @@ function GameImpl({
       for (let n = list.length - 1; n >= 0; n--) {
         const g = list[n];
         const owner = fighters[g.slot];
-        const def = fighters[g.tgt] ?? fighters[1 - g.slot];
         g.age += step;
+        if (g.tgt < 0) {
+          // no one in reach: drift on and fade out
+          g.pos.addScaledVector(g.vel, step);
+          g.vel.multiplyScalar(0.97);
+          if (g.age > 1.1 || solidAt(g.pos.x, g.pos.y, g.pos.z)) {
+            vfx.sparkBurst(vB.copy(g.pos), 6, '#ffe9a8', 2, 0.04);
+            list.splice(n, 1);
+          }
+          continue;
+        }
+        const def = fighters[g.tgt] ?? fighters[1 - g.slot];
         const tgt = new THREE.Vector3(def.pos[0], def.pos[1] + 1.15, def.pos[2]);
         glyphSteer(g.pos, g.vel, tgt, g.age, step);
         if (g.age > 0.15 && solidAt(g.pos.x, g.pos.y, g.pos.z)) {
@@ -3687,6 +3721,9 @@ function GameImpl({
         c.beaconHold = 0;
         c.devoured = 0;
         c.swarmExpo = 0;
+        c.drinkWell = 0;
+        c.drinkT = 0;
+        c.sandExpo = 0;
         c.reviveHint = '';
         c.interactHint = '';
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
@@ -3747,7 +3784,7 @@ function GameImpl({
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
         const force = (globalThis as any).__TQ_SWARM;
         const swarmAt = map.id !== 'desert' ? -1 : force ? +force : Math.random() < DESERT.swarm.chance ? 30 + Math.random() * 45 : -1;
-        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0 };
+        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0, wells: [] };
       }
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
@@ -4036,6 +4073,11 @@ function GameImpl({
     /** 大漠玉门关: sandstorm cycle and the beacon's fire */
     function updateDesert(t: number) {
       const D = mapRuntime.desert;
+      // who is drawing water where (the well scenery animates the rope, bucket and crank from this)
+      D.wells = DESERT.wells.map((_, k) => {
+        const f = fighters.find((o) => o.drinkWell === k + 1);
+        return f ? { t: f.drinkT ?? 0, x: f.pos[0], y: f.pos[1], z: f.pos[2], yaw: f.rotY } : { t: -1, x: 0, y: 0, z: 0, yaw: 0 };
+      });
       const S = DESERT.storm;
       const cyc = S.calm + S.warn + S.storm + S.ease;
       const u = t % cyc;
@@ -4046,8 +4088,9 @@ function GameImpl({
       D.warn = u < a ? 0 : u < b ? (u - a) / S.warn : u < c2 ? 1 : Math.max(0, 1 - (u - c2) / S.ease);
       const target = u < b - 1.5 ? 0 : u < b + 2 ? (u - (b - 1.5)) / 3.5 : u < c2 ? 1 : Math.max(0, 1 - (u - c2) / S.ease);
       D.sand = Math.min(1, Math.max(0, target));
-      if (u >= a && u - dt < a && !round.over) onRoundEvent?.({ type: 'toast', text: '天边发黄 · 沙暴要来了，进城躲风' });
+      if (u >= a && u - dt < a && !round.over) onRoundEvent?.({ type: 'toast', text: '天边发黄 · 沙暴要来了，进城躲风 · 在沙暴里待 3 秒就开始掉血' });
       updateSwarm(t);
+      sandBurn();
       if (D.beaconT > 0) {
         D.beaconT -= dt;
         if (D.beaconT <= 0) {
@@ -4132,6 +4175,22 @@ function GameImpl({
         koCheck(i, '#3a2a1a');
       }
     }
+    /** caught out in a thick sandstorm: after 3 seconds it starts to hurt (30 a second) until you get into the fort or a room */
+    function sandBurn() {
+      const D = mapRuntime.desert;
+      for (let i = 0; i < N; i++) {
+        const c = fighters[i];
+        const out = D.sand > 0.55 && c.hp > 0 && !(c.devoured ?? 0) && !desertSheltered(c.pos[0], c.pos[2], c.pos[1]) && !desertIndoor(c.pos[0], c.pos[2], c.pos[1]);
+        if (!out || round.over) {
+          c.sandExpo = 0;
+          continue;
+        }
+        const e0 = c.sandExpo ?? 0;
+        c.sandExpo = e0 + dt;
+        if (e0 < 3 && c.sandExpo >= 3 && i === ME) onRoundEvent?.({ type: 'toast', text: '沙暴刮得人睁不开眼，在掉血 · 快进城或进屋' });
+        if (c.sandExpo >= 3 && Math.floor((c.sandExpo - 3) / 0.5) !== Math.floor((e0 - 3) / 0.5)) envHit(i, 15, 0, '沙暴');
+      }
+    }
     /** out in the open (or up on the walls) a sandstorm pushes you along with the wind */
     function desertWind(c: CombatantState) {
       const D = mapRuntime.desert;
@@ -4148,7 +4207,43 @@ function GameImpl({
       if (c.hp <= 0) return;
       const st = c.actionState;
       const free = c.isGrounded && (st === 'idle' || st === 'run' || st === 'block');
-      for (const [wx, wz] of DESERT.wells) {
+      // drawing water: crank the bucket down and up, lift it, drink (moving or being hit stops it, no heal)
+      if ((c.drinkWell ?? 0) > 0) {
+        const k = (c.drinkWell ?? 1) - 1;
+        const [wx, wz] = DESERT.wells[k];
+        const moved = !!intent && (intent.move.lengthSq() > 0.04 || !!intent.request);
+        if (moved || !(st === 'idle' || st === 'run') || !c.isGrounded) {
+          c.drinkWell = 0;
+          c.drinkT = 0;
+        } else {
+          const t0 = c.drinkT ?? 0;
+          c.drinkT = t0 + dt;
+          c.vel[0] = c.vel[2] = 0;
+          c.rotY = c.targetRotY = yawTo(c.pos, [wx, 0, wz]);
+          if (t0 < DRINK.down && c.drinkT >= DRINK.down) vfx.dustPuff(vB.set(wx, 0.35, wz), 6, 0.3, 1.2, 0.5, '#9fd3f0');
+          if (t0 < DRINK.drink && c.drinkT >= DRINK.drink) {
+            const lost = c.maxHp - c.hp;
+            const heal = Math.max(1, Math.round(lost * 0.1));
+            c.hp = Math.min(c.maxHp, c.hp + heal);
+            c.cooldowns['well'] = 20;
+            vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.6, c.pos[2]), 10, '#7dd3fc', 2.5, 0.05, UP, 0.6);
+            vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), `+${heal}`, false, '#4ade80');
+            if (i === ME) onRoundEvent?.({ type: 'toast', text: `喝了口井水，回复 ${heal} 气血` });
+          }
+          if ((c.drinkT ?? 0) > DRINK.lift && (c.drinkT ?? 0) < DRINK.drink && Math.random() < dt * 12) {
+            const f = fwdOf(c.rotY);
+            vfx.sparkBurst(vB.set(c.pos[0] + f.x * 0.3, c.pos[1] + 1.45, c.pos[2] + f.z * 0.3), 1, '#bfe7ff', 1.2, 0.03, UP, 1);
+          }
+          c.interactHint = c.drinkT < DRINK.up ? '摇辘轳打水中 · 动一下就会中断' : '喝水中 · 动一下就会中断';
+          if ((c.drinkT ?? 0) >= DRINK.end) {
+            c.drinkWell = 0;
+            c.drinkT = 0;
+          }
+          return;
+        }
+      }
+      for (let k = 0; k < DESERT.wells.length; k++) {
+        const [wx, wz] = DESERT.wells[k];
         if (Math.hypot(c.pos[0] - wx, c.pos[2] - wz) > 1.9 || c.pos[1] > 1.6) continue;
         const cd = c.cooldowns['well'] || 0;
         const lost = c.maxHp - c.hp;
@@ -4156,15 +4251,16 @@ function GameImpl({
           c.interactHint = `井水 · ${cd.toFixed(0)} 秒后可再喝`;
           return;
         }
+        const busy = fighters.some((o) => o !== c && o.drinkWell === k + 1);
+        if (busy) {
+          c.interactHint = '井边有人在打水';
+          return;
+        }
         c.interactHint = lost > 1 ? 'F 打水喝 · 回复已损失气血 10%' : '井水 · 气血已满';
         if (!pressed || lost <= 1 || !free) return;
-        const heal = Math.max(1, Math.round(lost * 0.1));
-        c.hp = Math.min(c.maxHp, c.hp + heal);
-        c.cooldowns['well'] = 20;
-        vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.2, c.pos[2]), 14, '#7dd3fc', 3.5, 0.06, UP, 0.6);
-        vfx.ring(vC.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.2, '#38bdf8', 0.5, 0.12);
-        vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), `+${heal}`, false, '#4ade80');
-        if (i === ME) onRoundEvent?.({ type: 'toast', text: `喝了口井水，回复 ${heal} 气血` });
+        c.drinkWell = k + 1;
+        c.drinkT = 0;
+        gameAudio.playCrispClick();
         return;
       }
       const B = DESERT.beacon;
@@ -4227,6 +4323,16 @@ function GameImpl({
       const D = mapRuntime.desert;
       A.cool -= dt;
       out.interact = false;
+      if (D.sand > 0.55 && (me.sandExpo ?? 0) > 1.2 && !desertSheltered(me.pos[0], me.pos[2], me.pos[1])) {
+        // the storm is burning: into the fort's courtyard
+        const tz = me.pos[2] > 0 ? 8 : -8;
+        const st = desertSteer(desertNavRefs.current[i], me.pos[0], me.pos[1], me.pos[2], 0, 0, tz, dt);
+        out.move.set((st ? st.x : 0) - me.pos[0], 0, (st ? st.z : tz) - me.pos[2]);
+        if (out.move.lengthSq() > 0.01) out.move.normalize();
+        out.request = null;
+        out.block = false;
+        return;
+      }
       if (D.swarmWarn > 0 && (D.swarmLeft > 0 || D.swarm > 0.5)) {
         // the swarm is coming: get under a roof and stay there
         A.goal = -1;

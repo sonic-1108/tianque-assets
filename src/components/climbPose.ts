@@ -110,3 +110,36 @@ export function applySitPose(l: Limbs, fwd: THREE.Vector3, w: number) {
     aim(B[p + 'forearm'], B[p + 'hand'], d, w);
   }
 }
+
+/**
+ * 大漠玉门关 well: t seconds into drawing water. First the right hand works the windlass crank (the forearm
+ * circles), then both hands lift the bucket to the mouth (elbows out, hands meeting in front of the face).
+ */
+export function applyDrinkPose(l: Limbs, fwd: THREE.Vector3, t: number, w: number) {
+  if (w <= 0.001) return;
+  right.set(-fwd.z, 0, fwd.x);
+  const B = l.bones;
+  if (t < DRINK.lift) {
+    // cranking: right arm forward and down to the handle, forearm turning the crank
+    const a = t * 7;
+    d.copy(fwd).multiplyScalar(0.85).addScaledVector(up, -0.35).addScaledVector(right, 0.25).normalize();
+    aim(B.rightarm, B.rightforearm, d, w);
+    d.copy(fwd).multiplyScalar(0.55).addScaledVector(up, Math.sin(a) * 0.6).addScaledVector(right, 0.15 + Math.cos(a) * 0.45).normalize();
+    aim(B.rightforearm, B.righthand, d, w);
+    // the left hand steadies the post
+    d.copy(fwd).multiplyScalar(0.6).addScaledVector(up, -0.6).addScaledVector(right, -0.35).normalize();
+    aim(B.leftarm, B.leftforearm, d, w * 0.8);
+    return;
+  }
+  // drinking: the bucket held up to the face
+  const k = Math.min(1, (t - DRINK.lift) / 0.35) * w;
+  for (const side of [-1, 1]) {
+    const p = side < 0 ? 'left' : 'right';
+    d.copy(fwd).multiplyScalar(0.7).addScaledVector(up, 0.05).addScaledVector(right, side * 0.55).normalize();
+    aim(B[p + 'arm'], B[p + 'forearm'], d, k);
+    d.copy(up).multiplyScalar(0.75).addScaledVector(fwd, 0.35).addScaledVector(right, -side * 0.55).normalize();
+    aim(B[p + 'forearm'], B[p + 'hand'], d, k);
+  }
+}
+/** well timeline (seconds): bucket down, in the water, up, then lifted to the mouth, drinking, put back */
+export const DRINK = { down: 1.2, wet: 1.5, up: 2.6, lift: 2.9, drink: 4.0, end: 4.4 };

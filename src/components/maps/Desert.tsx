@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MAPS, DESERT, desertHeight, desertDunes, desertCeil, mapRuntime } from '../../maps';
 import { Sky, Banner, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
+import { DRINK } from '../climbPose';
 
 // ==================================================================
 // 大漠玉门关: a rammed-earth frontier fort among the dunes, late afternoon.
@@ -719,35 +720,138 @@ function Wells() {
   return (
     <group>
       {DESERT.wells.map(([x, z], i) => (
-        <group key={i} position={[x, 0, z]}>
-          <mesh position={[0, 0.42, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[0.85, 0.92, 0.84, 14, 1, true]} />
-            <meshStandardMaterial color="#8a7a68" roughness={0.95} side={THREE.DoubleSide} />
-          </mesh>
-          <mesh position={[0, 0.84, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.62, 0.92, 16]} />
-            <meshStandardMaterial color="#a39280" roughness={0.9} />
-          </mesh>
-          <mesh position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <circleGeometry args={[0.62, 16]} />
-            <meshStandardMaterial color="#1c2a30" roughness={0.1} metalness={0.2} />
-          </mesh>
-          {[-1, 1].map((s) => (
-            <mesh key={s} position={[s * 0.7, 1.4, 0]} castShadow>
-              <boxGeometry args={[0.12, 1.3, 0.12]} />
-              <meshStandardMaterial color="#5a3d26" roughness={0.9} />
-            </mesh>
-          ))}
-          <mesh position={[0, 1.95, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-            <cylinderGeometry args={[0.09, 0.09, 1.5, 8]} />
-            <meshStandardMaterial color="#6b4a2e" roughness={0.85} />
-          </mesh>
-          <mesh position={[0.25, 1.35, 0]}>
-            <cylinderGeometry args={[0.13, 0.11, 0.25, 8]} />
-            <meshStandardMaterial color="#4a3020" roughness={0.9} />
-          </mesh>
-        </group>
+        <Well key={i} k={i} x={x} z={z} />
       ))}
+    </group>
+  );
+}
+
+/**
+ * A well with a windlass. While someone draws water (mapRuntime.desert.wells[k].t seconds in) the crank turns,
+ * the rope pays out and the bucket goes down into the water, comes back up full, is carried to the drinker's
+ * mouth and tipped, then hung back on the rope.
+ */
+function Well({ k, x, z }: { k: number; x: number; z: number }) {
+  const AXLE = 1.95;
+  const REST = 1.3; // bucket bottom hanging under the axle
+  const WATER = 0.32;
+  const bucket = useRef<THREE.Group>(null);
+  const rope = useRef<THREE.Mesh>(null);
+  const axle = useRef<THREE.Group>(null);
+  const water = useRef<THREE.Mesh>(null);
+  const tmp = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    const W = mapRuntime.desert.wells?.[k];
+    const t = W && W.t >= 0 ? W.t : -1;
+    const b = bucket.current;
+    const r = rope.current;
+    if (!b || !r) return;
+    // bucket height on the rope through the timeline
+    let y = REST;
+    let onRope = true;
+    let full = false;
+    if (t >= 0) {
+      if (t < DRINK.down) y = REST - (REST - WATER) * (t / DRINK.down);
+      else if (t < DRINK.wet) y = WATER + Math.sin((t - DRINK.down) * 18) * 0.02;
+      else if (t < DRINK.up) {
+        y = WATER + (REST - WATER) * ((t - DRINK.wet) / (DRINK.up - DRINK.wet));
+        full = true;
+      } else onRope = false;
+      if (t >= DRINK.wet && t < DRINK.drink) full = true;
+    }
+    if (onRope) {
+      b.position.set(0, y, 0);
+      b.rotation.set(0, 0, 0);
+    } else {
+      // carried: to the drinker's hands, then up to the mouth and tipped toward them
+      const fx = -Math.sin(W!.yaw);
+      const fz = -Math.cos(W!.yaw);
+      const u = THREE.MathUtils.smoothstep(t, DRINK.up, DRINK.lift);
+      const back = THREE.MathUtils.smoothstep(t, DRINK.drink, DRINK.end);
+      tmp.set(W!.x - x + fx * 0.38, W!.y + 1.42, W!.z - z + fz * 0.38);
+      b.position.set(0, REST, 0).lerp(tmp, u * (1 - back));
+      const tip = THREE.MathUtils.smoothstep(t, DRINK.lift, DRINK.lift + 0.4) * (1 - back) * 0.9;
+      b.rotation.set(0, W!.yaw, 0);
+      b.rotateX(tip);
+    }
+    if (water.current) water.current.visible = full;
+    // rope from the axle down to the bucket handle (only while it hangs from the rope)
+    const len = AXLE - (onRope ? y + 0.3 : REST + 0.3);
+    r.scale.set(1, Math.max(0.02, len), 1);
+    r.position.set(0, AXLE - len / 2, 0);
+    if (axle.current && t >= 0 && t < DRINK.up) axle.current.rotation.x = t < DRINK.wet ? -t * 9 : -(DRINK.wet * 9) + (t - DRINK.wet) * 9;
+  });
+  return (
+    <group position={[x, 0, z]}>
+      {/* stone curb */}
+      <mesh position={[0, 0.42, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.85, 0.92, 0.84, 14, 1, true]} />
+        <meshStandardMaterial color="#8a7a68" roughness={0.95} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0.84, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.62, 0.92, 16]} />
+        <meshStandardMaterial color="#a39280" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, WATER - 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.62, 16]} />
+        <meshStandardMaterial color="#1c2a30" roughness={0.1} metalness={0.2} />
+      </mesh>
+      {/* posts */}
+      {[-1, 1].map((sd) => (
+        <mesh key={sd} position={[sd * 0.7, 1.4, 0]} castShadow>
+          <boxGeometry args={[0.12, 1.3, 0.12]} />
+          <meshStandardMaterial color="#5a3d26" roughness={0.9} />
+        </mesh>
+      ))}
+      {/* the windlass drum, rope wound on it, and the crank on the +x end */}
+      <group ref={axle} position={[0, AXLE, 0]}>
+        <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.09, 0.09, 1.5, 10]} />
+          <meshStandardMaterial color="#6b4a2e" roughness={0.85} />
+        </mesh>
+        <mesh rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.13, 0.13, 0.42, 12]} />
+          <meshStandardMaterial color="#a88a5a" roughness={0.95} />
+        </mesh>
+        <mesh position={[0.8, 0.13, 0]}>
+          <boxGeometry args={[0.04, 0.3, 0.04]} />
+          <meshStandardMaterial color="#4a3020" roughness={0.9} />
+        </mesh>
+        <mesh position={[0.86, 0.27, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.025, 0.025, 0.14, 6]} />
+          <meshStandardMaterial color="#3a2414" roughness={0.9} />
+        </mesh>
+      </group>
+      {/* rope: a unit-length cylinder scaled to the drop */}
+      <mesh ref={rope}>
+        <cylinderGeometry args={[0.012, 0.012, 1, 5]} />
+        <meshStandardMaterial color="#c9b58a" roughness={1} />
+      </mesh>
+      {/* the bucket (bottom at its origin), with a handle and water inside when full */}
+      <group ref={bucket} position={[0, REST, 0]}>
+        <mesh position={[0, 0.13, 0]} castShadow>
+          <cylinderGeometry args={[0.15, 0.12, 0.26, 10, 1, true]} />
+          <meshStandardMaterial color="#5a3a22" roughness={0.9} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position={[0, 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.12, 10]} />
+          <meshStandardMaterial color="#4a3020" roughness={0.9} side={THREE.DoubleSide} />
+        </mesh>
+        {[0.07, 0.2].map((h) => (
+          <mesh key={h} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.142 - h * 0.08, 0.008, 4, 14]} />
+            <meshStandardMaterial color="#2a2a2a" metalness={0.6} roughness={0.5} />
+          </mesh>
+        ))}
+        <mesh position={[0, 0.27, 0]} rotation={[0, 0, 0]}>
+          <torusGeometry args={[0.15, 0.008, 4, 12, Math.PI]} />
+          <meshStandardMaterial color="#2a2a2a" metalness={0.6} roughness={0.5} />
+        </mesh>
+        <mesh ref={water} position={[0, 0.22, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+          <circleGeometry args={[0.14, 12]} />
+          <meshStandardMaterial color="#5aa7c9" roughness={0.05} metalness={0.1} transparent opacity={0.85} />
+        </mesh>
+      </group>
     </group>
   );
 }

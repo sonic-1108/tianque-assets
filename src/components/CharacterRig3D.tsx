@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
-import { collectLimbs, applyClimbPose, applySitPose, Limbs } from './climbPose';
+import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose } from './climbPose';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
@@ -434,6 +434,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const eatenRef = useRef(false);
   const climbKickRef = useRef(-1);
   const sitBlendRef = useRef(0);
+  const drinkBlendRef = useRef(0);
   const castRef = useRef(true);
   const stealthRef = useRef(1);
   const lastOpRef = useRef(1);
@@ -736,6 +737,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     // 青冥寺: sitting in meditation on a prayer cushion
     sitBlendRef.current = THREE.MathUtils.damp(sitBlendRef.current, (c.meditateT ?? 0) > 0 ? 1 : 0, 6, delta);
     if (limbsRef.current && sitBlendRef.current > 0.01) applySitPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), sitBlendRef.current);
+    // 大漠玉门关 well: cranking the windlass, then drinking from the bucket
+    drinkBlendRef.current = THREE.MathUtils.damp(drinkBlendRef.current, (c.drinkWell ?? 0) > 0 ? 1 : 0, 8, delta);
+    if (limbsRef.current && drinkBlendRef.current > 0.01) applyDrinkPose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), c.drinkT ?? 0, drinkBlendRef.current);
     // 影遁: fade almost out of sight (a faint shimmer for the opponent, a ghost of yourself for the player)
     const veil = (c.burrowT ?? 0) > 0 ? 0 : (c.stealthT ?? 0) > 0 ? (isPlayer ? 0.32 : 0.07) : 1; // 遁地: gone under the ground
     stealthRef.current = THREE.MathUtils.damp(stealthRef.current, veil, 12, delta);
@@ -766,7 +770,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     // no weapons in hand while swimming, climbing or sitting
     // (and once 飞虫沙暴 has eaten them past the hands)
-    const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5 || (c.devoured ?? 0) >= 0.45;
+    const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5 || drinkBlendRef.current > 0.3 || (c.devoured ?? 0) >= 0.45;
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy;
