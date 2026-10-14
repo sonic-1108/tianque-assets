@@ -638,10 +638,6 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           if (o.isMesh) o.castShadow = !eaten;
         });
       }
-      const w = weaponsRef.current;
-      const showW = dv < 0.45;
-      if (w.right && w.right.group.visible !== showW) w.right.group.visible = showW;
-      if (w.left && w.left.group.visible !== showW) w.left.group.visible = showW;
     }
 
     // Size weapons once the model's world scale is known
@@ -769,7 +765,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       });
     }
     // no weapons in hand while swimming, climbing or sitting
-    const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5;
+    // (and once 飞虫沙暴 has eaten them past the hands)
+    const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5 || (c.devoured ?? 0) >= 0.45;
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy;
