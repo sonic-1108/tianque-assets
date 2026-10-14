@@ -1225,7 +1225,13 @@ export default function App() {
           </span>
           <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`} · 版本 {__BUILD__}
             {hudMirror.fps > 0 && <span className={hudMirror.fps < 45 ? ' text-red-400' : ''}> · {hudMirror.fps} 帧</span>}
-            {online && hudMirror.ping > 0 && <span className={hudMirror.ping > 200 ? ' text-red-400' : ''}> · 延迟 {hudMirror.ping}ms{net?.via === 'relay' ? '（中转）' : ''}</span>}
+            {online && hudMirror.ping > 0 && (
+              <span className={hudMirror.ping > 200 ? ' text-red-400' : ''}>
+                {' '}· 延迟 {hudMirror.ping}ms
+                {net?.path === 'lan' ? '（局域网直连）' : net?.path === 'p2p' ? '（直连）' : net?.path === 'turn' ? '（TURN 中转）' : net?.path === 'relay' || net?.via === 'relay' ? '（服务器中转）' : ''}
+                {net?.role === 'guest' ? ` · 同步 ${net.snapRate}/秒` : ''}
+              </span>
+            )}
           </span>
         </div>
       </div>

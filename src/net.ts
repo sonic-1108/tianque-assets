@@ -129,6 +129,44 @@ export class NetSession {
   private sLastKey = 0;
   /** host: send a keyframe next (someone just joined) */
   needKey = true;
+  /** how the data actually travels: 'lan' (same network), 'p2p' (direct over the internet), 'turn' (through a TURN server), 'relay' (public MQTT broker), '' unknown */
+  path = '';
+  /** guest: snapshots received per second */
+  snapRate = 0;
+  private snapCount = 0;
+  private async probePath() {
+    if (this.via === 'relay') {
+      this.path = 'relay';
+      return;
+    }
+    const conns = this.role === 'host' ? [...this.guests.values()].map((g) => (g.relay ? null : g.conn)) : [this.conn];
+    let worst = '';
+    const rank: Record<string, number> = { '': 0, lan: 1, p2p: 2, turn: 3, relay: 4 };
+    for (const c of conns) {
+      if (!c) {
+        if (rank.relay > rank[worst]) worst = 'relay';
+        continue;
+      }
+      const pc: RTCPeerConnection | undefined = (c as any).peerConnection;
+      if (!pc) continue;
+      try {
+        const stats = await pc.getStats();
+        let pair: any = null;
+        stats.forEach((r: any) => {
+          if (r.type === 'transport' && r.selectedCandidatePairId) pair = stats.get(r.selectedCandidatePairId);
+        });
+        if (!pair) stats.forEach((r: any) => r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated && (pair = r));
+        if (!pair) continue;
+        const l = stats.get(pair.localCandidateId);
+        const rm = stats.get(pair.remoteCandidateId);
+        const kind = l?.candidateType === 'relay' || rm?.candidateType === 'relay' ? 'turn' : l?.candidateType === 'host' && rm?.candidateType === 'host' ? 'lan' : 'p2p';
+        if (rank[kind] > rank[worst]) worst = kind;
+      } catch {
+        /* ignore */
+      }
+    }
+    this.path = worst;
+  }
   private relayReady: Promise<boolean> | null = null;
   private gBase: any[] | null = null;
   private gSeq = -1;
@@ -236,7 +274,14 @@ export class NetSession {
   private pinger = 0;
   private changed(status?: NetStatus, err?: string) {
     if (status === 'connected' && !this.pinger)
-      this.pinger = window.setInterval(() => this.status === 'connected' && this.send({ t: 'pi', c: performance.now() }), 1000);
+      this.pinger = window.setInterval(() => {
+        if (this.status !== 'connected') return;
+        this.send({ t: 'pi', c: performance.now() });
+        this.probePath();
+        // snapshots received in the last second (guest)
+        this.snapRate = this.snapCount;
+        this.snapCount = 0;
+      }, 1000);
     if (status) this.status = status;
     if (err !== undefined) this.error = err;
     this.listeners.forEach((l) => l());
@@ -442,6 +487,7 @@ export class NetSession {
         return;
       }
       const at = performance.now();
+      this.snapCount++;
       const ts = m.ts ?? at;
       // clock offset: the fastest packet is the best estimate; creep up slowly so a route change is followed
       const off = at - ts;
