@@ -45,7 +45,10 @@ jobs:
               [ -n "$sub" ] && break
             done
           fi
-          if [ -z "$sub" ]; then echo "::warning::relay: could not get or register a workers.dev subdomain"; exit 1; fi
+          v=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/user/tokens/verify)
+          echo "::notice::token check: $(echo "$v" | jq -c '{success, status: .result.status, errors}' | cut -c1-200) · token length ${#CLOUDFLARE_API_TOKEN}"
+          # the account's workers.dev subdomain, as set in the dashboard (not a secret)
+          [ -z "$sub" ] && sub=msjzxy2022
           cd relay
           if npx --yes wrangler@4 deploy > ../wrangler.log 2>&1; then
             echo "url=wss://tianque-relay.$sub.workers.dev" >> $GITHUB_OUTPUT
