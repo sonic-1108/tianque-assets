@@ -1087,52 +1087,225 @@ function DustWall() {
   );
 }
 
+/**
+ * The sandstorm round the camera: no streaks. Layers of billowing dust at several distances in front of the
+ * camera (soft noise, scrolling downwind, so nearer layers drift faster: depth), plus fine round grains
+ * blowing past. Nothing inside a room.
+ */
 function SandStorm() {
-  const COUNT = 900;
-  const ref = useRef<THREE.InstancedMesh>(null);
-  const seeds = useMemo(() => {
-    const rand = seeded(13);
-    return Array.from({ length: COUNT }, () => [rand(), rand(), rand(), 0.6 + rand() * 0.8]);
-  }, []);
-  const mat = useMemo(
+  const LAYERS = [1.6, 3.2, 6, 10, 16, 26];
+  const mats = useMemo(
     () =>
-      new THREE.MeshBasicMaterial({ color: '#d8ad78', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false }),
+      LAYERS.map(
+        (dist, i) =>
+          new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false,
+            depthTest: true,
+            fog: false,
+            uniforms: { uT: { value: 0 }, uA: { value: 0 }, uWind: { value: 1 }, uOff: { value: new THREE.Vector2() }, uSeed: { value: i * 7.13 }, uNear: { value: dist < 3 ? 1 : 0 } },
+            vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: /* glsl */ `
+              varying vec2 vUv; uniform float uT, uA, uWind, uSeed, uNear; uniform vec2 uOff;
+              ${GLSL_NOISE}
+              void main(){
+                vec2 p = vUv * vec2(3.0, 1.6) + uOff + vec2(uSeed);
+                p.x -= uT * 0.35 * uWind;
+                float n = fbm(p + vec2(fbm(p * 0.7 + uT * 0.05) * 1.6, 0.0));
+                float billow = smoothstep(0.32, 0.8, n);
+                // fade out at the plane's edges, and the nearest layer thins in the middle so you can still see
+                float edge = smoothstep(0.0, 0.25, vUv.x) * smoothstep(1.0, 0.75, vUv.x) * smoothstep(0.0, 0.2, vUv.y) * smoothstep(1.0, 0.7, vUv.y);
+                float centre = mix(1.0, smoothstep(0.08, 0.45, length(vUv - 0.5)), uNear);
+                float a = billow * edge * centre * uA;
+                vec3 col = mix(vec3(0.72, 0.53, 0.33), vec3(0.93, 0.78, 0.55), n);
+                gl_FragColor = vec4(col, a);
+              }`,
+          })
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
-  const geo = useMemo(() => new THREE.PlaneGeometry(0.9, 0.035), []);
+  const quads = useRef<(THREE.Mesh | null)[]>([]);
+  const GRAINS = 700;
+  const grainGeo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(GRAINS * 3), 3));
+    return g;
+  }, []);
+  const grainSeeds = useMemo(() => {
+    const rand = seeded(13);
+    return Array.from({ length: GRAINS }, () => [rand(), rand(), rand(), 0.6 + rand() * 0.9]);
+  }, []);
+  const grainMat = useMemo(() => {
+    // a soft round dot
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grd.addColorStop(0, 'rgba(255,240,215,1)');
+    grd.addColorStop(1, 'rgba(255,240,215,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 32, 32);
+    const tex = new THREE.CanvasTexture(c);
+    return new THREE.PointsMaterial({ map: tex, color: '#e2bf8c', size: 0.07, transparent: true, depthWrite: false, opacity: 0, fog: false });
+  }, []);
+  const pts = useRef<THREE.Points>(null);
+  const dir = useMemo(() => new THREE.Vector3(), []);
+  useFrame((st) => {
+    const D = mapRuntime.desert;
+    const cam = st.camera;
+    const indoor = desertCeil(cam.position.x, cam.position.z) < 900 && cam.position.y < desertCeil(cam.position.x, cam.position.z) + 0.3;
+    const a = indoor ? 0 : D.sand;
+    const t = st.clock.elapsedTime;
+    cam.getWorldDirection(dir);
+    LAYERS.forEach((dist, i) => {
+      const m = quads.current[i];
+      if (!m) return;
+      m.visible = a > 0.02;
+      if (!m.visible) return;
+      m.position.copy(cam.position).addScaledVector(dir, dist);
+      m.quaternion.copy(cam.quaternion);
+      const s2 = dist * 2.6;
+      m.scale.set(s2 * 1.8, s2, 1);
+      const u = mats[i].uniforms;
+      u.uT.value = t * (1.6 - i * 0.18);
+      u.uA.value = a * (i === 0 ? 0.28 : 0.42 - i * 0.03);
+      u.uWind.value = D.wind;
+      // the noise is pinned to the world, so turning the camera sweeps through it instead of dragging it along
+      u.uOff.value.set(cam.position.x * 0.04 + Math.atan2(dir.x, dir.z) * 0.6, cam.position.y * 0.03);
+    });
+    const P = pts.current;
+    if (P) {
+      P.visible = a > 0.05;
+      if (P.visible) {
+        grainMat.opacity = a * 0.9;
+        const arr = (grainGeo.attributes.position as THREE.BufferAttribute).array as Float32Array;
+        const size = 18;
+        for (let i = 0; i < GRAINS; i++) {
+          const g = grainSeeds[i];
+          const x = ((((g[0] * size + t * 14 * g[3] * D.wind) % size) + size) % size) - size / 2;
+          arr[i * 3] = cam.position.x + x;
+          arr[i * 3 + 1] = cam.position.y - 2 + g[1] * 5 + Math.sin(t * 3 + i) * 0.15;
+          arr[i * 3 + 2] = cam.position.z + g[2] * size - size / 2;
+        }
+        grainGeo.attributes.position.needsUpdate = true;
+      }
+    }
+  });
+  return (
+    <group>
+      {LAYERS.map((_, i) => (
+        <mesh key={i} ref={(el) => (quads.current[i] = el)} material={mats[i]} renderOrder={40 + (LAYERS.length - i)} frustumCulled={false}>
+          <planeGeometry args={[1, 1]} />
+        </mesh>
+      ))}
+      <points ref={pts} geometry={grainGeo} material={grainMat} frustumCulled={false} />
+    </group>
+  );
+}
+
+/**
+ * 龙卷风: a sand devil that roams the dunes during a storm. A twisted funnel of dust (three layers turning at
+ * different speeds), debris whirling round it, a skirt of dust where it touches the ground.
+ */
+function Tornado() {
+  const g = useRef<THREE.Group>(null);
+  const funnel = useMemo(
+    () =>
+      [0, 1, 2].map(
+        (k) =>
+          new THREE.ShaderMaterial({
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            uniforms: { uT: { value: 0 }, uA: { value: 0 }, uK: { value: k } },
+            vertexShader: /* glsl */ `
+              varying vec2 vUv; uniform float uT;
+              void main(){
+                vUv = uv;
+                vec3 p = position;
+                // the column sways and snakes
+                float h = uv.y;
+                p.x += sin(h * 3.0 + uT * 1.3) * 1.2 * h;
+                p.z += cos(h * 2.4 + uT * 1.1) * 1.0 * h;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+              }`,
+            fragmentShader: /* glsl */ `
+              varying vec2 vUv; uniform float uT, uA, uK;
+              ${GLSL_NOISE}
+              void main(){
+                // bands winding round the funnel, climbing as they turn
+                vec2 p = vec2(vUv.x * 6.0 + vUv.y * 4.0 - uT * (1.6 + uK * 0.5), vUv.y * 5.0 - uT * 0.8);
+                float n = fbm(p);
+                float band = smoothstep(0.35, 0.75, n);
+                float a = band * (0.35 + 0.25 * uK) * smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.75, vUv.y) * uA;
+                vec3 col = mix(vec3(0.55, 0.4, 0.26), vec3(0.85, 0.69, 0.48), n);
+                gl_FragColor = vec4(col, a);
+              }`,
+          })
+      ),
+    []
+  );
+  const debris = useRef<THREE.InstancedMesh>(null);
   const M = useMemo(() => new THREE.Matrix4(), []);
   const q = useMemo(() => new THREE.Quaternion(), []);
+  const e = useMemo(() => new THREE.Euler(), []);
   const v = useMemo(() => new THREE.Vector3(), []);
-  const sc = useMemo(() => new THREE.Vector3(), []);
+  const one = useMemo(() => new THREE.Vector3(1, 1, 1), []);
+  const skirt = useRef<(THREE.Sprite | null)[]>([]);
+  const tex = useMemo(() => cloudPuffTexture(), []);
   useFrame((st) => {
-    const m = ref.current;
-    if (!m) return;
-    const D = mapRuntime.desert;
-    const a = D.sand;
-    m.visible = a > 0.02;
-    if (!m.visible) return;
-    mat.opacity = a * 0.55;
-    const cam = st.camera.position;
+    const T = mapRuntime.desert.tornado;
+    const grp = g.current;
+    if (!grp) return;
+    const a = T ? T.a : 0;
+    grp.visible = a > 0.01;
+    if (!grp.visible || !T) return;
     const t = st.clock.elapsedTime;
-    const size = 26;
-    q.setFromAxisAngle(v.set(0, 0, 1), -0.08 * D.wind);
-    for (let i = 0; i < COUNT; i++) {
-      const s = seeds[i];
-      const speed = 18 * s[3];
-      let x = ((s[0] * size + t * speed * D.wind) % size + size) % size - size / 2;
-      const y = s[1] * 7 - 1.5;
-      const z = s[2] * size - size / 2;
-      x += cam.x;
-      v.set(x, cam.y + y - 1.5, cam.z + z);
-      // none under a roof (barracks, gate passage): the room keeps the sand out
-      if (desertCeil(v.x, v.z) > 900) sc.set(D.wind * (0.6 + s[3]), 1, 1);
-      else sc.set(0, 0, 0);
-      M.compose(v, q, sc);
-      m.setMatrixAt(i, M);
+    grp.position.set(T.x, desertHeight(T.x, T.z) - 0.3, T.z);
+    funnel.forEach((m, k) => {
+      m.uniforms.uT.value = t;
+      m.uniforms.uA.value = a;
+    });
+    const d = debris.current;
+    if (d) {
+      for (let i = 0; i < 48; i++) {
+        const h = ((i * 0.37 + t * 0.25) % 1) * 18;
+        const r = 1.2 + h * 0.28;
+        const ang = t * (3.5 - h * 0.08) + i * 2.1;
+        v.set(Math.cos(ang) * r, h, Math.sin(ang) * r);
+        e.set(t * 3 + i, t * 2 + i * 0.5, 0);
+        q.setFromEuler(e);
+        M.compose(v, q, one.set(0.2 + (i % 4) * 0.1, 0.12, 0.2 + (i % 3) * 0.12));
+        d.setMatrixAt(i, M);
+      }
+      d.instanceMatrix.needsUpdate = true;
     }
-    m.instanceMatrix.needsUpdate = true;
+    skirt.current.forEach((sp, i) => {
+      if (!sp) return;
+      const ang = t * 2.5 + (i / 10) * Math.PI * 2;
+      sp.position.set(Math.cos(ang) * 2.4, 0.8, Math.sin(ang) * 2.4);
+      (sp.material as THREE.SpriteMaterial).opacity = 0.55 * a;
+    });
   });
-  return <instancedMesh ref={ref} args={[geo, mat, COUNT]} frustumCulled={false} />;
+  return (
+    <group ref={g} visible={false}>
+      {funnel.map((m, k) => (
+        <mesh key={k} material={m} position={[0, 11, 0]} rotation={[0, k * 1.3, 0]} renderOrder={20 + k}>
+          <cylinderGeometry args={[6.5 - k * 0.9, 1.0 + k * 0.3, 22, 28, 12, true]} />
+        </mesh>
+      ))}
+      <instancedMesh ref={debris} args={[undefined, undefined, 48]} castShadow>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#6b5238" roughness={1} />
+      </instancedMesh>
+      {Array.from({ length: 10 }, (_, i) => (
+        <sprite key={i} ref={(el) => (skirt.current[i] = el)} scale={[5, 2.4, 1]}>
+          <spriteMaterial map={tex} color="#d2ad7a" transparent depthWrite={false} opacity={0} />
+        </sprite>
+      ))}
+    </group>
+  );
 }
 
 /** the 飞虫沙暴 swarm round the camera: thousands of dark flecks whirling downwind */
@@ -1281,6 +1454,7 @@ export function DesertMap() {
       <SandDrifts />
       <DustWall />
       <SandStorm />
+      <Tornado />
       <Swarm />
     </group>
   );

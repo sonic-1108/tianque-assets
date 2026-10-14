@@ -17,7 +17,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, DESERT, desertSheltered, desertIndoor, desertCeil } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -871,7 +871,7 @@ function GameImpl({
           c.stateDuration = 0;
         }
       }
-      const hovering = (c.classId === 'Ranger' && c.actionState === 'ultimate' && c.stateTimer > 0.45 && c.stateTimer < 2.45) || c.treeClimb !== undefined;
+      const hovering = (c.classId === 'Ranger' && c.actionState === 'ultimate' && c.stateTimer > 0.45 && c.stateTimer < 2.45) || c.treeClimb !== undefined || (c.twister ?? 0) > 0;
       if (hovering) c.vel[1] = 0;
       if (!c.isGrounded && c.actionState !== 'buried' && !hovering) {
         const y0 = c.pos[1];
@@ -904,6 +904,17 @@ function GameImpl({
             c.stateDuration = c.hp > 0 ? 0.8 : 99;
           }
           if (impact > 6) vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), Math.min(14, Math.round(impact)), 0.5, 2, 0.6);
+          if (c.twisterFall) {
+            // flung out of the 龙卷风: a hard fall
+            c.twisterFall = false;
+            c.actionState = 'knockdown';
+            c.stateTimer = 0;
+            c.stateDuration = c.hp > 150 ? 1.2 : 99;
+            vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 22, 1.2, 3, 0.9, '#c9a27a');
+            vfx.ring(vB, 2.2, '#d6b48a', 0.4, 0.12, 0.3);
+            if (i === ME) controller?.addShake(0.7);
+            envHit(i, 150, 0, '摔落');
+          }
           // a hard landing on a slick floor costs balance
         }
       }
@@ -3724,6 +3735,9 @@ function GameImpl({
         c.drinkWell = 0;
         c.drinkT = 0;
         c.sandExpo = 0;
+        c.twister = 0;
+        c.twisterCd = 0;
+        c.twisterFall = false;
         c.reviveHint = '';
         c.interactHint = '';
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
@@ -3784,7 +3798,7 @@ function GameImpl({
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
         const force = (globalThis as any).__TQ_SWARM;
         const swarmAt = map.id !== 'desert' ? -1 : force ? +force : Math.random() < DESERT.swarm.chance ? 30 + Math.random() * 45 : -1;
-        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0, wells: [] };
+        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0, wells: [], tornado: null };
       }
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
@@ -4091,6 +4105,7 @@ function GameImpl({
       if (u >= a && u - dt < a && !round.over) onRoundEvent?.({ type: 'toast', text: '天边发黄 · 沙暴要来了，进城躲风 · 在沙暴里待 3 秒就开始掉血' });
       updateSwarm(t);
       sandBurn();
+      updateTornado();
       if (D.beaconT > 0) {
         D.beaconT -= dt;
         if (D.beaconT <= 0) {
@@ -4174,6 +4189,71 @@ function GameImpl({
         c.revived = 9;
         koCheck(i, '#3a2a1a');
       }
+    }
+    /**
+     * 龙卷风: in a thick storm a sand devil comes in from upwind and wanders across the dunes (never into the fort).
+     * Get within 3 m of it and it takes you: round and up to a dozen metres over two seconds, then flings you out
+     * to fall hard (150 and knocked down).
+     */
+    function updateTornado() {
+      const D = mapRuntime.desert;
+      let T = D.tornado;
+      if (!T && D.sand > 0.65 && !round.over && Math.random() < dt * 0.25) {
+        const z = (Math.random() < 0.5 ? -1 : 1) * (28 + Math.random() * 20);
+        T = D.tornado = { x: -D.wind * (DESERT.radius - 10), z, vx: D.wind * 3.4, vz: (Math.random() - 0.5) * 1.5, a: 0, life: 26 };
+        onRoundEvent?.({ type: 'toast', text: '沙暴里卷起了龙卷风！别靠近，会被卷上天' });
+      }
+      if (!T) return;
+      T.life -= dt;
+      const ending = T.life <= 0 || D.sand < 0.3 || Math.hypot(T.x, T.z) > DESERT.radius + 2;
+      T.a = ending ? Math.max(0, T.a - dt / 1.5) : Math.min(1, T.a + dt / 1.5);
+      // wander, but stay out of the fort
+      T.vz += (Math.sin(mapTimeRef.current * 0.7 + T.life) * 1.2 - T.vz * 0.15) * dt;
+      const m = Math.max(Math.abs(T.x), Math.abs(T.z));
+      if (m < DESERT.fort.half + 6) T.vz += Math.sign(T.z || 1) * 6 * dt;
+      T.x += T.vx * dt;
+      T.z += T.vz * dt;
+      if (Math.random() < dt * 6) vfx.dustPuff(vB.set(T.x + (Math.random() - 0.5) * 3, fy(T.x, T.z) + 0.3, T.z + (Math.random() - 0.5) * 3), 2, 1, 3, 1.2, '#c9a27a');
+      for (let i = 0; i < N; i++) {
+        const c = fighters[i];
+        if ((c.twisterCd ?? 0) > 0) c.twisterCd = (c.twisterCd ?? 0) - dt;
+        const tw = c.twister ?? 0;
+        if (tw > 0) {
+          // being carried round and up
+          const nt = tw + dt;
+          const h = Math.min(1, nt / 2.2);
+          const r = 1.6 + h * 1.6;
+          const ang = (c.twisterA ?? 0) + nt * 5.5;
+          const gy = desertHeight(T.x, T.z);
+          c.pos = [T.x + Math.cos(ang) * r, gy + 0.4 + h * 12, T.z + Math.sin(ang) * r];
+          c.vel = [0, 0, 0];
+          c.isGrounded = false;
+          c.actionState = 'launched';
+          c.stateTimer = 0;
+          c.stateDuration = 0.6;
+          c.rotY = c.targetRotY = ang * 2;
+          if (Math.random() < dt * 10) vfx.dustPuff(vB.set(c.pos[0], c.pos[1], c.pos[2]), 2, 0.4, 2, 0.6, '#c9a27a');
+          c.twister = nt;
+          if (nt >= 2.4 || T.a < 0.2 || c.hp <= 0) {
+            // flung out
+            c.twister = 0;
+            c.twisterCd = 3;
+            c.twisterFall = c.hp > 0;
+            c.vel = [Math.cos(ang) * 9, 4, Math.sin(ang) * 9];
+            c.stateDuration = 3;
+          }
+          continue;
+        }
+        if (T.a < 0.6 || c.hp <= 0 || (c.devoured ?? 0) > 0 || (c.twisterCd ?? 0) > 0 || c.ballista !== undefined) continue;
+        if (Math.hypot(c.pos[0] - T.x, c.pos[2] - T.z) > 3 || c.pos[1] > desertHeight(T.x, T.z) + 4) continue;
+        c.twister = 0.001;
+        c.twisterA = Math.atan2(c.pos[2] - T.z, c.pos[0] - T.x);
+        c.treeClimb = undefined;
+        c.drinkWell = 0;
+        onRoundEvent?.({ type: 'toast', text: i === ME ? '你被龙卷风卷上天了！' : `${c.tag || '对手'}被龙卷风卷走了` });
+        if (i === ME) controller?.addShake(0.5);
+      }
+      if (T.a <= 0 && ending) D.tornado = null;
     }
     /** caught out in a thick sandstorm: after 3 seconds it starts to hurt (30 a second) until you get into the fort or a room */
     function sandBurn() {
@@ -4323,6 +4403,14 @@ function GameImpl({
       const D = mapRuntime.desert;
       A.cool -= dt;
       out.interact = false;
+      const Tn = D.tornado;
+      if (Tn && Tn.a > 0.3 && Math.hypot(me.pos[0] - Tn.x, me.pos[2] - Tn.z) < 9) {
+        // a 龙卷风 close by: get out of its way (away from it and across its path)
+        out.move.set(me.pos[0] - Tn.x - Tn.vz * 0.5, 0, me.pos[2] - Tn.z + Tn.vx * 0.5);
+        if (out.move.lengthSq() > 0.01) out.move.normalize();
+        out.request = null;
+        return;
+      }
       if (D.sand > 0.55 && (me.sandExpo ?? 0) > 1.2 && !desertSheltered(me.pos[0], me.pos[2], me.pos[1])) {
         // the storm is burning: into the fort's courtyard
         const tz = me.pos[2] > 0 ? 8 : -8;
