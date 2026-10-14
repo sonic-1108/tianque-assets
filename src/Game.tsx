@@ -1089,7 +1089,8 @@ function GameImpl({
     }
     mapRuntime.viewSide = sideOf(p1);
     if (map.id === 'desert') {
-      const sd = mapRuntime.desert.sand;
+      // inside a room the air is clear: only a little of the storm's haze
+      const sd = mapRuntime.desert.sand * (desertIndoor(camera.position.x, camera.position.z, camera.position.y - 1.5) ? 0.2 : 1);
       if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.6 * sd);
       if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 + 0.15 * sd);
       if (scene.fog) {
@@ -3894,10 +3895,27 @@ function GameImpl({
       };
       if ((map.id !== 'forest' && map.id !== 'desert') || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
+      // the body has some width: test the leading edge (straight ahead and either side of it), not just the
+      // centre, or a shoulder sinks a third of a metre into a wall
+      const mdx = c.pos[0] - px0;
+      const mdz = c.pos[2] - pz0;
+      const ml = Math.hypot(mdx, mdz) || 1;
+      const fx = mdx / ml;
+      const fz = mdz / ml;
+      const BR = 0.3;
+      const edgeMax = (x: number, z: number) => {
+        let h = terrainHeight(map.id, x, z);
+        for (const a of [0, 0.75, -0.75]) {
+          const ca = Math.cos(a);
+          const sa = Math.sin(a);
+          h = Math.max(h, terrainHeight(map.id, x + (fx * ca - fz * sa) * BR, z + (fx * sa + fz * ca) * BR));
+        }
+        return h;
+      };
       if (!c.isGrounded) {
         // 大漠玉门关, in the air: a wall face stops you; you can only come down on something your feet are above
         if (map.id !== 'desert') return;
-        const above = (x: number, z: number) => terrainHeight(map.id, x, z) > c.pos[1] + 0.25;
+        const above = (x: number, z: number) => edgeMax(x, z) > c.pos[1] + 0.25;
         if (!above(c.pos[0], c.pos[2])) return;
         splat();
         if (!above(c.pos[0], pz0)) {
@@ -3913,9 +3931,9 @@ function GameImpl({
         }
         return;
       }
-      const tooHigh = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.55;
+      const tooHigh = (x: number, z: number) => edgeMax(x, z) - c.pos[1] > 0.55;
       if (!tooHigh(c.pos[0], c.pos[2])) return;
-      const rise = terrainHeight(map.id, c.pos[0], c.pos[2]) - c.pos[1];
+      const rise = edgeMax(c.pos[0], c.pos[2]) - c.pos[1];
       if (rise < 1.3 && (c.actionState === 'idle' || c.actionState === 'run')) {
         // a light hop up onto it instead of popping through the stone
         c.pos[0] = px0;
@@ -4032,7 +4050,7 @@ function GameImpl({
       }
       if (D.beaconCool > 0) D.beaconCool = Math.max(0, D.beaconCool - dt);
       // sand blowing past the camera
-      if (D.sand > 0.2 && Math.random() < D.sand * 0.9) {
+      if (D.sand > 0.2 && Math.random() < D.sand * 0.9 && !desertIndoor(p1.pos[0], p1.pos[2], p1.pos[1])) {
         const x = p1.pos[0] - D.wind * 8 + (Math.random() - 0.5) * 6;
         const z = p1.pos[2] + (Math.random() - 0.5) * 14;
         vfx.dustPuff(vB.set(x, fy(x, z) + 0.3 + Math.random() * 1.5, z), 2, 0.6, 2.4, 1.2, '#d9b07a');

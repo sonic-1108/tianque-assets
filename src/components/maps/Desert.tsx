@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MAPS, DESERT, desertHeight, desertDunes, mapRuntime } from '../../maps';
+import { MAPS, DESERT, desertHeight, desertDunes, desertCeil, mapRuntime } from '../../maps';
 import { Sky, Banner, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -1020,7 +1020,9 @@ function SandStorm() {
       const z = s[2] * size - size / 2;
       x += cam.x;
       v.set(x, cam.y + y - 1.5, cam.z + z);
-      sc.set(D.wind * (0.6 + s[3]), 1, 1);
+      // none under a roof (barracks, gate passage): the room keeps the sand out
+      if (desertCeil(v.x, v.z) > 900) sc.set(D.wind * (0.6 + s[3]), 1, 1);
+      else sc.set(0, 0, 0);
       M.compose(v, q, sc);
       m.setMatrixAt(i, M);
     }
@@ -1071,7 +1073,8 @@ function Swarm() {
       v.set(cam.x + x, cam.y + y - 1.5, cam.z + z);
       e.set(t * 9 + s[4], t * 4 * s[3], Math.sin(t * 30 + s[4]) * 1.2);
       q.setFromEuler(e);
-      sc.set(1, 0.4 + Math.abs(Math.sin(t * 40 + s[4] * 3)), 1); // wings beating
+      if (desertCeil(v.x, v.z) > 900) sc.set(1, 0.4 + Math.abs(Math.sin(t * 40 + s[4] * 3)), 1); // wings beating
+      else sc.set(0, 0, 0); // not inside a room
       M.compose(v, q, sc);
       m.setMatrixAt(i, M);
     }
