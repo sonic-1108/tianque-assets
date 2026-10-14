@@ -129,6 +129,7 @@ export class NetSession {
   private sLastKey = 0;
   /** host: send a keyframe next (someone just joined) */
   needKey = true;
+  private relayReady: Promise<boolean> | null = null;
   private gBase: any[] | null = null;
   private gSeq = -1;
   private gM: any = null;
@@ -246,7 +247,10 @@ export class NetSession {
     const opts = { debug: 1, config: ICE_CONFIG };
     const peer = this.role === 'host' ? new Peer(ID_PREFIX + this.code, opts) : new Peer(opts);
     this.peer = peer;
-    if (this.role === 'host') this.openRelay().then((ok) => ok && this.status === 'opening' && this.changed('waiting'));
+    if (this.role === 'host') {
+      this.relayReady = this.openRelay();
+      this.relayReady.then((ok) => ok && (this.status === 'opening' || this.status === 'error') && this.changed('waiting', ''));
+    }
     peer.on('open', () => {
       if (this.role === 'host') {
         this.changed('waiting');
@@ -292,6 +296,8 @@ export class NetSession {
       if (t !== 'unavailable-id' && t !== 'browser-incompatible') {
         if (this.role === 'guest') return void this.joinViaRelay(msg);
         if (this.relays.length) return void this.changed('waiting', '');
+        // the relay brokers are still being dialled: wait for them before giving up
+        if (this.role === 'host' && this.relayReady) return void this.relayReady.then((ok) => !ok && this.status !== 'connected' && this.status !== 'waiting' && this.changed('error', msg));
       }
       this.changed('error', msg);
     });
