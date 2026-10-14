@@ -459,7 +459,7 @@ export const MAPS = {
     icon: '🌊',
     mechanics: [
       '两艘五层楼船并排漂在海上，两队各占一艘：甲板下有货舱，船尾高塔四层，两舷楼梯上下',
-      '主甲板船尾大舱前有船舵：站过去按 F 下令「接舷」，两艘船自己靠拢，贴上后放下两块跳板，走过去就能打到对方船上；再按 F 下令「离舷」，收起跳板把船分开（两队都能下令）',
+      '船舵在主甲板船尾大舱门前（地上有金色光圈）：走过去按 F 掌舵，朝对面船的方向推（WASD）就把自己的船开过去，往回推就拉开；两船贴上自动放下两块跳板，掌舵的人自动松手去冲杀；再掌舵往回推会先收跳板再分开；F 松开船舵，挨打也会被打下来',
       '从跳板边上掉进海里：掉 120 血，被捞回自己船上',
       '货舱里有一桌饭菜，按 F 吃一口回复已损失气血的 10%',
       '每艘船船头楼和船尾高塔各一台床弩，按 F 抢占射击，能转过来打对面的船，箭能把人钉住',
@@ -901,6 +901,8 @@ export const mapRuntime = {
   /** 怒海战船: world x of each ship (the helms move them), and how hard each helm is being worked (0..1) */
   shipX: [-24, 24] as [number, number],
   helm: [0, 0] as [number, number],
+  /** who is at each ship's helm (fighter index, -1 nobody) */
+  helmUser: [-1, -1] as [number, number],
   /** boarding: mode 0 apart, 1 closing, 2 alongside, 3 casting off; plank 0..1 how far the planks are down */
   board: { mode: 0, plank: 0 },
   /** crossbow bolts in flight or stuck in the planks (t: seconds left; stuck: embedded) */
@@ -1380,7 +1382,7 @@ for (const p of MAPS.sea.pillars || []) if (p.h !== undefined) p.y0 = shipFloorA
 // (ship-local coordinates above); a ship sits at world x = mapRuntime.shipX[k]. The helms close or open the gap.
 // Every query below takes world coordinates and asks the ship whose side of the gap the point is on.
 // ----------------------------------------------------------------------
-export const SHIP_GAP = { start: 46, min: 26.4, max: 46, speed: 2.2 }; // min: the hulls (12.9 m half beam) just touching
+export const SHIP_GAP = { start: 46, min: 26.4, max: 46, speed: 3.0 }; // min: the hulls (12.9 m half beam) just touching
 /** boarding planks (跳板) dropped across when the ships lie alongside: centre z of each, half width */
 export const SHIP_PLANKS = { z: [-11, -2], half: 1.1 };
 /** standing on a boarding plank (planks down), or on the strip of deck edge where one lands */

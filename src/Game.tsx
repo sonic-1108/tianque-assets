@@ -1240,7 +1240,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -3898,7 +3898,11 @@ function GameImpl({
       waveRef.current = { timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 };
       mapRuntime.shipX = [-SHIP_GAP.start / 2, SHIP_GAP.start / 2];
       mapRuntime.helm = [0, 0];
+      mapRuntime.helmUser = [-1, -1];
+      helmHold.current = [0, 0];
+      for (const f of fightersRef.current) f.atHelm = undefined;
       syncShips();
+      if (map.id === 'sea') setTimeout(() => onRoundEvent?.({ type: 'toast', text: '船舵在主甲板船尾（金色光圈）：走过去按 F 掌舵，朝敌船推就开过去' }), 1500);
       mapRuntime.ballistae = SEA_BALLISTAE.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
       shipNavRefs.current = [0, 1, 2, 3].map(() => newNavState());
@@ -5708,6 +5712,14 @@ function GameImpl({
       c.ballista = undefined;
       if (k !== undefined && mapRuntime.ballistae[k]?.user === i) mapRuntime.ballistae[k].user = -1;
     }
+    function leaveHelm(i: number, c: CombatantState) {
+      const k = c.atHelm;
+      c.atHelm = undefined;
+      if (k !== undefined && mapRuntime.helmUser[k] === i) {
+        mapRuntime.helmUser[k] = -1;
+        helmHold.current[k] = 0;
+      }
+    }
     /** returns true when it used up the fighter's button press */
     function manBallista(i: number, c: CombatantState, foe: CombatantState, intent: Intent): boolean {
       const B = mapRuntime.ballistae;
@@ -5742,22 +5754,62 @@ function GameImpl({
         c.interactHint = b.load >= 1 ? '床弩 · 左键发射 · F 离开' : '床弩上弦中… · F 离开';
         return !!req;
       }
+      if (c.atHelm !== undefined && (c.hp <= 0 || !c.isGrounded || !isFree(c))) leaveHelm(i, c); // knocked off the wheel
       if (c.hp <= 0 || !c.isGrounded || !isFree(c)) return false;
       {
-        // 船舵: hold F at your own ship's helm to sail at the other ship (or, already alongside, away again)
-        const k = shipOf(c.pos[0]);
-        const hx = mapRuntime.shipX[k] + SHIP_HELM.x;
-        if (Math.hypot(c.pos[0] - hx, c.pos[2] - SHIP_HELM.z) < 1.6 && Math.abs(c.pos[1]) < 0.6) {
+        // 船舵: F takes the wheel of the ship you're standing on; push toward the other ship to sail at her,
+        // away to pull off. Alongside, the planks drop and whoever steers lets go to fight.
+        const H = mapRuntime.helmUser;
+        const X = mapRuntime.shipX;
+        if (c.atHelm !== undefined && H[c.atHelm] !== i) c.atHelm = undefined;
+        if (c.atHelm !== undefined) {
+          const hk = c.atHelm;
+          const hurt = c.hp <= 0 || c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown';
+          if (pressed || hurt || round.over || intent.request === 'jump' || intent.request === 'dodge') {
+            leaveHelm(i, c);
+            return pressed;
+          }
+          const dirX = hk === 0 ? 1 : -1;
+          const push = intent.move.x * dirX;
+          helmHold.current[hk] = push > 0.3 ? 1 : push < -0.3 ? -1 : 0;
+          const hx = X[hk] + SHIP_HELM.x;
+          c.pos = [hx, 0, SHIP_HELM.z + 0.8];
+          c.vel = [0, 0, 0];
+          c.isGrounded = true;
+          c.rotY = c.targetRotY = yawTo(c.pos, [hx, 0, SHIP_HELM.z]);
+          if (c.actionState === 'run') c.actionState = 'idle';
+          intent.faceYaw = c.rotY;
+          intent.move.set(0, 0, 0);
+          intent.block = false;
+          intent.request = null;
           const Bd = mapRuntime.board;
-          const closing = Bd.mode === 1 || Bd.mode === 2;
-          c.interactHint = closing ? 'F 下令离舷 · 收跳板、把船分开' : 'F 下令接舷 · 两船靠拢、放跳板';
+          c.interactHint =
+            Bd.mode === 2
+              ? '跳板放下了 · F 松舵去冲杀 · 往回推 = 收板离舷'
+              : helmHold.current[hk] > 0
+                ? '满帆靠过去！· 往回推 = 拉开 · F 松舵'
+                : helmHold.current[hk] < 0
+                  ? '正在拉开 · 朝对面船推 = 靠过去 · F 松舵'
+                  : '掌舵中 · 朝对面船推 (WASD) = 靠过去 · 反方向 = 拉开 · F 松舵';
+          return false;
+        }
+        const k = shipOf(c.pos[0]);
+        const hx = X[k] + SHIP_HELM.x;
+        if (Math.hypot(c.pos[0] - hx, c.pos[2] - SHIP_HELM.z) < 2.1 && Math.abs(c.pos[1]) < 0.6) {
+          if (H[k] >= 0 && H[k] !== i) {
+            c.interactHint = '船舵有人在掌';
+            return false;
+          }
+          c.interactHint = mapRuntime.board.mode === 2 ? 'F 掌舵 · 往回推可以收跳板离舷' : 'F 掌舵 · 把船开过去接舷';
           if (pressed && !round.over) {
-            Bd.mode = closing ? 3 : 1;
-            mapRuntime.helm[k] = 1;
-            c.rotY = c.targetRotY = yawTo(c.pos, [hx, 0, SHIP_HELM.z - 1]);
-            vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), closing ? '离舷！' : '接舷！', true, '#fde68a');
+            c.atHelm = k;
+            H[k] = i;
+            c.ballista = undefined;
+            if (i === ME && controller) controller.yaw = k === 0 ? -Math.PI / 2 : Math.PI / 2; // looking at the other ship: W sails at her
+            vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), '掌舵！', true, '#fde68a');
             gameAudio.playGong();
-            onRoundEvent?.({ type: 'toast', text: `${i === ME ? '你' : c.tag || '有人'}下令${closing ? '离舷：收起跳板，两船分开' : '接舷：两船靠拢，贴上就放跳板'}` });
+            if (i === ME) onRoundEvent?.({ type: 'toast', text: '掌舵了：朝对面船推就开过去，往回推拉开，F 松舵' });
+            else onRoundEvent?.({ type: 'toast', text: `${c.tag || '有人'}掌舵了，${(c.side ?? 0) === (fighters[ME].side ?? 0) ? '我方' : '敌船'}在开船` });
             return true;
           }
           return false;
@@ -5964,8 +6016,26 @@ function GameImpl({
       }
       S.mountedT = 0;
       S.outT = 0;
+      if (me.atHelm !== undefined) {
+        // at the wheel: sail at them; let go once alongside, or if they've come aboard / close in
+        const hk = me.atHelm;
+        const docked = mapRuntime.board.mode === 2;
+        out.request = null;
+        out.block = false;
+        if (docked || shipOf(foe.pos[0]) === hk || dist < 4) {
+          out.move.set(0, 0, 0);
+          out.interact = !me.intPrev;
+        } else {
+          out.interact = false;
+          out.move.set(hk === 0 ? 1 : -1, 0, 0);
+        }
+        return;
+      }
       // mostly it fights; once in a while, when the player is well away and nobody holds a crossbow, it runs for one
-      if (S.goal < 0 && S.cool <= 0 && isFree(me) && me.isGrounded) {
+      // ships apart and nobody at our wheel: sailing over comes before any crossbow
+      const helmFirst = mapRuntime.board.mode !== 2 && mapRuntime.helmUser[shipOf(me.pos[0])] < 0 && shipOf(foe.pos[0]) !== shipOf(me.pos[0]);
+      if (helmFirst && S.goal >= 0 && S.goal !== 99) S.goal = -1;
+      if (!helmFirst && S.goal < 0 && S.cool <= 0 && isFree(me) && me.isGrounded) {
         S.cool = 6 + Math.random() * 4;
         if (dist > 7 && foe.ballista === undefined) {
           let best = -1;
@@ -5988,6 +6058,7 @@ function GameImpl({
       let tx = foe.pos[0];
       let ty = foe.pos[1];
       let tz = foe.pos[2];
+      let travel = false; // heading somewhere other than at the enemy (walk straight there when the way is clear)
       // badly hurt with the player well away: go down to the hold and eat
       const T = shipTable(shipOf(me.pos[0]));
       const mealReady = !(me.cooldowns['meal'] > 0);
@@ -6036,20 +6107,29 @@ function GameImpl({
         const X = mapRuntime.shipX;
         const Bd = mapRuntime.board;
         const dirX = Math.sign(X[kFoe] - X[kMe]);
-        if (Bd.mode === 0 || Bd.mode === 3) {
-          // order the ships together
-          tx = X[kMe] + SHIP_HELM.x;
-          ty = 0;
-          tz = SHIP_HELM.z - 1.0;
-          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.2 && Math.abs(me.pos[1]) < 0.6) {
-            out.move.set(0, 0, 0);
-            out.request = null;
-            out.interact = !me.intPrev;
-            return;
+        if (Bd.mode !== 2) {
+          // sail over: take the helm (unless a teammate already has it; then wait by a plank)
+          const H = mapRuntime.helmUser[kMe];
+          travel = true;
+          if (H >= 0 && H !== slotOf(me) && fighters[H] !== me) {
+            tx = X[kMe] + dirX * 9.5;
+            ty = 0;
+            tz = SHIP_PLANKS.z[0];
+          } else {
+            tx = X[kMe] + SHIP_HELM.x;
+            ty = 0;
+            tz = SHIP_HELM.z + 0.8;
+            if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 1.4 && Math.abs(me.pos[1]) < 0.6) {
+              out.move.set(0, 0, 0);
+              out.request = null;
+              out.interact = !me.intPrev;
+              return;
+            }
           }
         } else {
           // to the nearest plank's foot, then straight across it once it's down
           const pz = SHIP_PLANKS.z.reduce((a, b) => (Math.abs(b - foe.pos[2]) + Math.abs(b - me.pos[2]) < Math.abs(a - foe.pos[2]) + Math.abs(a - me.pos[2]) ? b : a));
+          travel = true;
           tx = X[kMe] + dirX * 10.5;
           ty = 0;
           tz = pz;
@@ -6070,7 +6150,7 @@ function GameImpl({
       // walk the ship's floor graph: stairs, doors, the hatch, round the crates and the hatch rail
       const st = shipSteerW(Math.max(0, slotOf(me)), me, tx, ty, tz, S.goal >= 0);
       if (!st) {
-        if (S.goal >= 0) {
+        if (S.goal >= 0 || travel) {
           out.move.set(tx - me.pos[0], 0, tz - me.pos[2]);
           if (out.move.lengthSq() > 0.01) out.move.normalize();
           out.request = null;
@@ -6088,35 +6168,48 @@ function GameImpl({
       const w = waveRef.current;
       const lt = lightningRef.current;
       {
-        // boarding orders: close in (both ships steer together, easing in at the end), drop the planks;
-        // cast off: planks up first, then the ships draw apart
+        // each ship goes where her helmsman steers her: toward the other ship or away. Alongside, the planks
+        // drop by themselves; pulling away raises them first, then the hulls part.
         const Bd = mapRuntime.board;
         const X = mapRuntime.shipX;
-        for (let k = 0; k < 2; k++) mapRuntime.helm[k] = Math.max(0, mapRuntime.helm[k] - dt * 0.5);
-        let move = 0;
-        const gap = X[1] - X[0];
-        if (Bd.mode === 1) {
-          const left = gap - SHIP_GAP.min;
-          move = -Math.min(left, SHIP_GAP.speed * dt * Math.min(1, 0.25 + left / 6)); // gap change (negative: closing)
-          if (left <= 0.01) {
-            Bd.mode = 2;
+        const thr = helmHold.current;
+        for (let k = 0; k < 2; k++) {
+          if (mapRuntime.helmUser[k] < 0) thr[k] = 0;
+          mapRuntime.helm[k] += (thr[k] - mapRuntime.helm[k]) * Math.min(1, dt * 4);
+        }
+        const gap0 = X[1] - X[0];
+        const pullOff = thr[0] < 0 || thr[1] < 0;
+        const closing = thr[0] > 0 || thr[1] > 0;
+        const wasMode = Bd.mode;
+        if (gap0 <= SHIP_GAP.min + 0.02 && !pullOff) {
+          Bd.mode = 2;
+          const was = Bd.plank;
+          Bd.plank = Math.min(1, Bd.plank + dt / 1.2);
+          if (wasMode !== 2) {
             onRoundEvent?.({ type: 'toast', text: '两船靠上了，跳板放下！冲过去' });
             controller?.addShake(0.45);
             gameAudio.playSlam();
           }
-        } else if (Bd.mode === 2) {
-          Bd.plank = Math.min(1, Bd.plank + dt / 1.2);
-        } else if (Bd.mode === 3) {
-          if (Bd.plank > 0) Bd.plank = Math.max(0, Bd.plank - dt / 0.8);
-          else {
-            move = Math.min(SHIP_GAP.max - gap, SHIP_GAP.speed * 0.8 * dt);
-            if (SHIP_GAP.max - gap <= 0.01) Bd.mode = 0;
-          }
-        }
-        if (move) {
-          // each ship takes half; everyone and everything aboard goes with her
+          if (was < 1 && Bd.plank >= 1)
+            for (let k = 0; k < N; k++) if (fighters[k].atHelm !== undefined) leaveHelm(k, fighters[k]); // let go and fight
+        } else if (Bd.plank > 0) {
+          Bd.mode = 3; // planks up before anyone can move
+          Bd.plank = Math.max(0, Bd.plank - dt / 0.8);
+        } else {
+          Bd.mode = closing ? 1 : pullOff ? 3 : 0;
           for (let k = 0; k < 2; k++) {
-            const dx = (k === 0 ? -move : move) / 2;
+            if (!thr[k]) continue;
+            const gap = X[1] - X[0];
+            const left = gap - SHIP_GAP.min;
+            const dir = k === 0 ? 1 : -1; // toward the other ship
+            let dx: number;
+            if (thr[k] > 0) dx = dir * Math.min(left, SHIP_GAP.speed * dt * Math.min(1, 0.25 + left / 6));
+            else {
+              const room = k === 0 ? X[0] + SHIP_GAP.max / 2 : SHIP_GAP.max / 2 - X[1];
+              dx = -dir * Math.max(0, Math.min(room, SHIP_GAP.speed * 0.8 * dt));
+            }
+            if (!dx) continue;
+            // everyone and everything aboard goes with her
             for (const c of fighters) if (shipOf(c.pos[0]) === k && c.pos[1] > -6) c.pos[0] += dx;
             for (const b of mapRuntime.bolts) if (b.stuck && shipOf(b.x) === k) b.x += dx;
             X[k] += dx;

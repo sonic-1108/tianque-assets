@@ -984,32 +984,69 @@ const SAILS = [
   { w: 19, h: 17, y: 20.5 },
 ];
 
-/** 船舵: a spoked wheel on a post on the main deck, turning while someone works it */
+/** 船舵: a big spoked wheel on a post on the main deck, a gold ring on the planks round it and a lantern-gold
+ *  marker bobbing over it while nobody has the wheel, so it is easy to find; it turns as the ship is steered */
 function Helm({ k }: { k: number }) {
   const wheel = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (wheel.current) wheel.current.rotation.z += mapRuntime.helm[k] * dt * 2.2;
+  const marker = useRef<THREE.Group>(null);
+  const ringMat = useRef<THREE.MeshBasicMaterial>(null);
+  useFrame((st, dt) => {
+    const t = st.clock.elapsedTime;
+    if (wheel.current) wheel.current.rotation.z += mapRuntime.helm[k] * dt * 2.6 * (k === 0 ? 1 : -1);
+    const free = (mapRuntime.helmUser?.[k] ?? -1) < 0;
+    if (marker.current) {
+      marker.current.visible = free;
+      marker.current.position.y = 2.75 + Math.sin(t * 2.4) * 0.12;
+      marker.current.rotation.y = t * 1.6;
+    }
+    if (ringMat.current) ringMat.current.opacity = free ? 0.45 + Math.sin(t * 3) * 0.2 : 0.85;
   });
   return (
     <group position={[SHIP_HELM.x, 0, SHIP_HELM.z]}>
-      <mesh position={[0, 0.55, 0]} castShadow>
-        <boxGeometry args={[0.28, 1.1, 0.28]} />
+      {/* a low dais the wheel stands on */}
+      <mesh position={[0, 0.025, 0.35]} receiveShadow>
+        <cylinderGeometry args={[1.25, 1.32, 0.05, 24]} />
+        <meshStandardMaterial color="#5a3a22" roughness={0.8} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.056, 0.35]}>
+        <ringGeometry args={[1.05, 1.25, 40]} />
+        <meshBasicMaterial ref={ringMat} color="#ffd36a" transparent opacity={0.6} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.7, 0]} castShadow>
+        <boxGeometry args={[0.34, 1.3, 0.34]} />
         <meshStandardMaterial color="#4a2e1a" roughness={0.85} />
       </mesh>
-      <group ref={wheel} position={[0, 1.2, -0.22]}>
+      <group ref={wheel} position={[0, 1.45, 0.24]}>
+        <mesh castShadow>
+          <torusGeometry args={[0.78, 0.065, 8, 28]} />
+          <meshStandardMaterial color="#7a4e28" roughness={0.65} />
+        </mesh>
         <mesh>
-          <torusGeometry args={[0.55, 0.05, 6, 20]} />
-          <meshStandardMaterial color="#6b4423" roughness={0.7} />
+          <torusGeometry args={[0.32, 0.05, 6, 18]} />
+          <meshStandardMaterial color="#7a4e28" roughness={0.65} />
         </mesh>
         {[0, 1, 2, 3].map((i) => (
           <mesh key={i} rotation={[0, 0, (i * Math.PI) / 4]}>
-            <boxGeometry args={[1.5, 0.05, 0.05]} />
+            <boxGeometry args={[2.0, 0.07, 0.07]} />
             <meshStandardMaterial color="#5a3a1e" roughness={0.75} />
           </mesh>
         ))}
+        {/* handles sticking out past the rim */}
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <mesh key={'h' + i} position={[Math.cos((i * Math.PI) / 4) * 0.98, Math.sin((i * Math.PI) / 4) * 0.98, 0]} rotation={[0, 0, (i * Math.PI) / 4 - Math.PI / 2]}>
+            <cylinderGeometry args={[0.045, 0.06, 0.26, 6]} />
+            <meshStandardMaterial color="#8a5a2e" roughness={0.6} />
+          </mesh>
+        ))}
         <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[0.1, 0.1, 0.12, 10]} />
-          <meshStandardMaterial color="#b08a3a" metalness={0.6} roughness={0.4} />
+          <cylinderGeometry args={[0.13, 0.13, 0.16, 12]} />
+          <meshStandardMaterial color="#c9a04a" metalness={0.6} roughness={0.35} />
+        </mesh>
+      </group>
+      <group ref={marker} position={[0, 2.75, 0]}>
+        <mesh>
+          <octahedronGeometry args={[0.26, 0]} />
+          <meshBasicMaterial color="#ffd36a" toneMapped={false} />
         </mesh>
       </group>
     </group>
