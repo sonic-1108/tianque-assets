@@ -2987,7 +2987,17 @@ function GameImpl({
           vfx.flash(chest(), '#ffd36a', 40, 0.2, 9);
           gameAudio.playHitHeavy();
           if (slot === ME) controller?.addShake(0.35);
-          if (dist < 3.2 && inFront) applyHit(slot, c, foe, 160, { heavy: true, crit: true, knock: 17, dur: 0.75, shake: 0.5 });
+          if (dist < 3.2 && inFront) {
+            // one palm in twenty is a critical: double damage
+            const crit = Math.random() < 0.05;
+            applyHit(slot, c, foe, crit ? 320 : 160, { heavy: true, crit, knock: crit ? 22 : 17, dur: crit ? 1.0 : 0.75, shake: crit ? 0.75 : 0.5 });
+            if (crit) {
+              vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.7, foe.pos[2]), '暴击！', true, '#fde047');
+              vfx.flash(chest(), '#fff3b0', 70, 0.3, 12);
+              vfx.ring(vA.set(foe.pos[0], foe.pos[1] + 1.0, foe.pos[2]), 2.2, '#fde047', 0.4, 0.16, 0.3);
+              if (slot === ME) controller?.addShake(0.5);
+            }
+          }
           c.stateTimer = Math.max(c.stateTimer, cfg.startup + cfg.active);
           c.vel[0] *= 0.2;
           c.vel[2] *= 0.2;
