@@ -2,7 +2,7 @@ import { shipSteer, newNavState, shipGraph } from './shipNav';
 import { desertSteer, newDesertNav } from './desertNav';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame, useThree, advance } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
@@ -441,6 +441,24 @@ function GameImpl({
       scene.environment = null;
     };
   }, [gl, scene, map]);
+
+  // Hosting in a hidden tab (switched to another window, or playing a second account on the same computer):
+  // the browser stops animation frames there, which froze the whole room for the guests. A worker's timer is
+  // not throttled, so it keeps the host's game ticking ~30 times a second while the tab is hidden.
+  useEffect(() => {
+    if (!net || net.role !== 'host') return;
+    let w: Worker | null = null;
+    try {
+      const src = 'setInterval(() => postMessage(0), 33);';
+      w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      w.onmessage = () => {
+        if (document.hidden && net.guests.size > 0) advance(performance.now());
+      };
+    } catch {
+      /* no workers: nothing to do */
+    }
+    return () => w?.terminate();
+  }, [net]);
 
   // Compile every shader the map needs in the background (KHR_parallel_shader_compile) right after it loads,
   // instead of all at once on the first frames it is drawn: that first-frame compile is the long freeze

@@ -34,7 +34,7 @@ export type NetMessage =
   | { t: 'cfg'; map: MapId; hostCls?: CharacterClassId; guestCls?: CharacterClassId; seq: number; hostName?: string; seats?: RoomSeat[] }
   | { t: 'room'; seats: RoomSeat[]; map: MapId; started: boolean }
   | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; ult?: boolean; req: string | null }
-  | { t: 's'; f: any[]; p: any[]; m: any; ev: any[]; ts?: number }
+  | { t: 's'; f: any[]; p: any[]; m?: any; ev: any[]; ts?: number; q?: number; k?: 1 }
   | { t: 're'; e: any }
   | { t: 'pi'; c: number }
   | { t: 'po'; c: number }
@@ -117,6 +117,84 @@ export class NetSession {
   get myId() {
     return this.via === 'relay' ? this.relayId : this.peer?.id || '';
   }
+  // ---- snapshot delta coding ----
+  // A full snapshot is ~7 KB (every field of every fighter); 30 a second to each of three guests is several
+  // megabits of upload from the host, which choked rooms. Now a keyframe (everything) goes out every second
+  // (and whenever someone joins); in between only the fields that changed since the last snapshot are sent,
+  // and the map state only when it changed. Messages carry a sequence number: a guest that misses one (the
+  // relay can drop) waits for the next keyframe instead of drawing garbage.
+  private sSeq = 0;
+  private sPrev: any[] | null = null;
+  private sPrevM = '';
+  private sLastKey = 0;
+  /** host: send a keyframe next (someone just joined) */
+  needKey = true;
+  private gBase: any[] | null = null;
+  private gSeq = -1;
+  private gM: any = null;
+  private static eq(a: any, b: any) {
+    if (a === b) return true;
+    if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+    if (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => typeof v !== 'object' && v === b[i])) return true;
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  private encodeSnap(m: Extract<NetMessage, { t: 's' }>) {
+    const now = performance.now();
+    const relay = [...this.guests.values()].some((g) => g.relay);
+    const key = this.needKey || !this.sPrev || this.sPrev.length !== m.f.length || now - this.sLastKey > (relay ? 500 : 1000);
+    this.sSeq++;
+    const mj = JSON.stringify(m.m ?? null);
+    const mChanged = key || mj !== this.sPrevM;
+    this.sPrevM = mj;
+    if (key) {
+      this.needKey = false;
+      this.sLastKey = now;
+      this.sPrev = m.f;
+      return { ...m, q: this.sSeq, k: 1 as const };
+    }
+    const prev = this.sPrev!;
+    const f = m.f.map((cur, i) => {
+      const old = prev[i];
+      const d: any = {};
+      for (const k in cur) if (cur[k] !== undefined && !NetSession.eq(cur[k], old[k])) d[k] = cur[k];
+      for (const k in old) if (old[k] !== undefined && cur[k] === undefined) d[k] = null; // gone
+      return d;
+    });
+    this.sPrev = m.f;
+    const out: any = { ...m, f, q: this.sSeq };
+    if (!mChanged) delete out.m;
+    return out;
+  }
+  /** guest: rebuild the full snapshot from a keyframe or a delta; false if it can't be (a message went missing) */
+  private decodeSnap(m: Extract<NetMessage, { t: 's' }>) {
+    if (m.q === undefined) return true; // an older host: always full
+    if (m.k) {
+      this.gBase = m.f;
+      this.gSeq = m.q;
+      this.gM = m.m;
+      return true;
+    }
+    if (!this.gBase || m.q !== this.gSeq + 1 || this.gBase.length !== m.f.length) {
+      this.gBase = null; // lost one: wait for the next keyframe
+      return false;
+    }
+    const full = this.gBase.map((b, i) => {
+      const o = { ...b };
+      const d = m.f[i];
+      for (const k in d) {
+        if (d[k] === null) delete o[k];
+        else o[k] = d[k];
+      }
+      return o;
+    });
+    this.gBase = full;
+    this.gSeq = m.q;
+    m.f = full;
+    if (m.m === undefined) m.m = this.gM;
+    else this.gM = m.m;
+    return true;
+  }
+
   /** guest: the latest state snapshots (a small jitter buffer), each with its host timestamp */
   snaps: { at: number; ts: number; msg: Extract<NetMessage, { t: 's' }>; used?: boolean }[] = [];
   /** guest: local clock minus host clock, plus the smallest network delay seen */
@@ -225,6 +303,7 @@ export class NetSession {
 
   // ---------------- host: guests ----------------
   private addGuest(id: string, conn: DataConnection | null, relay: boolean) {
+    this.needKey = true; // the newcomer needs a full snapshot to start from
     let g = this.guests.get(id);
     if (!g) {
       g = { id, conn, relay, remote: { mx: 0, mz: 0, yaw: 0, blk: false, req: null, reqTtl: 0 }, cls: null, name: '', pingMs: 0, heard: performance.now() };
@@ -352,6 +431,10 @@ export class NetSession {
       return;
     }
     if (m.t === 's') {
+      if (!this.decodeSnap(m)) {
+        if (m.ev?.length) this.inbox.push(...m.ev); // never drop an effect
+        return;
+      }
       const at = performance.now();
       const ts = m.ts ?? at;
       // clock offset: the fastest packet is the best estimate; creep up slowly so a route change is followed
@@ -390,6 +473,7 @@ export class NetSession {
   /** guest: to the host. Host: to every guest */
   send(m: NetMessage) {
     if (this.role === 'host') {
+      if (m.t === 's') m = this.encodeSnap(m);
       let relayed = false;
       for (const g of this.guests.values()) {
         if (g.relay) {
