@@ -41,9 +41,15 @@ jobs:
               [ -n "$sub" ] && break
             done
           fi
-          cd relay && npx --yes wrangler@4 deploy
-          echo "url=wss://tianque-relay.$sub.workers.dev" >> $GITHUB_OUTPUT
-          echo "relay: wss://tianque-relay.$sub.workers.dev"
+          if [ -z "$sub" ]; then echo "::warning::relay: could not get or register a workers.dev subdomain"; exit 1; fi
+          cd relay
+          if npx --yes wrangler@4 deploy > ../wrangler.log 2>&1; then
+            echo "url=wss://tianque-relay.$sub.workers.dev" >> $GITHUB_OUTPUT
+            echo "::notice::relay deployed: wss://tianque-relay.$sub.workers.dev"
+          else
+            echo "::warning::relay deploy failed: $(grep -m3 -i 'error' ../wrangler.log | tr '\n' ' ' | cut -c1-300)"
+            exit 1
+          fi
       - run: npm run build
         env:
           ADMIN_SEED: ${{ secrets.ADMIN_SEED }}
