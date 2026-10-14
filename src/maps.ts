@@ -12,6 +12,9 @@ export interface Circle {
   y0?: number;
   /** a platform round a trunk: you stand on the ring between r and deck at height h, the trunk stays solid */
   deck?: number;
+  /** 怒海战船: which ship it belongs to, and its ship-local x */
+  ship?: number;
+  lx?: number;
   /** can be climbed (青冥古林 lookout trees) */
   climb?: boolean;
   /** angle round the trunk where its rope ladder hangs */
@@ -454,13 +457,20 @@ export const MAPS = {
     name: '怒海战船',
     subtitle: '风暴夜里，大海上的古战船甲板',
     icon: '🌊',
-    mechanics: ['一艘五层楼船：甲板下有货舱，船尾高塔四层，每层都有能进去的船舱，两舷楼梯上下', '货舱里有一桌饭菜，按 F 吃一口回复已损失气血的 10%', '船头楼和船尾高塔各架一台床弩，按 F 抢占射击，箭能把人钉住', '巨浪会拍上主甲板把人冲走；躲进船舱或站上高处就不怕'],
+    mechanics: [
+      '两艘五层楼船并排漂在海上，两队各占一艘：甲板下有货舱，船尾高塔四层，两舷楼梯上下',
+      '主甲板船尾前有船舵：站过去按住 F 把船往对面开，两船贴上就能翻过船舷跳到对方船上开打；贴着的时候按住 F 是把船开远',
+      '掉进两船之间的海里：掉 120 血，被捞回自己船上',
+      '货舱里有一桌饭菜，按 F 吃一口回复已损失气血的 10%',
+      '每艘船船头楼和船尾高塔各一台床弩，按 F 抢占射击，能转过来打对面的船，箭能把人钉住',
+      '巨浪会拍上主甲板把人冲走；躲进船舱或站上高处就不怕',
+    ],
     homeClass: 'LightHealer',
     homeClassName: '灵雀',
     homeBonus: '移速 +10%（职业开发中）',
     available: true,
     radius: 42,
-    rect: { hx: 11.8, hz: 40 },
+    rect: { hx: 40, hz: 40 },
     terrain: true,
     spawnPlayer: [3, 9],
     spawnEnemy: [-3, -14],
@@ -888,6 +898,9 @@ export const mapRuntime = {
   items: [] as PlacedItem[],
   /** 怒海战船 mounted crossbows: aim, who is on it (-1 nobody), reload 0..1, recoil kick */
   ballistae: [] as { yaw: number; user: number; load: number; kick: number }[],
+  /** 怒海战船: world x of each ship (the helms move them), and how hard each helm is being worked (0..1) */
+  shipX: [-24, 24] as [number, number],
+  helm: [0, 0] as [number, number],
   /** crossbow bolts in flight or stuck in the planks (t: seconds left; stuck: embedded) */
   bolts: [] as { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; stuck: boolean; slot: number }[],
   /** where the local player is (scenery uses it to show F markers near things you can use) */
@@ -1238,7 +1251,7 @@ export const SHIP_LAYOUT = {
     { x: 0, z: -31.5, y: H, yaw: Math.PI },
     { x: 0, z: 30.5, y: 3 * H, yaw: 0 },
   ],
-  ballistaArc: Math.PI / 3, // ±60°
+  ballistaArc: 1.75, // ±100°: fore and aft, and across at the other ship
   /** the two-storey pavilion on the roof (solid) */
   pavilion: { hw: 8, z0: 36.2, z1: 39.8, h: 2.9 },
 };
@@ -1326,7 +1339,7 @@ function shipNear(x: number, z: number): ShipBox[] {
   return SHIP_GRID[j * SG.nx + i];
 }
 /** the highest surface under (x, z) that a fighter whose feet are at y stands on (steps up to 0.6 m count) */
-export function shipFloorAt(x: number, z: number, y: number) {
+export function shipFloorAtL(x: number, z: number, y: number) {
   let g = SHIP_LAYOUT.holdY;
   for (const b of shipNear(x, z)) {
     if (!inXZ(b, x, z)) continue;
@@ -1341,24 +1354,75 @@ function stairRamp(f: ShipFlight, z: number) {
   return f.y0 + f.rise * t;
 }
 /** the underside of whatever is overhead (a deck above a cabin); Infinity in the open */
-export function shipCeilAt(x: number, z: number, y: number) {
+export function shipCeilAtL(x: number, z: number, y: number) {
   let c = Infinity;
   for (const b of shipNear(x, z)) if (b.y0 >= y + 0.3 && b.y0 < c && inXZ(b, x, z)) c = b.y0;
   return c;
 }
 /** would a fighter (radius r) with feet at y overlap something solid here? Low steps don't count */
-export function shipBlocked(x: number, z: number, y: number, r = 0.38) {
+export function shipBlockedL(x: number, z: number, y: number, r = 0.38) {
   // stair treads are shallow: a smaller reach there, so the next step up never counts as a wall
   for (const b of r <= SG.pad ? shipNear(x, z) : SHIP_BOXES) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inXZ(b, x, z, b.kind === 'tread' ? Math.min(r, 0.05) : r)) return true;
   return false;
 }
 /** is the point inside a solid (camera, projectiles) */
-export function shipSolidAt(x: number, y: number, z: number, r = 0, skipSteps = false) {
+export function shipSolidAtL(x: number, y: number, z: number, r = 0, skipSteps = false) {
   for (const b of r <= SG.pad ? shipNear(x, z) : SHIP_BOXES) if (!(skipSteps && (b.kind === 'tread' || b.kind === 'rail')) && y > b.y0 - r && y < b.y1 + r && inXZ(b, x, z, r)) return true;
   return false;
 }
 // the crates and crossbow posts stand on whatever deck is under them, and only there
-for (const p of MAPS.sea.pillars || []) if (p.h !== undefined) p.y0 = shipFloorAt(p.x, p.z, p.h - 0.9);
+for (const p of MAPS.sea.pillars || []) if (p.h !== undefined) p.y0 = shipFloorAtL(p.x, p.z, p.h - 0.9);
+
+// ----------------------------------------------------------------------
+// 怒海战船 is fought between TWO junks lying side by side, one per team. Each ship's geometry is the same
+// (ship-local coordinates above); a ship sits at world x = mapRuntime.shipX[k]. The helms close or open the gap.
+// Every query below takes world coordinates and asks the ship whose side of the gap the point is on.
+// ----------------------------------------------------------------------
+export const SHIP_GAP = { start: 48, min: 26.1, max: 56, speed: 1.7 }; // min: the hulls (12.9 m half beam) just touching
+/** the helm (船舵) on each ship: on the main deck just forward of the great cabin (ship-local) */
+export const SHIP_HELM = { x: 0, z: 11.4, r: 0.55 };
+export function shipOf(x: number) {
+  const s = mapRuntime.shipX;
+  return x < (s[0] + s[1]) / 2 ? 0 : 1;
+}
+/** is (x, z) over a ship's hull (rather than open water between or beside them) */
+export function overShip(x: number, z: number) {
+  const k = shipOf(x);
+  return Math.abs(x - mapRuntime.shipX[k]) < SHIP_LAYOUT.W + 0.2 && z > -52 && z < 41;
+}
+export function shipFloorAt(x: number, z: number, y: number) {
+  const k = shipOf(x);
+  return shipFloorAtL(x - mapRuntime.shipX[k], z, y);
+}
+export function shipCeilAt(x: number, z: number, y: number) {
+  const k = shipOf(x);
+  return shipCeilAtL(x - mapRuntime.shipX[k], z, y);
+}
+export function shipBlocked(x: number, z: number, y: number, r = 0.38) {
+  const k = shipOf(x);
+  return shipBlockedL(x - mapRuntime.shipX[k], z, y, r);
+}
+export function shipSolidAt(x: number, y: number, z: number, r = 0, skipSteps = false) {
+  const k = shipOf(x);
+  return shipSolidAtL(x - mapRuntime.shipX[k], y, z, r, skipSteps);
+}
+/** the sea map's pillars as laid out on one ship (masts, crates, crossbow posts) */
+export const SEA_PILLARS_LOCAL: Circle[] = (MAPS.sea.pillars || []).map((p) => ({ ...p }));
+/** both ships' pillars in world coordinates (moved with the ships by syncShips) */
+MAPS.sea.pillars = [0, 1].flatMap((k) => SEA_PILLARS_LOCAL.map((p) => ({ ...p, ship: k, lx: p.x })));
+/** world positions of every crossbow (ship 0's, then ship 1's), kept in step with the ships */
+export const SEA_BALLISTAE: { x: number; y: number; z: number; yaw: number; ship: number }[] = [0, 1].flatMap((k) => SHIP_LAYOUT.ballistae.map((b) => ({ ...b, ship: k })));
+/** after the ships move: pillars and crossbows follow */
+export function syncShips() {
+  for (const p of MAPS.sea.pillars!) p.x = (p.lx ?? 0) + mapRuntime.shipX[p.ship ?? 0];
+  const n = SHIP_LAYOUT.ballistae.length;
+  SEA_BALLISTAE.forEach((b, i) => (b.x = SHIP_LAYOUT.ballistae[i % n].x + mapRuntime.shipX[b.ship]));
+}
+/** the hold's food table on ship k (world) */
+export function shipTable(k: number) {
+  const T = SHIP_LAYOUT.table;
+  return { ...T, x: T.x + mapRuntime.shipX[k] };
+}
 /** which room or deck a point is on (for the AI's routing) */
 export type ShipRegion = 'hold' | 'deck' | 'foreCabin' | 'fore' | 'greatCabin' | 'quarter' | 'captain' | 'poop' | 'hall' | 'castle' | 'lookout' | 'roof';
 export function shipLevel(y: number) {

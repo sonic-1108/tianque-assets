@@ -150,16 +150,19 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
       uHull: { value: new THREE.Vector4(hull.halfW, (hull.z0 + hull.z1) / 2, (hull.z1 - hull.z0) / 2, 0) },
       // the hold sits below the waterline: no sea inside it
       uHold: { value: new THREE.Vector3(hold ? hold.halfW : -1, hold ? hold.z0 : 0, hold ? hold.z1 : 0) },
+      // 怒海战船: two hulls, at these x offsets
+      uShipX: { value: new THREE.Vector2(0, 0) },
     },
     vertexShader: /* glsl */ `
-      uniform float uTime; uniform vec4 uRogue; uniform vec4 uHull;
+      uniform float uTime; uniform vec4 uRogue; uniform vec4 uHull; uniform vec2 uShipX;
       varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP; varying float vRogue; varying float vFace;
       ${GLSL_WAVES}
-      float hullDist(vec2 p){
+      float hullDist1(vec2 p){
         // rounded box around the hull's waterline
         vec2 q = abs(p - vec2(0.0, uHull.y)) - vec2(uHull.x, uHull.z);
         return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
       }
+      float hullDist(vec2 p){ return min(hullDist1(p - vec2(uShipX.x, 0.0)), hullDist1(p - vec2(uShipX.y, 0.0))); }
       void main(){
         vec2 p = position.xz;
         float dH = hullDist(p);
@@ -223,11 +226,11 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uFog; uniform float uLightning; uniform float uTime; uniform vec3 uHold;
+      uniform vec3 uFog; uniform float uLightning; uniform float uTime; uniform vec3 uHold; uniform vec2 uShipX;
       varying vec3 vWorld; varying vec3 vN; varying float vFold; varying float vCrest; varying float vHull; varying float vLip; varying vec2 vP; varying float vRogue; varying float vFace;
       ${NOISE}
       void main(){
-        if (abs(vWorld.x) < uHold.x && vWorld.z > uHold.y && vWorld.z < uHold.z) discard;
+        if ((abs(vWorld.x - uShipX.x) < uHold.x || abs(vWorld.x - uShipX.y) < uHold.x) && vWorld.z > uHold.y && vWorld.z < uHold.z) discard;
         vec3 V = normalize(cameraPosition - vWorld);
         float dist = length(cameraPosition - vWorld);
         // fine wind ripples on top of the waves, fading with distance

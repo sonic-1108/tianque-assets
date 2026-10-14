@@ -10,7 +10,7 @@ import { DesertMap } from './maps/Desert';
 import { useSettings } from '../settings';
 import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray, StormSky } from './maps/Ocean';
 import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
-import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, shipFloorAt, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
+import { MAPS, MapId, mapRuntime, SHIP_LAYOUT, SHIP_BOXES, SHIP_HELM, SEA_PILLARS_LOCAL, shipFloorAtL, shipCeilAt, VOLCANO_CRATER, GLACIER, glacierHeight, glacierGradient, glacierPath } from '../maps';
 
 const NOISE = /* glsl */ `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
@@ -984,6 +984,38 @@ const SAILS = [
   { w: 19, h: 17, y: 20.5 },
 ];
 
+/** 船舵: a spoked wheel on a post on the main deck, turning while someone works it */
+function Helm({ k }: { k: number }) {
+  const wheel = useRef<THREE.Group>(null);
+  useFrame((_, dt) => {
+    if (wheel.current) wheel.current.rotation.z += mapRuntime.helm[k] * dt * 2.2;
+  });
+  return (
+    <group position={[SHIP_HELM.x, 0, SHIP_HELM.z]}>
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <boxGeometry args={[0.28, 1.1, 0.28]} />
+        <meshStandardMaterial color="#4a2e1a" roughness={0.85} />
+      </mesh>
+      <group ref={wheel} position={[0, 1.2, -0.22]}>
+        <mesh>
+          <torusGeometry args={[0.55, 0.05, 6, 20]} />
+          <meshStandardMaterial color="#6b4423" roughness={0.7} />
+        </mesh>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i} rotation={[0, 0, (i * Math.PI) / 4]}>
+            <boxGeometry args={[1.5, 0.05, 0.05]} />
+            <meshStandardMaterial color="#5a3a1e" roughness={0.75} />
+          </mesh>
+        ))}
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.1, 0.1, 0.12, 10]} />
+          <meshStandardMaterial color="#b08a3a" metalness={0.6} roughness={0.4} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
 function SeaMap() {
   const def = MAPS.sea;
   const { hx, hz } = def.rect!;
@@ -1003,13 +1035,16 @@ function SeaMap() {
     return t;
   }, []);
   const crateMap = useMemo(() => crateTexture(), []);
-  const shipRef = useRef<THREE.Group>(null);
+  const shipGroups = useRef<(THREE.Group | null)[]>([null, null]);
+  const deckMat2 = useRef<THREE.MeshStandardMaterial>(null);
   const boltRef = useRef<THREE.DirectionalLight>(null);
   useFrame((st, dtf) => {
     const t = st.clock.elapsedTime;
     const u = ocean.material.uniforms;
     u.uTime.value = t;
     u.uLightning.value = mapRuntime.lightning;
+    u.uShipX.value.set(mapRuntime.shipX[0], mapRuntime.shipX[1]);
+    for (let k = 0; k < 2; k++) if (shipGroups.current[k]) shipGroups.current[k]!.position.x = mapRuntime.shipX[k];
     if (st.scene.background instanceof THREE.Color) u.uFog.value.copy(st.scene.background);
     // The deck is the fighters' frame of reference, so the world rolls around the ship instead:
     // sample the long swell under the hull: centre for heave, the beams for roll, bow and stern for pitch
@@ -1038,18 +1073,19 @@ function SeaMap() {
       worldRef.current.position.y = -h0 * 0.85;
     }
     c.wet = Math.max(0, c.wet - dtf / 5);
-    if (deckMat.current) {
+    for (const dm of [deckMat.current, deckMat2.current]) {
+      if (!dm) continue;
       // storm-soaked planks: darker and glossier for a while after a wave washes over
       const wv = Math.min(1, c.wet);
-      deckMat.current.roughness = 0.8 - wv * 0.38;
-      deckMat.current.color.setRGB(0.3 - wv * 0.09, 0.25 - wv * 0.08, 0.2 - wv * 0.06);
+      dm.roughness = 0.8 - wv * 0.38;
+      dm.color.setRGB(0.3 - wv * 0.09, 0.25 - wv * 0.08, 0.2 - wv * 0.06);
     }
     if (boltRef.current) boltRef.current.intensity = mapRuntime.lightning * 7;
   });
   // rigging: shrouds from each masthead down to the cap rail, sheets fanning from the batten ends, fore and aft stays
   const rigging = useMemo(() => {
     const pts: number[] = [];
-    const masts = def.pillars!.slice(0, 2);
+    const masts = SEA_PILLARS_LOCAL.slice(0, 2);
     masts.forEach((p, i) => {
       for (const sx of [-1, 1])
         for (const dz of [-2.4, -0.8, 0.8, 2.4]) {
@@ -1091,14 +1127,15 @@ function SeaMap() {
       </group>
       </group>
       {/* the rogue wave breaking over the side: spray over the rail and foaming water across the main deck */}
-      <WaveCrash beam={12.5} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.tiers[0].edge]} />
-      <group ref={shipRef}>
+      {[0, 1].map((sk) => (
+      <group key={sk} ref={(el) => (shipGroups.current[sk] = el)} position={[mapRuntime.shipX[sk], 0, 0]}>
         <ShipHull />
-        <ShipStructure deckMap={planks} boxes={SHIP_BOXES} deckMatRef={deckMat} />
+        <WaveCrash beam={12.5} deckZ={[SHIP_LAYOUT.fore.edge, SHIP_LAYOUT.tiers[0].edge]} />
+        <Helm k={sk} />
+        <ShipStructure deckMap={planks} boxes={SHIP_BOXES} deckMatRef={sk === 0 ? deckMat : deckMat2} />
         {SHIP_LAYOUT.ballistae.map((b, k) => (
-          <Ballista key={k} k={k} at={b} rt={mapRuntime} />
+          <Ballista key={k} k={k + sk * SHIP_LAYOUT.ballistae.length} at={b} rt={mapRuntime} />
         ))}
-        <Bolts rt={mapRuntime} />
         <SternCastle base={SHIP_LAYOUT.tiers[3].y} />
         <pointLight position={[0, 3.2, -6]} color="#ffb060" intensity={10} distance={22} decay={1.4} />
         <RailLanterns />
@@ -1109,7 +1146,7 @@ function SeaMap() {
         <RopeCoil position={[-3, SHIP_LAYOUT.tiers[1].y, 25.0]} r={0.5} />
         <RopeCoil position={[3.0, SHIP_LAYOUT.tiers[0].y, 18.4]} r={0.4} />
         {/* masts with battened junk sails high above the deck, a lantern hung on each, and pennants */}
-        {def.pillars!.slice(0, 2).map((p, i) => (
+        {SEA_PILLARS_LOCAL.slice(0, 2).map((p, i) => (
           <group key={i} position={[p.x, 0, p.z]}>
             <Mast r={p.r} h={MAST_TOP + 0.4} />
             {/* down through the hold to the keelson */}
@@ -1126,9 +1163,9 @@ function SeaMap() {
           <lineBasicMaterial color="#1a120c" />
         </lineSegments>
         {/* cargo crates lashed with rope */}
-        {def.pillars!.slice(2).filter((p) => p.h !== 0.85 && !SHIP_LAYOUT.ballistae.some((b) => b.x === p.x && b.z === p.z)).map((p, i) => (
-          <group key={i} position={[p.x, shipFloorAt(p.x, p.z, (p.h ?? 1.1) - 1.0), p.z]} rotation={[0, i * 0.7, 0]}>
-            {Array.from({ length: Math.max(1, Math.round(((p.h ?? 1.1) - shipFloorAt(p.x, p.z, (p.h ?? 1.1) - 1.0)) / 1.1)) }, (_, k) => (
+        {SEA_PILLARS_LOCAL.slice(2).filter((p) => p.h !== 0.85 && !SHIP_LAYOUT.ballistae.some((b) => b.x === p.x && b.z === p.z)).map((p, i) => (
+          <group key={i} position={[p.x, shipFloorAtL(p.x, p.z, (p.h ?? 1.1) - 1.0), p.z]} rotation={[0, i * 0.7, 0]}>
+            {Array.from({ length: Math.max(1, Math.round(((p.h ?? 1.1) - shipFloorAtL(p.x, p.z, (p.h ?? 1.1) - 1.0)) / 1.1)) }, (_, k) => (
               <group key={k} position={[0, k * 1.1, 0]} rotation={[0, k * 0.35, 0]}>
                 <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
                   <boxGeometry args={[p.r * 1.7 - k * 0.08, 1.1, p.r * 1.7 - k * 0.08]} />
@@ -1145,6 +1182,8 @@ function SeaMap() {
           </group>
         ))}
       </group>
+      ))}
+      <Bolts rt={mapRuntime} />
       <Rain hideUnder={(x, y, z) => shipCeilAt(x, z, y - 1.2) < 99} />
     </group>
   );

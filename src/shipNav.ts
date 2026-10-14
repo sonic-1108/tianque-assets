@@ -3,7 +3,7 @@
 // A node is a 0.5 m cell on one floor surface; you can step to a neighbouring cell if nothing blocks
 // you there and the floor you'd land on is at most a step up (stepping or dropping down is fine).
 // Stairs, doors, the hatch and every way round a crate fall out of that on their own.
-import { SHIP_BOXES, SHIP_LAYOUT, MAPS, shipFloorAt, shipBlocked, type ShipBox } from './maps';
+import { SHIP_BOXES, SHIP_LAYOUT, SEA_PILLARS_LOCAL, shipFloorAtL as shipFloorAt, shipBlockedL as shipBlocked, type ShipBox } from './maps';
 import navWasmUrl from './wasm/shipnav.wasm?url';
 
 // The graph and A* run in C++ compiled to WebAssembly (native/shipnav.cpp) once it has loaded; until then (or if a
@@ -69,14 +69,14 @@ function seedPoints(): [number, number, number][] {
 }
 
 function buildWasm(w: NavWasm): Graph | null {
-  const rect = MAPS.sea.rect!;
+  const rect = { hx: 11.8, hz: 40 }; // one ship, in its own coordinates
   const hx = rect.hx - 0.35;
   const hz = rect.hz - 0.35;
   const f32 = () => new Float32Array(w.memory.buffer);
   let m = f32();
   const bo = w.boxes_buf() >> 2;
   SHIP_BOXES.forEach((b, k) => m.set([b.x0, b.x1, b.y0, b.y1, b.z0, b.z1, b.kind === 'tread' ? 1 : 0], bo + k * 7));
-  const pillars = MAPS.sea.pillars || [];
+  const pillars = SEA_PILLARS_LOCAL;
   const po = w.pillars_buf() >> 2;
   pillars.forEach((p, k) => m.set([p.x, p.z, p.r, p.h ?? 99, p.y0 ?? -99], po + k * 5));
   const seeds = seedPoints();
@@ -94,7 +94,7 @@ function buildWasm(w: NavWasm): Graph | null {
 let G: Graph | null = null;
 
 function build(): Graph {
-  const rect = MAPS.sea.rect!;
+  const rect = { hx: 11.8, hz: 40 }; // one ship, in its own coordinates
   const hx = rect.hx - 0.35;
   const hz = rect.hz - 0.35;
   const nx = Math.floor((hx * 2) / CELL) + 1;
@@ -110,7 +110,7 @@ function build(): Graph {
     const j1 = Math.min(nz - 1, Math.ceil((b.z1 + R + hz) / CELL));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) near[j * nx + i].push(b);
   }
-  const pillars = MAPS.sea.pillars || [];
+  const pillars = SEA_PILLARS_LOCAL;
   const inXZ = (b: ShipBox, x: number, z: number, r: number) => x > b.x0 - r && x < b.x1 + r && z > b.z0 - r && z < b.z1 + r;
   const floorAt = (c: number, x: number, z: number, y: number) => {
     let g = SHIP_LAYOUT.holdY;
@@ -310,7 +310,7 @@ export function findPath(a: number, b: number): number[] | null {
 function lineClear(x0: number, y0: number, z0: number, x1: number, z1: number) {
   const d = Math.hypot(x1 - x0, z1 - z0);
   const n = Math.ceil(d / 0.3);
-  const pillars = MAPS.sea.pillars || [];
+  const pillars = SEA_PILLARS_LOCAL;
   let y = y0;
   for (let k = 1; k <= n; k++) {
     const x = x0 + ((x1 - x0) * k) / n;
