@@ -626,8 +626,25 @@ export class VFXSystem {
     return { links, hook, from: new THREE.Vector3(), to: new THREE.Vector3(), life: 0, max: 1, LINKS };
   });
 
+  /** 穿云狙: a bright streak along the shot that fades fast */
+  private tracers = Array.from({ length: 4 }, () => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1, 6, 1, true), new THREE.MeshBasicMaterial({ color: '#fff3c4', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    m.visible = false;
+    return { m, life: 0 };
+  });
+  tracer(from: THREE.Vector3, to: THREE.Vector3, color: THREE.ColorRepresentation = '#fff3c4') {
+    const t = this.tracers.find((x) => x.life <= 0) ?? this.tracers[0];
+    const len = from.distanceTo(to);
+    t.m.position.copy(from).add(to).multiplyScalar(0.5);
+    t.m.scale.set(1, len, 1);
+    t.m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
+    (t.m.material as THREE.MeshBasicMaterial).color.set(color);
+    t.m.visible = true;
+    t.life = 0.3;
+  }
   constructor() {
     this.root.name = 'VFXSystem';
+    for (const t of this.tracers) this.root.add(t.m);
     this.monk = new MonkFX(this.root);
     this.root.add(this.sparks.points, this.dust.points, this.debris.mesh);
     for (const ch of this.chains) this.root.add(ch.links, ch.hook);
@@ -1220,6 +1237,13 @@ export class VFXSystem {
 
   update(dt: number) {
     this.time += dt;
+    for (const t of this.tracers)
+      if (t.life > 0) {
+        t.life -= dt;
+        (t.m.material as THREE.MeshBasicMaterial).opacity = Math.max(0, t.life / 0.3);
+        t.m.scale.x = t.m.scale.z = 1 + (0.3 - t.life) * 4;
+        if (t.life <= 0) t.m.visible = false;
+      }
     this.monk.update(dt);
     this.updateChains(dt);
     if (this.timers.length) {

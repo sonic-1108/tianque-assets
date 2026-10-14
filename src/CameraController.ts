@@ -12,6 +12,8 @@ export class CameraController {
   ceilAt: ((x: number, z: number) => number) | null = null;
   /** solid geometry (walls): the boom is pulled in in front of it */
   solidAt: ((x: number, y: number, z: number) => boolean) | null = null;
+  /** 穿云狙: looking down the scope from this eye point (null = normal third-person camera) */
+  scopeEye: THREE.Vector3 | null = null;
   pendingDX = 0;
   pendingDY = 0;
   private sensitivity = 0.0025;
@@ -56,12 +58,26 @@ export class CameraController {
 
   update(playerPos: THREE.Vector3, dt: number) {
     // consume mouse input ONCE, then reset it
-    const sens = this.sensitivity * getSettings().sens;
+    const sens = this.sensitivity * getSettings().sens * (this.scopeEye ? 0.28 : 1);
     this.yaw -= this.pendingDX * sens;
     this.pitch += this.pendingDY * sens;
     this.pendingDX = 0;
     this.pendingDY = 0;
-    this.pitch = THREE.MathUtils.clamp(this.pitch, 0.05, 1.15);
+    this.pitch = THREE.MathUtils.clamp(this.pitch, this.scopeEye ? -0.7 : 0.05, this.scopeEye ? 0.9 : 1.15);
+    if (this.scopeEye) {
+      // first person down the scope: narrow field of view, looking where the aim points
+      if (this.baseFov < 0) this.baseFov = this.camera.fov;
+      const dir = new THREE.Vector3(-Math.sin(this.yaw) * Math.cos(this.pitch), -Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch));
+      this.camera.position.copy(this.scopeEye);
+      this.camera.lookAt(this.scopeEye.clone().add(dir));
+      const want = 13;
+      if (Math.abs(this.camera.fov - want) > 0.05) {
+        this.camera.fov = THREE.MathUtils.damp(this.camera.fov, want, 14, dt);
+        this.camera.updateProjectionMatrix();
+      }
+      this.smoothPos.copy(this.scopeEye);
+      return;
+    }
 
     // Look slightly over the right shoulder so the character sits left of the crosshair
     // the height the camera follows is eased, so walking up stairs (a 30 cm hop per step) glides instead of jolting

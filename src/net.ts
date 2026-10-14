@@ -21,6 +21,8 @@ export interface RemoteInput {
   mx: number;
   mz: number;
   yaw: number;
+  /** aim pitch (穿云狙 scope) */
+  pt?: number;
   blk: boolean;
   int?: boolean;
   /** R held down: an ultimate only lasts while its key is held */
@@ -33,7 +35,7 @@ export type NetMessage =
   | { t: 'hello'; cls: CharacterClassId; name?: string }
   | { t: 'cfg'; map: MapId; hostCls?: CharacterClassId; guestCls?: CharacterClassId; seq: number; hostName?: string; seats?: RoomSeat[] }
   | { t: 'room'; seats: RoomSeat[]; map: MapId; started: boolean }
-  | { t: 'in'; mx: number; mz: number; yaw: number; blk: boolean; int?: boolean; ult?: boolean; req: string | null }
+  | { t: 'in'; mx: number; mz: number; pt?: number; yaw: number; blk: boolean; int?: boolean; ult?: boolean; req: string | null }
   | { t: 's'; f: any[]; p: any[]; m?: any; ev: any[]; ts?: number; q?: number; k?: 1 }
   | { t: 're'; e: any }
   | { t: 'pi'; c: number }
@@ -441,6 +443,7 @@ export class NetSession {
         r.mx = m.mx;
         r.mz = m.mz;
         r.yaw = m.yaw;
+      r.pt = (m as any).pt ?? 0;
         r.blk = m.blk;
         r.int = !!m.int;
       r.ult = !!m.ult;

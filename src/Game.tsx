@@ -189,6 +189,8 @@ interface Intent {
   interact?: boolean;
   /** R held: an ultimate only lasts while it's held (undefined = held, for the AI) */
   ultHeld?: boolean;
+  /** where the aim points up/down (camera pitch convention: positive looks down) */
+  aimPitch?: number;
 }
 
 interface AIMemory {
@@ -761,7 +763,8 @@ function GameImpl({
     for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
     const playerIntent: Intent = {
       move: pMove,
-      faceYaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : camYaw,
+      faceYaw: targeting.lockedEnemyId && !(p1.scope ?? 0) ? yawTo(p1.pos, en.pos) : camYaw,
+      aimPitch: controller ? controller.pitch : 0,
       request: round.over ? null : input.peekBuffer(),
       block: actions.special && !round.over && p1.classId !== 'Ranger',
       interact: !!actions.interact,
@@ -780,6 +783,7 @@ function GameImpl({
         it.move.set(r.mx, 0, r.mz);
         if (it.move.lengthSq() > 1) it.move.normalize();
         it.faceYaw = r.yaw;
+        it.aimPitch = r.pt ?? 0;
         it.block = r.blk && !round.over && c.classId !== 'Ranger';
         it.interact = !!r.int;
         it.ultHeld = !!r.ult;
@@ -815,6 +819,20 @@ function GameImpl({
         const r = seat?.ctl === 'remote' && net?.role === 'host' ? net.remoteOf(seat.remote) : null;
         if (r) r.req = null;
       }
+    }
+
+    // 穿云狙: holding the scope (rooted, turning with the aim); a hit, a fall or the time running out lowers it
+    for (let i = 0; i < N; i++) {
+      const c = fighters[i];
+      if (!(c.scope ?? 0)) continue;
+      if (c.actionState !== 'skill_4' || c.hp <= 0 || c.stateTimer >= c.stateDuration - 0.02) {
+        c.scope = 0;
+        continue;
+      }
+      c.scope = (c.scope ?? 0) + dt;
+      c.vel[0] = c.vel[2] = 0;
+      c.rotY = c.targetRotY = intents[i].faceYaw;
+      intents[i].move.set(0, 0, 0);
     }
 
     // every ultimate is channelled: let go of R and it stops (the cooldown is spent either way)
@@ -1022,6 +1040,7 @@ function GameImpl({
       if (!g) continue;
       const c = fighters[i];
       g.position.set(c.pos[0], c.pos[1] + footLift(c, i), c.pos[2]);
+      g.visible = !(i === ME && (c.scope ?? 0) > 0); // looking down your own scope: your body would block it
       g.rotation.y = c.rotY;
       g.updateMatrixWorld(true);
     }
@@ -1057,6 +1076,8 @@ function GameImpl({
       return L[i];
     }
     if (controller) {
+      const f0 = fwdOf(p1.rotY);
+      controller.scopeEye = (p1.scope ?? 0) > 0 && view === p1 ? new THREE.Vector3(p1.pos[0] + f0.x * 0.25, p1.pos[1] + 1.62, p1.pos[2] + f0.z * 0.25) : null;
       if (map.id === 'sea') {
         // the camera stays in the room the player is in: under the cabin ceiling, and never behind a wall
         controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, view.pos[1] + 0.8);
@@ -1252,7 +1273,7 @@ function GameImpl({
       if (mv.lengthSq() > 1) mv.normalize();
       for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
       const req = input.consumeBuffer();
-      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), yaw: targeting.lockedEnemyId ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, ult: !!actions.ultimate, req });
+      n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), pt: +(controller ? controller.pitch : 0).toFixed(3), yaw: targeting.lockedEnemyId && !(p1.scope ?? 0) ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, ult: !!actions.ultimate, req });
 
       // ---- host state -> every fighter (we are slot ME)
       const snaps = n.snaps;
@@ -1587,6 +1608,7 @@ function GameImpl({
         const f = fwdOf(intent.faceYaw).clone();
         switch (req) {
           case 'attack': {
+            if ((c.scope ?? 0) > 0) return fireSnipe(slot, c, intent), true;
             let next: CharacterActionState | null = null;
             if (free || (cur === 'dodge' && c.stateTimer > 0.22)) next = 'attack_1';
             else if (cur === 'attack_1' && phase === 'recovery') next = 'attack_2';
@@ -1600,6 +1622,7 @@ function GameImpl({
             return true;
           }
           case 'special': {
+            if ((c.scope ?? 0) > 0) return endScope(c), true;
             if ((c.cooldowns.special ?? 0) > 0) return report('右键: 撩刀后撤', '冷却中'), false;
             if (!canSkill && !canDodge) return report('右键: 撩刀后撤', `被 [${cur} ${phase}] 占用`), false;
             c.cooldowns.special = 2.5;
@@ -1637,12 +1660,17 @@ function GameImpl({
             return true;
           }
           case 'skill4': {
-            if (!paySkill(3, 'skill4', '4')) return false;
+            // 穿云狙: up with the scope (down again if it's already up). Costs and cooldown come when it fires.
+            if ((c.scope ?? 0) > 0) return endScope(c), true;
+            if ((c.cooldowns.skill4 ?? 0) > 0) return report('4: 穿云狙', `冷却中 ${(c.cooldowns.skill4 ?? 0).toFixed(1)}s`), false;
+            if (c.mp < 30) return report('4: 穿云狙', '法力不足'), false;
+            if (!c.isGrounded || !(free || canSkill)) return report('4: 穿云狙', `被 [${cur} ${phase}] 占用`), false;
             start('skill_4');
-            c.poisonBuff = 3;
-            vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 1.8, '#22c55e', 0.5, 0.12, 0.35);
-            vfx.embers(vC.set(c.pos[0], 0.4, c.pos[2]), 30, '#4ade80', 0.6, 2.5, 0.07);
-            gameAudio.playPowerupChime();
+            c.stateDuration = 6;
+            c.scope = 0.001;
+            c.vel[0] = c.vel[2] = 0;
+            if (slot === ME && controller) controller.pitch = 0.04;
+            gameAudio.playCrispClick();
             return true;
           }
           case 'ultimate': {
@@ -2169,7 +2197,8 @@ function GameImpl({
       if (def.actionState === 'knockdown' && def.isGrounded && !o.unblockable) return;
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
-      let dmg = base * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
+      let dmg = base * (att.classId === 'Berserker' ? 0.85 : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       if ((att.counterTimer ?? 0) > 0) {
         dmg *= 1.5;
         att.counterTimer = 0;
@@ -2671,6 +2700,65 @@ function GameImpl({
     // ======================================================
     // 影刃: twin daggers, a blink, a fan of knives, stealth, a rewind, the thousand shadows
     // ======================================================
+    function endScope(c: CombatantState) {
+      c.scope = 0;
+      c.stateTimer = 0;
+      c.stateDuration = 0.2;
+    }
+    /** 穿云狙 fires: a bolt straight down the aim, first thing it meets (a wall stops it) */
+    function fireSnipe(slot: number, c: CombatantState, intent: Intent) {
+      const aimed = c.scope ?? 0;
+      const yaw = intent.faceYaw;
+      const pitch = intent.aimPitch ?? 0;
+      const dir = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+      const eye = new THREE.Vector3(c.pos[0], c.pos[1] + 1.62, c.pos[2]).addScaledVector(dir, 0.3);
+      // the wall it would hit
+      let far = 75;
+      for (let d = 0.4; d < far; d += 0.35) {
+        if (solidAt(eye.x + dir.x * d, eye.y + dir.y * d, eye.z + dir.z * d)) {
+          far = d;
+          break;
+        }
+      }
+      // the first enemy body along it (a capsule from the knees to the head)
+      let hit: CombatantState | null = null;
+      let hitD = far;
+      for (const f of fighters) {
+        if (f === c || f.hp <= 0 || sideOf(f) === sideOf(c) || (f.burrowT ?? 0) > 0) continue;
+        for (const hgt of [0.5, 1.0, 1.45, 1.75]) {
+          const px = f.pos[0] - eye.x;
+          const py = f.pos[1] + hgt - eye.y;
+          const pz = f.pos[2] - eye.z;
+          const along = px * dir.x + py * dir.y + pz * dir.z;
+          if (along < 0 || along > hitD) continue;
+          const off = Math.hypot(px - dir.x * along, py - dir.y * along, pz - dir.z * along);
+          if (off < (hgt > 1.6 ? 0.28 : 0.42)) {
+            hit = f;
+            hitD = along;
+          }
+        }
+      }
+      const end = eye.clone().addScaledVector(dir, hitD);
+      vfx.tracer(eye, end);
+      vfx.flash(eye, '#fff3c4', 30, 0.12, 6);
+      gameAudio.playThrowHeavy();
+      c.mp = Math.max(0, c.mp - 30);
+      c.cooldowns.skill4 = 16;
+      endScope(c);
+      c.stateDuration = 0.45;
+      if (hit) {
+        const full = aimed >= 1.5;
+        if (hit.dodgeIframeTimer > 0) vfx.damageNumber(vA.set(hit.pos[0], hit.pos[1] + 2.2, hit.pos[2]), '闪', false, '#e5e7eb');
+        else {
+          applyHit(slot, c, hit, full ? 380 * 1.3 : 380, { heavy: true, crit: full, knock: 5, state: 'hitstun', dur: 0.6, ranged: true, shake: 0.4 });
+          vfx.sparkBurst(vB.copy(end), 24, '#fff3c4', 8, 0.07, dir.clone().negate(), 0.8);
+          if (full) vfx.damageNumber(vA.set(hit.pos[0], hit.pos[1] + 2.7, hit.pos[2]), '穿云！', true, '#fde047');
+        }
+      } else {
+        vfx.sparkBurst(vB.copy(end), 10, '#e5e7eb', 4, 0.05, dir.clone().negate(), 0.8);
+        vfx.dustPuff(vB.copy(end), 4, 0.2, 1.2, 0.5);
+      }
+    }
     /** a puff of shadow where 影刃 vanishes or appears */
     function shadowPuff(x: number, y: number, z: number, color: string) {
       vfx.dustPuff(vB.set(x, y + 0.6, z), 14, 0.5, 2.2, 0.8, '#1e1b2e');
@@ -3578,6 +3666,18 @@ function GameImpl({
 
     function runRangerAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
       const ai = aiRefs.current[Math.max(0, slotOf(me))];
+      if ((me.scope ?? 0) > 0) {
+        // 穿云狙 up: hold still, track the target (a little unsteady), squeeze off the shot once it's settled
+        const hx = foe.pos[0] - me.pos[0];
+        const hz = foe.pos[2] - me.pos[2];
+        const wobble = Math.max(0.004, 0.03 - (me.scope ?? 0) * 0.015);
+        out.move.set(0, 0, 0);
+        out.faceYaw = Math.atan2(-hx, -hz) + (Math.random() - 0.5) * wobble;
+        out.aimPitch = -Math.atan2(foe.pos[1] + 1.3 - (me.pos[1] + 1.62), Math.hypot(hx, hz)) + (Math.random() - 0.5) * wobble;
+        out.block = false;
+        out.request = (me.scope ?? 0) > 1.6 || foe.hp <= 0 ? (foe.hp > 0 ? 'attack' : 'special') : null;
+        return;
+      }
       const dx = foe.pos[0] - me.pos[0];
       const dz = foe.pos[2] - me.pos[2];
       const dist = Math.hypot(dx, dz);
@@ -3632,7 +3732,7 @@ function GameImpl({
           ai.planTimer = 0.6;
         } else {
           if (ready('ultimate') && me.mp >= 50 && dist < 10 && r < 0.1) ask('ultimate');
-          else if (ready('skill4') && me.mp >= 10 && r < 0.18) ask('skill4');
+          else if (ready('skill4') && me.mp >= 30 && dist > 8 && r < 0.12 && losClear(me.pos[0], me.pos[1] + 1.6, me.pos[2], foe.pos[0], foe.pos[1] + 1.2, foe.pos[2])) ask('skill4');
           else if (ready('skill2') && me.mp >= 20 && r < 0.3) ask('skill2');
           else if (ready('skill1') && me.mp >= 15 && dist < 10 && r < 0.42) ask('skill1');
           else if (r < 0.85) {

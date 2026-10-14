@@ -647,6 +647,7 @@ export default function App() {
     sandWarn: 0,
     beacon: 0,
     beaconT: 0,
+    scope: 0,
     swarmLeft: 0,
     swarm: 0,
     p1Indoor: false,
@@ -738,6 +739,7 @@ export default function App() {
         sandWarn: mapIdRef.current === 'desert' ? mapRuntime.desert.warn : 0,
         beacon: mapIdRef.current === 'desert' && mapRuntime.desert.beaconSide >= 0 ? (mapRuntime.desert.beaconSide === (p1.side ?? 0) ? 1 : -1) : 0,
         beaconT: mapRuntime.desert.beaconT,
+        scope: p1.scope ?? 0,
         swarmLeft: mapIdRef.current === 'desert' ? mapRuntime.desert.swarmLeft : 0,
         swarm: mapIdRef.current === 'desert' ? mapRuntime.desert.swarm : 0,
         p1Indoor: mapIdRef.current === 'desert' && desertIndoor(p1.pos[0], p1.pos[2], p1.pos[1]),
@@ -1013,6 +1015,22 @@ export default function App() {
           </Canvas>
         </Suspense>
 
+        {/* 穿云狙 scope: dark ring round a clear circle, crosshair, how long it has been steady */}
+        {hudMirror.scope > 0 && (
+          <div className="absolute inset-0 z-30 pointer-events-none">
+            <div className="absolute inset-0" style={{ background: 'radial-gradient(circle at 50% 50%, transparent 0, transparent 34vmin, rgba(0,0,0,0.92) 35vmin)' }} />
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ width: '70vmin', height: '70vmin', border: '2px solid rgba(0,0,0,0.85)', boxShadow: 'inset 0 0 40px rgba(0,0,0,0.6)' }} />
+            <div className="absolute left-1/2 top-1/2 -translate-y-1/2 bg-black/80" style={{ width: '70vmin', height: 1, transform: 'translate(-50%,-50%)' }} />
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 bg-black/80" style={{ height: '70vmin', width: 1, transform: 'translate(-50%,-50%)' }} />
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-red-500/90" style={{ width: 10, height: 10 }} />
+            <div className="absolute left-1/2 -translate-x-1/2 text-center" style={{ top: 'calc(50% + 37vmin)' }}>
+              <div className="w-48 h-1.5 bg-zinc-900 rounded-full overflow-hidden mx-auto">
+                <div className={`h-full ${hudMirror.scope >= 1.5 ? 'bg-amber-300' : 'bg-zinc-300'}`} style={{ width: `${Math.min(1, hudMirror.scope / 1.5) * 100}%` }} />
+              </div>
+              <div className="text-xs font-bold text-zinc-200 mt-1">{hudMirror.scope >= 1.5 ? '瞄满 · 左键开火必定暴击' : '稳住…左键开火'} · 4 / 右键收起</div>
+            </div>
+          </div>
+        )}
         {/* interaction prompt: appears only while you're standing at something F works on */}
         {hudMirror.p1Hint && !isGameMenuOpen && !isMapSelectOpen && (
           <div className="tq-hint absolute left-1/2 -translate-x-1/2 bottom-44 z-30 pointer-events-none">

@@ -225,6 +225,7 @@ export interface CombatantState {
   slip?: number; // 0..1 loss of balance; at 1 you fall
   devoured?: number; // 大漠玉门关 飞虫沙暴: 0 untouched, 0..1 being eaten (dissolving from the head down), 1 gone
   swarmExpo?: number; // seconds out in the open while the swarm is here
+  scope?: number; // 暗器 穿云狙: seconds the scope has been up (0 = down)
   twister?: number; // 大漠玉门关 龙卷风: seconds being carried (0 = not)
   twisterA?: number; // angle round the funnel where it took you
   twisterCd?: number; // just thrown out: can't be taken again yet
