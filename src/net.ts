@@ -129,6 +129,7 @@ export class NetSession {
   private sLastKey = 0;
   /** host: send a keyframe next (someone just joined) */
   needKey = true;
+  private lastInKey = '';
   /** how the data actually travels: 'lan' (same network), 'p2p' (direct over the internet), 'turn' (through a TURN server), 'relay' (public MQTT broker), '' unknown */
   path = '';
   /** guest: snapshots received per second */
@@ -494,10 +495,10 @@ export class NetSession {
       this.clockOff = this.clockOff === null || off < this.clockOff ? off : this.clockOff + (off - this.clockOff) * 0.01;
       if (this.lastArrive) {
         const gap = at - this.lastArrive;
-        this.jitter += (Math.abs(gap - (this.via === 'relay' ? 48 : 33)) - this.jitter) * 0.05;
+        this.jitter += (Math.abs(gap - (this.via === 'relay' ? 100 : 33)) - this.jitter) * 0.05;
       }
       this.lastArrive = at;
-      this.interpDelay = Math.min(220, Math.max(this.via === 'relay' ? 70 : 45, 35 + this.jitter * 2.5));
+      this.interpDelay = Math.min(320, Math.max(this.via === 'relay' ? 140 : 45, (this.via === 'relay' ? 110 : 35) + this.jitter * 2.5));
       this.snaps.push({ at, ts, msg: m });
       if (this.snaps.length > 12) {
         const old = this.snaps.shift()!;
@@ -536,11 +537,15 @@ export class NetSession {
       return;
     }
     if (this.via === 'relay') {
-      // the relay is a shared public broker: controls go out at most ~30 times a second (actions never dropped)
+      // the relay is a shared public broker that throttles busy clients (we measured ~5 messages a second getting
+      // through, with half a second of queueing): controls go out only when they change, at most ~12 a second,
+      // plus a refresh every quarter second; actions are never dropped
       if (m.t === 'in' && !m.req) {
         const now = performance.now();
-        if (now - this.lastIn < 33) return;
+        const key = `${m.mx},${m.mz},${Math.round(m.yaw * 20)},${m.blk},${m.int},${m.ult}`;
+        if (now - this.lastIn < 80 || (key === this.lastInKey && now - this.lastIn < 250)) return;
         this.lastIn = now;
+        this.lastInKey = key;
       }
       this.relaySend({ ...(m as any), _from: this.relayId });
     }
