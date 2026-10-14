@@ -139,6 +139,8 @@ function slimFighter(c: CombatantState) {
   return o;
 }
 const TREE_RUN_T = 1.0;
+/** team fights: seconds of holding F to help a downed teammate up */
+const REVIVE_T = 3;
 /** weather cycle (seconds): clear, clouding over, rain, thunderstorm, easing off */
 const WEATHER = { clear: 18, cloud: 8, rain: 28, storm: 32, ease: 8, dusk: 10, night: 160, dawn: 12 };
 const WEATHER_CYCLE = Object.values(WEATHER).reduce((a, b) => a + b, 0);
@@ -359,6 +361,8 @@ function GameImpl({
   const wasGrounded = useRef([true, true, true, true]);
   /** team fights: who each AI is after, and which fighters each attack has already hit this move */
   const aiTargetRef = useRef([-1, -1, -1, -1]);
+  const lockStepRef = useRef({ n: 0 });
+  const spectRef = useRef<{ v: CombatantState | null }>({ v: null });
   const hitMaskRef = useRef([0, 1, 2, 3].map(() => ({ mask: 0, state: '', t: 0 })));
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
@@ -484,8 +488,12 @@ function GameImpl({
       if (N === 2) return fighters[1 - i];
       if (i === ME && targeting.lockedEnemyId) {
         const t = fighters.find((f) => f.id === targeting.lockedEnemyId && f !== c);
-        if (t && t.hp > 0) return t;
+        if (t && t.hp > 0) {
+          aiTargetRef.current[i] = fighters.indexOf(t);
+          return t;
+        }
       }
+      const aiPick = i !== ME && seatsNow[i]?.ctl !== 'remote';
       let best = -1;
       let bd = 1e9;
       for (let pass = 0; pass < 2 && best < 0; pass++)
@@ -494,6 +502,11 @@ function GameImpl({
           if (j === i || f.hp <= 0 || (pass === 0 && (f.side ?? 0) === (c.side ?? 0))) continue;
           let d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) + Math.abs(f.pos[1] - c.pos[1]) * 1.5;
           if (j === aiTargetRef.current[i]) d -= 3;
+          if (aiPick && pass === 0) {
+            // an AI teammate focuses: the enemy an ally is already on, and whoever is nearly down
+            for (let a = 0; a < N; a++) if (a !== i && fighters[a].hp > 0 && (fighters[a].side ?? 0) === (c.side ?? 0) && aiTargetRef.current[a] === j) d -= 2.5;
+            d -= (1 - f.hp / Math.max(1, f.maxHp)) * 3;
+          }
           if (d < bd) {
             bd = d;
             best = j;
@@ -502,6 +515,31 @@ function GameImpl({
       if (best < 0) best = i === 0 ? 1 : 0;
       aiTargetRef.current[i] = best;
       return fighters[best];
+    }
+    /**
+     * Tab: in a 1v1 lock on / off. In a team fight it steps through the enemies: nearest first, then the next one,
+     * then off again.
+     */
+    function cycleLock() {
+      if (N === 2) {
+        targeting.lockedEnemyId = targeting.lockedEnemyId ? null : fighters[1 - ME].id;
+        return;
+      }
+      const me = fighters[ME];
+      const enemies = fighters.filter((f) => f !== me && f.hp > 0 && (f.side ?? 0) !== (me.side ?? 0));
+      const L = lockStepRef.current;
+      const cur = enemies.findIndex((f) => f.id === targeting.lockedEnemyId);
+      let next: CombatantState | null = null;
+      if (!enemies.length) next = null;
+      else if (cur < 0) {
+        next = enemies.reduce((a, b) => (Math.hypot(b.pos[0] - me.pos[0], b.pos[2] - me.pos[2]) < Math.hypot(a.pos[0] - me.pos[0], a.pos[2] - me.pos[2]) ? b : a));
+        L.n = 1;
+      } else if (L.n < enemies.length) {
+        next = enemies[(cur + 1) % enemies.length];
+        L.n++;
+      }
+      targeting.lockedEnemyId = next ? next.id : null;
+      onRoundEvent?.({ type: 'toast', text: next ? `锁定 ${next.tag || next.name} · Tab 换下一个` : '取消锁定' });
     }
     const foes = fighters.map((_, i) => foeOf(i));
     const p1 = fighters[ME];
@@ -624,7 +662,7 @@ function GameImpl({
     // ---------- targeting ----------
     if (just.lockEnemy) {
       just.lockEnemy = false;
-      targeting.lockedEnemyId = targeting.lockedEnemyId ? null : en.id;
+      cycleLock();
       gameAudio.playCrispClick();
     }
     if (just.clearTarget) {
@@ -672,10 +710,13 @@ function GameImpl({
         r.reqTtl -= dt;
         if (r.reqTtl <= 0) r.req = null;
       } else if (aiOn && !round.over && c.hp > 0) {
-        runAI(c, foes[i], it, dt);
-        if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
-        if (map.id === 'forest') leaveLookout(c, foes[i], it);
-        if (map.id === 'sea') routeOnShip(c, foes[i], it);
+        if (!(N > 2 && aiGoRevive(i, c, it))) {
+          runAI(c, foes[i], it, dt);
+          if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
+          if (map.id === 'forest') leaveLookout(c, foes[i], it);
+          if (map.id === 'sea') routeOnShip(c, foes[i], it);
+          if (N > 2) teamSpacing(i, c, foes[i], it);
+        }
       } else if (!aiOn) {
         it.faceYaw = c.targetRotY;
       }
@@ -712,6 +753,7 @@ function GameImpl({
       if (i === ME) onRoundEvent?.({ type: 'toast', text: '松开了 R，大招中断 · 大招要一直按住' });
     }
 
+    if (N > 2) updateRevive(intents);
     for (let i = 0; i < N; i++) applyMovement(fighters[i], intents[i]);
 
     // ================= COMBAT =================
@@ -893,7 +935,17 @@ function GameImpl({
       g.updateMatrixWorld(true);
     }
 
-    playerVec.set(p1.pos[0], p1.pos[1], p1.pos[2]);
+    // team fight, you're down and a teammate is still up: the camera follows them until the round ends
+    let view = p1;
+    if (N > 2 && p1.hp <= 0 && !round.over) {
+      const mate = fighters.find((f) => f !== p1 && f.hp > 0 && (f.side ?? 0) === (p1.side ?? 0));
+      if (mate) view = mate;
+    }
+    if (view !== spectRef.current.v) {
+      spectRef.current.v = view;
+      if (view !== p1 && controller) controller.yaw = view.rotY;
+    }
+    playerVec.set(view.pos[0], view.pos[1], view.pos[2]);
 
     /**
      * On a slope the uphill foot would sink into the ground: lift the model to the highest ground under
@@ -916,11 +968,11 @@ function GameImpl({
     if (controller) {
       if (map.id === 'sea') {
         // the camera stays in the room the player is in: under the cabin ceiling, and never behind a wall
-        controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, p1.pos[1] + 0.8);
-        controller.ceilAt = (x: number, z: number) => shipCeilAt(x, z, p1.pos[1] + 0.5);
+        controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, view.pos[1] + 0.8);
+        controller.ceilAt = (x: number, z: number) => shipCeilAt(x, z, view.pos[1] + 0.5);
         controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18, true); // the camera glides over steps and rails
       } else {
-        controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), p1.pos[1] - 2.5) : null;
+        controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), view.pos[1] - 2.5) : null;
         controller.ceilAt = null;
         controller.solidAt = null;
       }
@@ -929,9 +981,9 @@ function GameImpl({
 
     if (keyLightRef.current) {
       // the shadow frustum follows the player, height included (the glacier summit is 19 m up)
-      const ly = map.terrain ? p1.pos[1] : 0;
-      keyLightRef.current.position.set(p1.pos[0] + 8, ly + 14, p1.pos[2] + 6);
-      keyLightRef.current.target.position.set(p1.pos[0], ly, p1.pos[2]);
+      const ly = map.terrain ? view.pos[1] : 0;
+      keyLightRef.current.position.set(view.pos[0] + 8, ly + 14, view.pos[2] + 6);
+      keyLightRef.current.target.position.set(view.pos[0], ly, view.pos[2]);
       keyLightRef.current.target.updateMatrixWorld();
     }
     if (map.id === 'forest') {
@@ -1082,7 +1134,7 @@ function GameImpl({
       // ---- controls -> host
       if (just.lockEnemy) {
         just.lockEnemy = false;
-        targeting.lockedEnemyId = targeting.lockedEnemyId ? null : en.id;
+        cycleLock();
       }
       if (just.clearTarget) {
         just.clearTarget = false;
@@ -3461,6 +3513,10 @@ function GameImpl({
         c.candle = 0;
         c.shade = false;
         c.slip = 0;
+        c.revived = 0;
+        c.reviveT = 0;
+        c.reviveHint = '';
+        c.interactHint = '';
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
       }
       for (const pr of projRef.current) vfx.releaseProjectile(pr.obj);
@@ -3745,6 +3801,123 @@ function GameImpl({
       return pool[0];
     }
 
+    /** a downed teammate that can still be helped up this round */
+    function revivable(c: CombatantState) {
+      return c.hp <= 0 && c.stateDuration === 99 && (c.revived ?? 0) < 1 && !c.swimming;
+    }
+    /**
+     * Team fights: stand over a downed teammate and hold F for a few seconds to help them up with 30% HP (once
+     * each per round). Getting hit, moving off or starting an attack stops it, and the progress drains away.
+     */
+    function updateRevive(its: Intent[]) {
+      for (const c of fighters) c.reviveHint = '';
+      if (!aiOn || round.over) return;
+      for (let d = 0; d < N; d++) {
+        const down = fighters[d];
+        if (!revivable(down)) {
+          down.reviveT = 0;
+          continue;
+        }
+        let helper = -1;
+        for (let i = 0; i < N; i++) {
+          const c = fighters[i];
+          if (i === d || c.hp <= 0 || (c.side ?? 0) !== (down.side ?? 0) || c.ballista !== undefined) continue;
+          if (Math.hypot(c.pos[0] - down.pos[0], c.pos[2] - down.pos[2]) > 1.9 || Math.abs(c.pos[1] - down.pos[1]) > 1.2) continue;
+          const st = c.actionState;
+          if (!c.isGrounded || !(st === 'idle' || st === 'run' || st === 'block')) continue;
+          c.reviveHint = `按住 F 扶起${down.tag || '队友'}`;
+          if (its[i].interact && !its[i].request && helper < 0) helper = i;
+        }
+        if (helper < 0) {
+          down.reviveT = Math.max(0, (down.reviveT ?? 0) - dt * 0.6);
+          continue;
+        }
+        const h = fighters[helper];
+        its[helper].move.set(0, 0, 0);
+        its[helper].block = false;
+        its[helper].faceYaw = yawTo(h.pos, down.pos);
+        down.reviveT = (down.reviveT ?? 0) + dt;
+        h.reviveHint = `按住 F 扶起中 ${Math.min(99, Math.round((down.reviveT / REVIVE_T) * 100))}%`;
+        if (Math.random() < dt * 10) vfx.sparkBurst(vB.set(down.pos[0], down.pos[1] + 0.4, down.pos[2]), 2, '#fde68a', 0.9, 0.05, UP, 0.8);
+        if (down.reviveT < REVIVE_T) continue;
+        down.reviveT = 0;
+        down.revived = (down.revived ?? 0) + 1;
+        down.hp = Math.round(down.maxHp * 0.3);
+        down.mp = Math.max(down.mp, down.maxMp * 0.3);
+        down.actionState = 'knockdown';
+        down.stateTimer = 0;
+        down.stateDuration = 0.5;
+        down.vel = [0, 0, 0];
+        down.dodgeIframeTimer = 1.6;
+        down.celebrate = false;
+        vfx.ring(vB.set(down.pos[0], fy(down.pos[0], down.pos[2], down.pos[1]) + 0.05, down.pos[2]), 2.2, '#fde68a', 0.6, 0.12, 0.5);
+        vfx.pillarAt(0.05, '#fde68a', d);
+        gameAudio.playPowerupChime();
+        onRoundEvent?.({ type: 'toast', text: d === ME ? `${h.tag || '队友'}把你扶起来了` : helper === ME ? `你扶起了${down.tag || '队友'}` : `${h.tag || '有人'}扶起了${down.tag || '队友'}` });
+      }
+    }
+    /** AI: go help a downed teammate up when no enemy is right on top of you */
+    function aiGoRevive(i: number, c: CombatantState, it: Intent) {
+      let best: CombatantState | null = null;
+      let bd = 16;
+      for (const f of fighters)
+        if (f !== c && (f.side ?? 0) === (c.side ?? 0) && revivable(f)) {
+          const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) + Math.abs(f.pos[1] - c.pos[1]) * 2;
+          if (d < bd) {
+            bd = d;
+            best = f;
+          }
+        }
+      if (!best) return false;
+      // an enemy close by and swinging: deal with them first
+      for (const f of fighters)
+        if ((f.side ?? 0) !== (c.side ?? 0) && f.hp > 0 && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < (bd < 2.5 ? 2.2 : 5)) return false;
+      const dist = Math.hypot(best.pos[0] - c.pos[0], best.pos[2] - c.pos[2]);
+      it.faceYaw = yawTo(c.pos, best.pos);
+      it.request = null;
+      it.block = false;
+      if (dist < 1.4 && Math.abs(best.pos[1] - c.pos[1]) < 1.2) {
+        it.move.set(0, 0, 0);
+        it.interact = true;
+        return true;
+      }
+      it.move.set(best.pos[0] - c.pos[0], 0, best.pos[2] - c.pos[2]).normalize();
+      if (map.id === 'sea') {
+        const st = shipSteer(shipNavRefs.current[i], { x: c.pos[0], y: c.pos[1], z: c.pos[2], grounded: c.isGrounded }, best.pos[0], best.pos[1], best.pos[2], dt);
+        if (st) it.move.set(st.x, 0, st.z);
+      }
+      return true;
+    }
+    /**
+     * AI in a team fight: don't stand in your teammate's pocket. Near the same enemy, drift round to the other side
+     * of them, so the two of you come at them from two directions instead of queueing up.
+     */
+    function teamSpacing(i: number, c: CombatantState, foe: CombatantState, it: Intent) {
+      const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      if (fd > 6 || Math.abs(foe.pos[1] - c.pos[1]) > 1.5) return;
+      for (let a = 0; a < N; a++) {
+        const al = fighters[a];
+        if (a === i || al.hp <= 0 || (al.side ?? 0) !== (c.side ?? 0)) continue;
+        const dx = c.pos[0] - al.pos[0];
+        const dz = c.pos[2] - al.pos[2];
+        const d = Math.hypot(dx, dz);
+        if (d > 2.4 || Math.abs(al.pos[1] - c.pos[1]) > 1.2) continue;
+        // sideways round the enemy, away from the ally
+        const tx = foe.pos[0] - c.pos[0];
+        const tz = foe.pos[2] - c.pos[2];
+        const L = Math.hypot(tx, tz) || 1;
+        let sx = -tz / L;
+        let sz = tx / L;
+        if (sx * dx + sz * dz < 0) {
+          sx = -sx;
+          sz = -sz;
+        }
+        const k = (1 - d / 2.4) * 0.9;
+        it.move.x += sx * k + (d < 0.01 ? (i % 2 ? 0.5 : -0.5) : (dx / d) * k * 0.4);
+        it.move.z += sz * k + (d < 0.01 ? 0 : (dz / d) * k * 0.4);
+        if (it.move.lengthSq() > 1) it.move.normalize();
+      }
+    }
     function koCheck(defSlot: number, color: string) {
       const def = fighters[defSlot];
       if (!def || def.hp > 0 || !aiOn || round.over || def.stateDuration === 99) return;
@@ -3762,7 +3935,7 @@ function GameImpl({
       // the round ends when one side has nobody left standing
       const standing = [0, 1].map((sd) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0));
       if (standing[0] && standing[1]) {
-        if (N > 2) onRoundEvent?.({ type: 'toast', text: defSlot === ME ? '你倒下了 · 等队友' : `${def.tag || '有人'}倒下了` });
+        if (N > 2) onRoundEvent?.({ type: 'toast', text: defSlot === ME ? ((def.revived ?? 0) < 1 ? '你倒下了 · 队友站到你身边按住 F 能把你扶起来' : '你倒下了 · 观战队友') : `${def.tag || '有人'}倒下了` });
         return;
       }
       round.over = true;
@@ -3910,6 +4083,7 @@ function GameImpl({
       }
       if (aiOn && !round.over && c.hp > 0) {
         c.hp = 0;
+        c.revived = 9; // gone over the edge: nobody can help you up from that
         const where = map.id === 'summit' ? '坠入云海' : '坠入岩浆';
         onRoundEvent?.({ type: 'toast', text: i === ME ? `你${where}！` : `${fighters[i].tag || '对手'}${where}！` });
         koCheck(i, '#ff6a1a');

@@ -501,7 +501,7 @@ export default function App() {
       el.style.top = t.y + 'px';
     });
   }, []);
-  const [roster, setRoster] = useState<{ name: string; side: number; hp: number; maxHp: number; cls: CharacterClassId; target: boolean }[]>([]);
+  const [roster, setRoster] = useState<{ name: string; side: number; hp: number; maxHp: number; cls: CharacterClassId; target: boolean; revive: number; canRevive: boolean }[]>([]);
   const handleBloodRageFlash = useCallback(() => {
     setBloodRageFlash(true);
     setTimeout(() => setBloodRageFlash(false), 380);
@@ -675,7 +675,7 @@ export default function App() {
       const p1 = p1RefState.current;
       const dummy = dummyRefState.current;
       const all = fightersRef.current;
-      if (all.length > 2) setRoster(all.map((c) => ({ name: c.tag || c.name, side: c.side ?? 0, hp: Math.max(0, c.hp), maxHp: c.maxHp, cls: c.classId, target: c === dummy })));
+      if (all.length > 2) setRoster(all.map((c) => ({ name: c.tag || c.name, side: c.side ?? 0, hp: Math.max(0, c.hp), maxHp: c.maxHp, cls: c.classId, target: c === dummy, revive: (c.reviveT ?? 0) / 3, canRevive: c.hp <= 0 && (c.revived ?? 0) < 1 })));
       else setRoster((r) => (r.length ? [] : r));
       const zenHas = (owner: typeof p1, c: typeof p1) => !!owner.zenField && owner.zenField.t > 0 && Math.hypot(c.pos[0] - owner.zenField.x, c.pos[2] - owner.zenField.z) < 4.5;
       setHudMirror({
@@ -709,7 +709,7 @@ export default function App() {
         p1Grip: mapIdRef.current === 'forest' ? p1.grip ?? 1 : 1,
         fps: (globalThis as any).__TQ_PERF?.fps ?? 0,
         ping: Math.round(netRef.current?.pingMs ?? 0),
-        p1Hint: mapIdRef.current === 'forest' ? p1.interactHint ?? '' : '',
+        p1Hint: p1.reviveHint || p1.interactHint || '',
         p1Candle: mapIdRef.current === 'forest' ? p1.candle ?? 0 : 0,
         p1Shade: !!p1.shade,
         night: mapIdRef.current === 'forest' ? mapRuntime.night : 0,
@@ -993,6 +993,14 @@ export default function App() {
             {/^按住/.test(hudMirror.p1Hint) && <em>按住</em>}
           </div>
         )}
+        {teamFight && !roundBanner && hudMirror.p1Hp <= 0 && roster.some((r, k) => k !== lineup.me && r.hp > 0 && r.side === (lineup.seats[lineup.me]?.side ?? 0)) && (
+          <div className="absolute left-1/2 -translate-x-1/2 top-24 z-30 pointer-events-none bg-black/70 border border-zinc-600/70 rounded-lg px-4 py-1.5 text-center">
+            <div className="text-sm font-black text-zinc-100 tracking-widest">观战队友</div>
+            <div className="text-[11px] text-zinc-400">
+              {roster[lineup.me]?.canRevive ? (roster[lineup.me].revive > 0 ? `队友正在扶你 ${Math.round(Math.min(1, roster[lineup.me].revive) * 100)}%` : '队友站到你身边按住 F 能把你扶起来') : '这回合已经被扶起过一次'}
+            </div>
+          </div>
+        )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {!dummyScreenPos.visible && !dummyScreenPos.hidden && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
           <div
@@ -1029,12 +1037,25 @@ export default function App() {
                   <span>{r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'} · {r.name}</span>
                   {r.target && r.side !== (lineup.seats[lineup.me]?.side ?? 0) && <span className="text-yellow-300 text-[10px]">◎</span>}
                 </div>
-                <div className="w-28 h-2 bg-zinc-950 rounded-full border border-zinc-500/70 overflow-hidden">
-                  <div
-                    className={`h-full ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`}
-                    style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }}
-                  />
-                </div>
+                {r.hp <= 0 ? (
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] font-bold text-zinc-300 bg-black/70 px-1.5 rounded">
+                      {r.canRevive && r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '倒下 · 站过去按住 F 扶起' : '倒下'}
+                    </span>
+                    {r.revive > 0 && (
+                      <div className="w-28 h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-amber-300/60">
+                        <div className="h-full bg-amber-300" style={{ width: `${Math.min(1, r.revive) * 100}%` }} />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-28 h-2 bg-zinc-950 rounded-full border border-zinc-500/70 overflow-hidden">
+                    <div
+                      className={`h-full ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`}
+                      style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }}
+                    />
+                  </div>
+                )}
               </div>
             )
           )}
