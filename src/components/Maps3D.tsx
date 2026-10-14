@@ -6,6 +6,7 @@ import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
+import { DesertMap } from './maps/Desert';
 import { useSettings } from '../settings';
 import { makeOcean, seaSwell, rogueState, WaveCrash, CrestSpray, StormSky } from './maps/Ocean';
 import { ShipHull, ShipStructure, Ballista, Bolts, SternCastle, RailLanterns, ShipLantern, JunkSail, Mast, RopeCoil, HatchGrate, DistantJunk, deckTexture, crateTexture, hullW, sheer } from './maps/Ship';
@@ -1156,6 +1157,7 @@ export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'rooftop') return <ChanganMap />;
   if (mapId === 'summit') return <SummitMap />;
   if (mapId === 'forest') return <ForestMap />;
+  if (mapId === 'desert') return <DesertMap />;
   return <TempleMap />;
 }
 

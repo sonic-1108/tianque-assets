@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert';
 
 export interface Circle {
   x: number;
@@ -650,7 +650,169 @@ MAPS.forest = {
   pillars: forestPillars(),
 };
 
-export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'forest', 'rooftop', 'summit'];
+
+// ----------------------------------------------------------------------
+// 大漠玉门关 (50Q): a rammed-earth frontier fort in the middle of the dunes.
+//   The fort is a square of walls 6 m high and 4 m thick with a walkway on top. Gates in the
+//   north and south walls (a gate tower each side of the gap), a collapsed stretch in the west
+//   wall you can hop over, and four ramps (马道) up the inside of the east and west walls.
+//   In the middle stands the beacon tower (烽火台), reached by two ramps. Out in the dunes,
+//   a flat-topped yardang mesa east and west, each with a sand ramp up its fort side.
+//   One team camps south of the fort, the other north.
+// Everything is one height field (desertHeight); the walls' faces are sheer: you can only get up
+// by the ramps (or hop the low bits), and walking never takes you over an edge.
+// ----------------------------------------------------------------------
+export const DESERT = {
+  radius: g1(58),
+  /** fort: outer half size, wall thickness, walkway height, gate half width, gate tower out to, parapet */
+  fort: { half: 20, wall: 4, h: 6, gate: 2.6, tower: 6.4, towerH: 9.5, parapet: 1.45, corner: 7.2 },
+  /** the collapsed stretch of the west wall: rubble you can hop onto */
+  breach: { z: 3.2, h: 1.0 },
+  /** ramps up the inside of the east and west walls: from |z| = z0 (ground) to z1 (walkway), inner edge x */
+  ramp: { z0: 3, z1: 16, inner: 12.6 },
+  /** beacon tower in the middle: platform half size and height, ramps north and south */
+  beacon: { half: 3, h: 3.2, rampTo: 10.5, rampHalfW: 1.35 },
+  /** courtyard wells (F: a drink heals 10% of lost HP) */
+  wells: [
+    [-8.5, 0],
+    [8.5, 0],
+  ] as [number, number][],
+  /** yardang mesas: centre x, half extents, top height; a ramp on the fort side */
+  mesas: [
+    { x: 50, hx: 6.5, hz: 9, h: 4.6, rampFrom: 37, rampHalfW: 3 },
+    { x: -50, hx: 6.5, hz: 9, h: 4.6, rampFrom: -37, rampHalfW: 3 },
+  ],
+  spawnS: [0, 50] as [number, number],
+  spawnN: [0, -50] as [number, number],
+  /** sandstorm cycle (seconds): calm, warning, storm, easing off */
+  storm: { calm: 50, warn: 7, storm: 30, ease: 7 },
+  /** beacon: seconds of holding F to light (or put out) it, how long it burns, then cooldown */
+  beaconHold: 2.5,
+  beaconBurn: 25,
+  beaconCool: 15,
+  beaconDmg: 1.12,
+};
+
+/** rolling dunes; flat packed earth round the fort and in the two camps */
+export function desertDunes(x: number, z: number) {
+  const m = Math.max(Math.abs(x), Math.abs(z));
+  const fortFade = Math.min(1, Math.max(0, (m - 25) / 10));
+  const campS = Math.hypot(x - DESERT.spawnS[0], z - DESERT.spawnS[1]);
+  const campN = Math.hypot(x - DESERT.spawnN[0], z - DESERT.spawnN[1]);
+  const campFade = Math.min(1, Math.max(0, (Math.min(campS, campN) - 9) / 8));
+  const d =
+    Math.sin(x * 0.21 + Math.sin(z * 0.09) * 1.7) * 0.75 +
+    Math.sin(z * 0.17 - x * 0.07 + 1.3) * 0.55 +
+    Math.sin((x + z) * 0.37 + 0.6) * 0.18 +
+    0.9;
+  // dunes swell into big sand banks at the edge of the battlefield
+  const edge = Math.max(0, Math.hypot(x, z) - DESERT.radius + 8) * 0.35;
+  return Math.max(0, d) * fortFade * campFade + edge;
+}
+
+/** Walkable height of 大漠玉门关 at (x, z) */
+export function desertHeight(x: number, z: number) {
+  const F = DESERT.fort;
+  const ax = Math.abs(x);
+  const az = Math.abs(z);
+  const m = Math.max(ax, az);
+  let h = desertDunes(x, z);
+  for (const M of DESERT.mesas) {
+    const dx = Math.abs(x - M.x);
+    if (dx < M.hx && az < M.hz) h = Math.max(h, M.h);
+    // ramp of drifted sand up the fort side
+    const toward = Math.sign(M.rampFrom - M.x);
+    const edgeX = M.x + toward * M.hx;
+    const t = (x - M.rampFrom) / (edgeX - M.rampFrom);
+    if (t > 0 && t <= 1 && az < M.rampHalfW) h = Math.max(h, M.h * t);
+  }
+  if (m >= F.half - F.wall && m <= F.half) {
+    // the wall ring
+    if (az >= F.half - F.wall && ax < F.gate) return 0; // gate passage
+    if (az >= F.half - F.wall && ax < F.tower) return F.towerH; // gate towers
+    if (x < 0 && ax >= F.half - F.wall && az < DESERT.breach.z) return Math.max(h, DESERT.breach.h * (0.75 + 0.25 * Math.cos(z * 1.3))); // collapsed stretch
+    const corner = ax >= F.half - F.wall && az >= F.half - F.wall;
+    const top = corner ? F.corner : F.h;
+    return m > F.half - 0.6 ? top + F.parapet : top;
+  }
+  if (m < F.half - F.wall) {
+    const B = DESERT.beacon;
+    if (ax < B.half && az < B.half) return B.h;
+    if (ax < B.rampHalfW && az >= B.half && az < B.rampTo) return Math.max(0, (B.h * (B.rampTo - az)) / (B.rampTo - B.half));
+    const R = DESERT.ramp;
+    if (ax > R.inner && az > R.z0) return Math.min(F.h, (F.h * (az - R.z0)) / (R.z1 - R.z0));
+    return 0;
+  }
+  return h;
+}
+
+/** inside the fort's walls, out of the wind */
+export function desertSheltered(x: number, z: number, y: number) {
+  const F = DESERT.fort;
+  return Math.max(Math.abs(x), Math.abs(z)) < F.half - F.wall && y < F.h - 1.5;
+}
+
+function desertPillars(): Circle[] {
+  const out: Circle[] = [];
+  const rand = (() => {
+    let s = 7;
+    return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  })();
+  // yardang rocks: wind-carved ridges standing out of the sand (solid)
+  const rocks: [number, number, number][] = [
+    [30, 30, 2.2], [-31, 28, 2.6], [33, -29, 2.4], [-29, -32, 2.1], [62, 22, 2.8], [-60, -24, 2.6], [58, -30, 2.0], [-62, 26, 2.4],
+    [18, 40, 1.4], [-20, -40, 1.4], [-16, 38, 1.2], [21, -37, 1.3],
+  ];
+  for (const [x, z, r] of rocks) out.push({ x, z, r });
+  // dead poplars (胡杨)
+  for (const [x, z] of [[26, 14], [-26, -12], [-27, 15], [27, -16], [12, 58], [-12, -58], [40, 52], [-42, -50]] as [number, number][]) out.push({ x, z, r: 0.45 });
+  // the camps: tents and carts
+  for (const sz of [1, -1]) {
+    const cz = sz > 0 ? DESERT.spawnS[1] : DESERT.spawnN[1];
+    out.push({ x: -8, z: cz + sz * 3, r: 1.9 }, { x: 8, z: cz + sz * 3, r: 1.9 }, { x: -6, z: cz - sz * 5, r: 0.9, h: 1.1 }, { x: 6.5, z: cz - sz * 4.5, r: 0.9, h: 1.1 });
+  }
+  // crates and wells in the courtyard (crates you can hop onto)
+  for (const [x, z] of [[-6, 9], [6.5, -9.5], [-11, -7], [11, 7.5]] as [number, number][]) out.push({ x, z, r: 0.75, h: 1.0 });
+  for (const [x, z] of DESERT.wells) out.push({ x, z, r: 0.85, h: 0.85 });
+  void rand;
+  return out;
+}
+
+MAPS.desert = {
+  id: 'desert',
+  name: '大漠玉门关',
+  subtitle: '春风不度玉门关。黄沙里的夯土关城，两队各守一边营地。50Q 大地图',
+  icon: '🏜️',
+  sizeClass: '50Q',
+  mechanics: [
+    '50Q 大地图：两队营地在关城南北两头，关城在正中',
+    '关城有南北两道城门；西墙塌了一段，跳一下就能翻过去；东西两面城墙内侧各有两条马道上城头',
+    '城头一圈走道连着四角的角楼，居高临下；外侧有垛口挡着，被打出城墙会摔进沙里',
+    '正中是烽火台：站上台顶按住 F 点燃烽火，己方 25 秒内伤害 +12%，沙暴里也能看清每个敌人；敌人站上去按住 F 能把火踩灭',
+    '城里东西各一口井：F 喝水，回复已损失气血 10%',
+    '沙暴：大约一分半一次，起风前天边先发黄。沙暴里看不清远处的人，城外和城头会被风吹着走，躲进城里就没事',
+    '东西两头各有一座雅丹土台，顺着沙坡爬上去；风蚀的土柱和枯胡杨挡路也挡暗器',
+  ],
+  homeClass: 'Shadowblade',
+  homeClassName: '影刃',
+  homeBonus: '伤害 +10%',
+  available: true,
+  terrain: true,
+  radius: DESERT.radius,
+  spawnPlayer: DESERT.spawnS,
+  spawnEnemy: DESERT.spawnN,
+  background: '#e7c79a',
+  fog: [60, 260],
+  hemi: ['#ffe2b8', '#7a5a3a', 0.85],
+  keyColor: '#ffd29a',
+  keyIntensity: 2.3,
+  exposure: 0.9,
+  bloom: 0.75,
+  cardGradient: 'from-amber-700/70 via-orange-900/70 to-zinc-950/90',
+  pillars: desertPillars(),
+};
+
+export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {
@@ -698,6 +860,10 @@ export const mapRuntime = {
   viewZ: 0,
   /** what the local player carries: 0 nothing, 1 a candle, 2 only the shade */
   viewCarry: 0,
+  /** 大漠玉门关: sandstorm 0..1, warning glow on the horizon 0..1, wind along x (+1 / -1); the beacon: lit by side (-1 none), seconds left, cooldown */
+  /** the local player's side (scenery colours the beacon flag ours / theirs) */
+  viewSide: 0,
+  desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0 },
 };
 
 // ----------------------------------------------------------------------
@@ -963,6 +1129,7 @@ export function terrainHeight(id: MapId, x: number, z: number) {
   if (id === 'glacier') return glacierHeight(x, z);
   if (id === 'forest') return forestHeight(x, z);
   if (id === 'rooftop') return roofHeight(x, z);
+  if (id === 'desert') return desertHeight(x, z);
   return 0;
 }
 /** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */
@@ -972,11 +1139,13 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
     const e = 0.25;
     return [(forestHeight(x + e, z) - forestHeight(x - e, z)) / (2 * e), (forestHeight(x, z + e) - forestHeight(x, z - e)) / (2 * e)];
   }
-  if (id !== 'rooftop') return [0, 0];
+  if (id !== 'rooftop' && id !== 'desert') return [0, 0];
   const e = 0.25;
-  const h0 = roofHeight(x, z);
+  const hf = id === 'desert' ? desertHeight : roofHeight;
+  const h0 = hf(x, z);
   const s = (dx: number, dz: number) => {
-    const v = roofHeight(x + dx, z + dz);
+    const v = hf(x + dx, z + dz);
+    if (id === 'desert' && Math.abs(v - h0) > 0.5) return h0; // a wall face or ledge, not a slope
     return v < h0 - 1.2 ? h0 : v;
   };
   return [(s(e, 0) - s(-e, 0)) / (2 * e), (s(0, e) - s(0, -e)) / (2 * e)];

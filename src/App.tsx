@@ -237,7 +237,7 @@ export default function App() {
     else gameAudio.startMusic();
   }, [isMusicMuted]);
   useEffect(() => {
-    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' || mapId === 'forest' ? mapId : 'temple');
+    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' || mapId === 'forest' ? mapId : mapId === 'desert' ? 'glacier' : 'temple');
   }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
@@ -629,6 +629,10 @@ export default function App() {
     p1Ladder: false,
     p1Grip: 1,
     p1Hint: '',
+    sand: 0,
+    sandWarn: 0,
+    beacon: 0,
+    beaconT: 0,
     fps: 0,
     ping: 0,
     p1Candle: 0,
@@ -713,6 +717,10 @@ export default function App() {
         p1Candle: mapIdRef.current === 'forest' ? p1.candle ?? 0 : 0,
         p1Shade: !!p1.shade,
         night: mapIdRef.current === 'forest' ? mapRuntime.night : 0,
+        sand: mapIdRef.current === 'desert' ? mapRuntime.desert.sand : 0,
+        sandWarn: mapIdRef.current === 'desert' ? mapRuntime.desert.warn : 0,
+        beacon: mapIdRef.current === 'desert' && mapRuntime.desert.beaconSide >= 0 ? (mapRuntime.desert.beaconSide === (p1.side ?? 0) ? 1 : -1) : 0,
+        beaconT: mapRuntime.desert.beaconT,
         foeHidden: !!dummyScreenPosRef.current.hidden,
         p1Slip: mapIdRef.current === 'forest' ? p1.slip ?? 0 : 0,
         rain: mapIdRef.current === 'forest' ? mapRuntime.rain : 0,
@@ -1130,6 +1138,9 @@ export default function App() {
           if (hudMirror.p1Candle) meChips.push({ text: (hudMirror.p1Candle === 2 ? (hudMirror.p1Shade ? '蜡烛 · 灯罩护火' : '蜡烛 已点燃') : '蜡烛 已熄灭') + ' · F 放下', tone: hudMirror.p1Candle === 2 ? 'gold' : 'slate' });
           else if (hudMirror.p1Shade) meChips.push({ text: '灯罩 · F 放下', tone: 'gold' });
           if (hudMirror.night > 0.55 && hudMirror.foeHidden) meChips.push({ text: '天黑 看不见对手', tone: 'slate' });
+          if (hudMirror.sand > 0.55) meChips.push({ text: '沙暴 · 远处看不清 · 进城躲风', tone: 'amber', pulse: true });
+          else if (hudMirror.sandWarn > 0 && hudMirror.sandWarn < 1) meChips.push({ text: '沙暴将至', tone: 'amber' });
+          if (hudMirror.beacon) meChips.push({ text: `${hudMirror.beacon > 0 ? '我方' : '敌方'}烽火 ${Math.ceil(hudMirror.beaconT)}s${hudMirror.beacon > 0 ? ' · 伤害 +12%' : ''}`, tone: hudMirror.beacon > 0 ? 'gold' : 'red', pulse: hudMirror.beacon < 0 });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',

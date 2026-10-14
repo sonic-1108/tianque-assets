@@ -1,4 +1,5 @@
 import { shipSteer, newNavState, shipGraph } from './shipNav';
+import { desertSteer, newDesertNav } from './desertNav';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -15,7 +16,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, DESERT, desertSheltered } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -321,6 +322,7 @@ function GameImpl({
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   const forestRef = useRef({ timer: 14 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
+  const bgSand = useMemo(() => new THREE.Color('#c08a4e'), []);
   const bgNight = useMemo(() => new THREE.Color('#05070c'), []);
   /** weather clock and lightning timer (host / offline) */
   const weatherRef = useRef({ t: 12, phase: '', strike: 6, warn: 0 });
@@ -330,6 +332,9 @@ function GameImpl({
   const newShipAi = () => ({ goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
   const shipNavRefs = useRef([0, 1, 2, 3].map(() => newNavState()));
   const shipAiRefs = useRef([0, 1, 2, 3].map(newShipAi));
+  const desertNavRefs = useRef([0, 1, 2, 3].map(newDesertNav));
+  /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
+  const desertAiRefs = useRef([0, 1, 2, 3].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0, 0, 0]);
@@ -715,6 +720,7 @@ function GameImpl({
           if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
           if (map.id === 'forest') leaveLookout(c, foes[i], it);
           if (map.id === 'sea') routeOnShip(c, foes[i], it);
+          if (map.id === 'desert') routeDesert(i, c, foes[i], it);
           if (N > 2) teamSpacing(i, c, foes[i], it);
         }
       } else if (!aiOn) {
@@ -839,6 +845,7 @@ function GameImpl({
       const pz0 = c.pos[2];
       c.pos[0] += c.vel[0] * cdt;
       c.pos[2] += c.vel[2] * cdt;
+      if (map.id === 'desert') desertWind(c);
       ledgeGuard(c, px0, pz0);
       mountainWall(i, c, px0, pz0);
       if (map.id === 'sea') shipWall(i, c, px0, pz0);
@@ -855,6 +862,7 @@ function GameImpl({
         updateWater(c);
         updateItems(i, c, intents[i]);
       }
+      if (map.id === 'desert') updateDesertItems(i, c, intents[i]);
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
@@ -1008,6 +1016,16 @@ function GameImpl({
         (scene.fog as THREE.Fog).far = THREE.MathUtils.lerp(map.fog[1] * (1 - 0.5 * rain), 45, dark); // the dark comes from the lights; heavy fog would swallow candle-lit ground too
       }
     }
+    mapRuntime.viewSide = sideOf(p1);
+    if (map.id === 'desert') {
+      const sd = mapRuntime.desert.sand;
+      if (keyLightRef.current) keyLightRef.current.intensity = map.keyIntensity * (1 - 0.6 * sd);
+      if (hemiRef.current) hemiRef.current.intensity = map.hemi[2] * (1 + 0.15 * sd);
+      if (scene.fog) {
+        (scene.fog as THREE.Fog).near = THREE.MathUtils.lerp(map.fog[0], 3, sd);
+        (scene.fog as THREE.Fog).far = THREE.MathUtils.lerp(map.fog[1], 42, sd);
+      }
+    }
     if (rimLightRef.current) {
       rimLightRef.current.position.set(p1.pos[0] + basis.forward.x * 8, 5, p1.pos[2] + basis.forward.z * 8);
       rimLightRef.current.target.position.set(p1.pos[0], 1, p1.pos[2]);
@@ -1050,7 +1068,7 @@ function GameImpl({
     // night: they show only if they carry a flame, stand in your candle's light, or near a candle that's been set down
     const litNear = (x: number, z: number) =>
       mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? (TREE_HOOKS[it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground));
-    const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
+    const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || lostInSand(en, enDist) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
       // itself is moved every frame without a re-render
@@ -1070,7 +1088,7 @@ function GameImpl({
     if (onTagsMove && N > 2) {
       const tags = fighters.map((c, k) => {
         if (k === ME) return null;
-        const hidden = (c.stealthT ?? 0) > 0 || (c.burrowT ?? 0) > 0;
+        const hidden = (c.stealthT ?? 0) > 0 || (c.burrowT ?? 0) > 0 || ((c.side ?? 0) !== (p1.side ?? 0) && lostInSand(c, Math.hypot(c.pos[0] - p1.pos[0], c.pos[2] - p1.pos[2])));
         headProj.set(c.pos[0], c.pos[1] + 2.25, c.pos[2]).project(camera);
         if (hidden || headProj.z >= 1 || Math.abs(headProj.x) > 1.05 || Math.abs(headProj.y) > 1.05) return null;
         return { x: (headProj.x * 0.5 + 0.5) * size.width, y: (-headProj.y * 0.5 + 0.5) * size.height };
@@ -1114,7 +1132,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })) },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -1313,6 +1331,7 @@ function GameImpl({
       bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
       if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
       if (map.id === 'forest') bgTmp.lerp(bgNight, mapRuntime.night * 0.92); // night
+      if (map.id === 'desert') bgTmp.lerp(bgSand, Math.max(mapRuntime.desert.sand * 0.9, mapRuntime.desert.warn * 0.35)); // the sandstorm
       bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
       if (scene.background instanceof THREE.Color) scene.background.copy(bgTmp);
       if (scene.fog) (scene.fog as THREE.Fog).color.copy(bgTmp);
@@ -2066,7 +2085,7 @@ function GameImpl({
       if (def.actionState === 'knockdown' && def.isGrounded && !o.unblockable) return;
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
-      let dmg = base * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1);
+      let dmg = base * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       if ((att.counterTimer ?? 0) > 0) {
         dmg *= 1.5;
         att.counterTimer = 0;
@@ -3258,8 +3277,9 @@ function GameImpl({
           }
           p.traveled += (p.vel.length() * step) / 2;
           if (p.kind !== 'boomerang') {
-            if (p.pos.y < fy(p.pos.x, p.pos.z, p.pos.y) + 0.02) {
-              p.pos.y = fy(p.pos.x, p.pos.z, p.pos.y) + 0.02;
+            const gy = fy(p.pos.x, p.pos.z, p.pos.y);
+            if (p.pos.y < gy + 0.02) {
+              if (gy - p.pos.y < 0.6) p.pos.y = gy + 0.02; // into a wall face: it sticks in the wall, not on top of it
               embed(p, p.noStop ? 1.0 : 2.5);
               vfx.dustPuff(vB.copy(p.pos), 2, 0.1, 0.8, 0.25);
               break;
@@ -3515,6 +3535,7 @@ function GameImpl({
         c.slip = 0;
         c.revived = 0;
         c.reviveT = 0;
+        c.beaconHold = 0;
         c.reviveHint = '';
         c.interactHint = '';
         for (const k of Object.keys(c.cooldowns)) c.cooldowns[k] = 0;
@@ -3569,6 +3590,9 @@ function GameImpl({
       shipNavRefs.current = [0, 1, 2, 3].map(() => newNavState());
       if (map.id === 'sea') shipGraph();
       shipAiRefs.current = [0, 1, 2, 3].map(newShipAi);
+      desertNavRefs.current = [0, 1, 2, 3].map(newDesertNav);
+      desertAiRefs.current = [0, 1, 2, 3].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
+      mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0 };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -3716,8 +3740,26 @@ function GameImpl({
 
     /** 青冥古林: a walking fighter climbs stairs; a waist-high ledge (the temple podium's sides) gets a small hop, higher ones block */
     function stepWall(c: CombatantState, px0: number, pz0: number) {
-      if (map.id !== 'forest' || !c.isGrounded || c.treeClimb !== undefined || c.actionState === 'buried') return;
+      if ((map.id !== 'forest' && map.id !== 'desert') || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
+      if (!c.isGrounded) {
+        // 大漠玉门关, in the air: a wall face stops you; you can only come down on something your feet are above
+        if (map.id !== 'desert') return;
+        const above = (x: number, z: number) => terrainHeight(map.id, x, z) > c.pos[1] + 0.25;
+        if (!above(c.pos[0], c.pos[2])) return;
+        if (!above(c.pos[0], pz0)) {
+          c.pos[2] = pz0;
+          c.vel[2] = 0;
+        } else if (!above(px0, c.pos[2])) {
+          c.pos[0] = px0;
+          c.vel[0] = 0;
+        } else {
+          c.pos[0] = px0;
+          c.pos[2] = pz0;
+          c.vel[0] = c.vel[2] = 0;
+        }
+        return;
+      }
       const tooHigh = (x: number, z: number) => terrainHeight(map.id, x, z) - c.pos[1] > 0.55;
       if (!tooHigh(c.pos[0], c.pos[2])) return;
       const rise = terrainHeight(map.id, c.pos[0], c.pos[2]) - c.pos[1];
@@ -3801,6 +3843,207 @@ function GameImpl({
       return pool[0];
     }
 
+    function sideOf(c: CombatantState) {
+      return c.side ?? (fighters.indexOf(c) === 0 ? 0 : 1);
+    }
+    /** 大漠玉门关: in a thick sandstorm, enemies farther than 10 m vanish, unless your side's beacon burns */
+    function lostInSand(c: CombatantState, dist: number) {
+      const D = mapRuntime.desert;
+      return map.id === 'desert' && D.sand > 0.55 && dist > 10 && D.beaconSide !== sideOf(p1);
+    }
+    /** 大漠玉门关: sandstorm cycle and the beacon's fire */
+    function updateDesert(t: number) {
+      const D = mapRuntime.desert;
+      const S = DESERT.storm;
+      const cyc = S.calm + S.warn + S.storm + S.ease;
+      const u = t % cyc;
+      D.wind = Math.floor(t / cyc) % 2 ? -1 : 1;
+      const a = S.calm;
+      const b = a + S.warn;
+      const c2 = b + S.storm;
+      D.warn = u < a ? 0 : u < b ? (u - a) / S.warn : u < c2 ? 1 : Math.max(0, 1 - (u - c2) / S.ease);
+      const target = u < b - 1.5 ? 0 : u < b + 2 ? (u - (b - 1.5)) / 3.5 : u < c2 ? 1 : Math.max(0, 1 - (u - c2) / S.ease);
+      D.sand = Math.min(1, Math.max(0, target));
+      if (u >= a && u - dt < a && !round.over) onRoundEvent?.({ type: 'toast', text: '天边发黄 · 沙暴要来了，进城躲风' });
+      if (D.beaconT > 0) {
+        D.beaconT -= dt;
+        if (D.beaconT <= 0) {
+          D.beaconT = 0;
+          D.beaconSide = -1;
+          D.beaconCool = DESERT.beaconCool;
+          onRoundEvent?.({ type: 'toast', text: '烽火烧尽了' });
+        }
+        if (Math.random() < dt * 14) vfx.embers(vB.set((Math.random() - 0.5) * 1.2, DESERT.beacon.h + 1.7, (Math.random() - 0.5) * 1.2), 1, '#ff9a3c', 0.4, 3.5, 0.07);
+      }
+      if (D.beaconCool > 0) D.beaconCool = Math.max(0, D.beaconCool - dt);
+      // sand blowing past the camera
+      if (D.sand > 0.2 && Math.random() < D.sand * 0.9) {
+        const x = p1.pos[0] - D.wind * 8 + (Math.random() - 0.5) * 6;
+        const z = p1.pos[2] + (Math.random() - 0.5) * 14;
+        vfx.dustPuff(vB.set(x, fy(x, z) + 0.3 + Math.random() * 1.5, z), 2, 0.6, 2.4, 1.2, '#d9b07a');
+      }
+    }
+    /** out in the open (or up on the walls) a sandstorm pushes you along with the wind */
+    function desertWind(c: CombatantState) {
+      const D = mapRuntime.desert;
+      if (D.sand < 0.05 || c.hp <= 0 || c.actionState === 'buried') return;
+      if (desertSheltered(c.pos[0], c.pos[2], c.pos[1])) return;
+      const k = c.isBlocking ? 0.4 : 1;
+      c.pos[0] += D.wind * D.sand * 1.6 * k * dt;
+    }
+    /** 大漠玉门关: F at a well for a drink; hold F on top of the beacon tower to light it (or put out the other side's) */
+    function updateDesertItems(i: number, c: CombatantState, intent: Intent | null) {
+      const pressed = !!intent?.interact && !c.intPrev;
+      c.intPrev = !!intent?.interact;
+      c.interactHint = '';
+      if (c.hp <= 0) return;
+      const st = c.actionState;
+      const free = c.isGrounded && (st === 'idle' || st === 'run' || st === 'block');
+      for (const [wx, wz] of DESERT.wells) {
+        if (Math.hypot(c.pos[0] - wx, c.pos[2] - wz) > 1.9 || c.pos[1] > 1.6) continue;
+        const cd = c.cooldowns['well'] || 0;
+        const lost = c.maxHp - c.hp;
+        if (cd > 0) {
+          c.interactHint = `井水 · ${cd.toFixed(0)} 秒后可再喝`;
+          return;
+        }
+        c.interactHint = lost > 1 ? 'F 打水喝 · 回复已损失气血 10%' : '井水 · 气血已满';
+        if (!pressed || lost <= 1 || !free) return;
+        const heal = Math.max(1, Math.round(lost * 0.1));
+        c.hp = Math.min(c.maxHp, c.hp + heal);
+        c.cooldowns['well'] = 20;
+        vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.2, c.pos[2]), 14, '#7dd3fc', 3.5, 0.06, UP, 0.6);
+        vfx.ring(vC.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 1.2, '#38bdf8', 0.5, 0.12);
+        vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), `+${heal}`, false, '#4ade80');
+        if (i === ME) onRoundEvent?.({ type: 'toast', text: `喝了口井水，回复 ${heal} 气血` });
+        return;
+      }
+      const B = DESERT.beacon;
+      const D = mapRuntime.desert;
+      const onTop = Math.abs(c.pos[0]) < B.half + 0.2 && Math.abs(c.pos[2]) < B.half + 0.2 && c.pos[1] > B.h - 0.3;
+      if (!onTop) {
+        c.beaconHold = 0;
+        return;
+      }
+      const mine = sideOf(c);
+      if (D.beaconSide === mine) {
+        c.interactHint = `烽火正旺 · 还能烧 ${Math.ceil(D.beaconT)} 秒`;
+        c.beaconHold = 0;
+        return;
+      }
+      if (D.beaconSide < 0 && D.beaconCool > 0) {
+        c.interactHint = `烽火台 · ${Math.ceil(D.beaconCool)} 秒后能再点`;
+        c.beaconHold = 0;
+        return;
+      }
+      const verb = D.beaconSide < 0 ? '点燃烽火' : '踩灭敌方烽火';
+      if (!intent?.interact || !free || intent.request) {
+        c.beaconHold = 0;
+        c.interactHint = `按住 F ${verb}`;
+        return;
+      }
+      if (intent) {
+        intent.move.set(0, 0, 0);
+        intent.block = false;
+      }
+      c.beaconHold = (c.beaconHold ?? 0) + dt;
+      c.interactHint = `按住 F ${verb}中 ${Math.min(99, Math.round((c.beaconHold / DESERT.beaconHold) * 100))}%`;
+      if (Math.random() < dt * 8) vfx.embers(vB.set(0, B.h + 1.0, 0), 1, '#ffb15a', 0.3, 1.5, 0.05);
+      if (c.beaconHold < DESERT.beaconHold) return;
+      c.beaconHold = 0;
+      const who = i === ME ? '你' : c.tag || '有人';
+      const ours = mine === sideOf(p1);
+      if (D.beaconSide < 0) {
+        D.beaconSide = mine;
+        D.beaconT = DESERT.beaconBurn;
+        vfx.flash(vB.set(0, B.h + 1.6, 0), '#ff8a2a', 40, 0.6, 18);
+        vfx.sparkBurst(vB.set(0, B.h + 1.4, 0), 40, '#ffb15a', 8, 0.1, UP, 0.5);
+        gameAudio.playGong();
+        onRoundEvent?.({ type: 'toast', text: `${who}点燃了烽火 · ${ours ? '我方' : '敌方'} ${DESERT.beaconBurn} 秒伤害 +12%，沙暴里也看得清对面` });
+      } else {
+        D.beaconSide = -1;
+        D.beaconT = 0;
+        D.beaconCool = 3;
+        vfx.dustPuff(vB.set(0, B.h + 0.6, 0), 20, 0.8, 2.5, 1.0, '#6b5a4a');
+        onRoundEvent?.({ type: 'toast', text: `${who}踩灭了${ours ? '敌方' : '我方'}的烽火` });
+      }
+    }
+    /**
+     * 大漠玉门关 AI: walls are sheer, so it walks the grid round to the foe (through a gate, over the breach,
+     * up a ramp). Now and then it runs an errand: light the beacon when the foe is well away, or a drink
+     * from a well when hurt.
+     */
+    function routeDesert(i: number, me: CombatantState, foe: CombatantState, out: Intent) {
+      const A = desertAiRefs.current[i];
+      const D = mapRuntime.desert;
+      A.cool -= dt;
+      out.interact = false;
+      const dist = Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]) + Math.abs(foe.pos[1] - me.pos[1]);
+      if (A.goal < 0 && A.cool <= 0 && isFree(me) && me.isGrounded) {
+        A.cool = 5 + Math.random() * 4;
+        const beaconOpen = D.beaconSide !== sideOf(me) && !(D.beaconSide < 0 && D.beaconCool > 2);
+        const wellReady = !((me.cooldowns['well'] ?? 0) > 0);
+        if (wellReady && me.hp < me.maxHp * 0.5 && dist > 9) {
+          let bw = 1;
+          let bd = 1e9;
+          DESERT.wells.forEach(([x, z], k) => {
+            const d = Math.hypot(x - me.pos[0], z - me.pos[2]);
+            if (d < bd) {
+              bd = d;
+              bw = k + 1;
+            }
+          });
+          if (bd < 45) A.goal = bw;
+        } else if (beaconOpen && dist > 8 && Math.hypot(me.pos[0], me.pos[2]) < 40 && Math.random() < 0.55) A.goal = 0;
+        A.goalT = 0;
+      }
+      let tx = foe.pos[0];
+      let ty = foe.pos[1];
+      let tz = foe.pos[2];
+      if (A.goal >= 0) {
+        A.goalT += dt;
+        const stop = dist < 4 || A.goalT > 20 || (A.goal === 0 && D.beaconSide === sideOf(me)) || (A.goal > 0 && (me.cooldowns['well'] ?? 0) > 0);
+        if (stop) {
+          A.goal = -1;
+          A.cool = 6;
+        } else if (A.goal === 0) {
+          tx = 0;
+          ty = DESERT.beacon.h;
+          tz = 0;
+          if (Math.hypot(me.pos[0], me.pos[2]) < 1.6 && me.pos[1] > DESERT.beacon.h - 0.3) {
+            out.move.set(0, 0, 0);
+            out.request = null;
+            out.block = false;
+            out.interact = true;
+            return;
+          }
+        } else {
+          const [wx, wz] = DESERT.wells[A.goal - 1];
+          tx = wx + (wx > 0 ? -1.4 : 1.4);
+          ty = 0;
+          tz = wz;
+          if (Math.hypot(tx - me.pos[0], tz - me.pos[2]) < 0.9) {
+            out.move.set(0, 0, 0);
+            out.request = null;
+            out.interact = !me.intPrev;
+            return;
+          }
+        }
+      }
+      const st = desertSteer(desertNavRefs.current[i], me.pos[0], me.pos[1], me.pos[2], tx, ty, tz, dt);
+      if (!st) {
+        if (A.goal >= 0) {
+          out.move.set(tx - me.pos[0], 0, tz - me.pos[2]);
+          if (out.move.lengthSq() > 0.01) out.move.normalize();
+          out.request = null;
+        }
+        return;
+      }
+      out.move.set(st.x - me.pos[0], 0, st.z - me.pos[2]);
+      if (out.move.lengthSq() > 0.01) out.move.normalize();
+      out.request = null;
+      out.block = false;
+    }
     /** a downed teammate that can still be helped up this round */
     function revivable(c: CombatantState) {
       return c.hp <= 0 && c.stateDuration === 99 && (c.revived ?? 0) < 1 && !c.swimming;
@@ -3884,7 +4127,11 @@ function GameImpl({
       it.move.set(best.pos[0] - c.pos[0], 0, best.pos[2] - c.pos[2]).normalize();
       if (map.id === 'sea') {
         const st = shipSteer(shipNavRefs.current[i], { x: c.pos[0], y: c.pos[1], z: c.pos[2], grounded: c.isGrounded }, best.pos[0], best.pos[1], best.pos[2], dt);
-        if (st) it.move.set(st.x, 0, st.z);
+        if (st) it.move.set(st.x - c.pos[0], 0, st.z - c.pos[2]).normalize();
+      }
+      if (map.id === 'desert') {
+        const st = desertSteer(desertNavRefs.current[i], c.pos[0], c.pos[1], c.pos[2], best.pos[0], best.pos[1], best.pos[2], dt);
+        if (st) it.move.set(st.x - c.pos[0], 0, st.z - c.pos[2]).normalize();
       }
       return true;
     }
@@ -4235,6 +4482,7 @@ function GameImpl({
       if (map.id === 'sea') updateSea();
       if (map.id === 'glacier') updateGlacier();
       if (map.id === 'rooftop') updateRooftop();
+      if (map.id === 'desert') updateDesert(t);
       if (map.id === 'summit') updateSummit(t);
       if (map.id === 'forest') {
         updateForest();
