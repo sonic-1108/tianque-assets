@@ -1254,6 +1254,21 @@ export function roofFloorAt(x: number, z: number, y: number) {
   if (inCorridor(x, z) && y > ROOF.corridor - 1.2) return ROOF.corridor;
   return ROOF.street;
 }
+/**
+ * 长安 camera: is (x, y, z) inside something solid? A hall is solid from the street up to its roof surface,
+ * except the open space under its eaves (where you walk round it); a covered bridge is a slab.
+ */
+export function roofCamSolid(x: number, y: number, z: number) {
+  for (const hl of ROOF.halls) {
+    const v = hallHeight(hl, x, z);
+    if (v === null || y > v + 0.15) continue;
+    const edge = Math.min(x - hl.x0, hl.x1 - x, z - hl.z0, hl.z1 - z);
+    if (edge < EAVE_OVER && y < hl.eave - 0.6) continue; // under the eaves: open air
+    return true;
+  }
+  if (inCorridor(x, z) && y > ROOF.corridor - 0.6 && y < ROOF.corridor + 0.15) return true;
+  return false;
+}
 /** the underside of a bridge or an eave overhead (999 when open sky) */
 export function roofCeilAt(x: number, z: number, y: number) {
   if (inCorridor(x, z) && y < ROOF.corridor - 1.2) return ROOF.corridor - 0.5;

@@ -113,7 +113,7 @@ export class CameraController {
         const z = target.z + (this.smoothPos.z - target.z) * t;
         const y = target.y + (this.smoothPos.y - target.y) * t;
         if (y < this.groundAt(x, z) + 0.45 || (this.solidAt && this.solidAt(x, y, z))) {
-          k = Math.max(0.35, (i - 1) / n);
+          k = Math.max(this.solidAt ? 0.12 : 0.35, (i - 1) / n); // with real solids known, it may come right in
           break;
         }
       }

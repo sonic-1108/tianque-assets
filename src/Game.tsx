@@ -18,7 +18,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, roofFloorAt, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -1171,6 +1171,13 @@ function GameImpl({
         controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, view.pos[1] + 0.8);
         controller.ceilAt = (x: number, z: number) => shipCeilAt(x, z, view.pos[1] + 0.5);
         controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18, true); // the camera glides over steps and rails
+      } else if (map.id === 'rooftop') {
+        // 长安: the floor under the camera is the street or the roof at the player's level, and the halls are solid:
+        // a roof between the camera and the player pulls the camera in along the boom (under the eaves, or down
+        // to the player) instead of lifting it onto the roof, where it looked at nothing but tiles
+        controller.groundAt = (x: number, z: number) => roofFloorAt(x, z, view.pos[1] + 0.8);
+        controller.ceilAt = null;
+        controller.solidAt = (x: number, y: number, z: number) => roofCamSolid(x, y, z);
       } else {
         controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), view.pos[1] - 2.5) : null;
         controller.ceilAt = map.id === 'desert' && desertIndoor(view.pos[0], view.pos[2], view.pos[1]) ? (x: number, z: number) => Math.min(desertCeil(x, z), desertCeil(view.pos[0], view.pos[2])) : null;
