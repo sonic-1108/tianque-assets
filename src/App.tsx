@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { startPresence, setPresence } from './presence';
+import { LoadingScreen } from './components/lobby/LoadingScreen';
 import { Lobby, NameGate } from './components/lobby/Lobby';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
@@ -129,58 +130,6 @@ const SHADOW_HOTBAR: HotbarEntry[] = [
 ];
 const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR };
 const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade'];
-
-interface CanvasLoadingScreenProps {
-  progress: number;
-  error: string | null;
-  onRetry: () => void;
-}
-
-function CanvasLoadingScreen({ progress, error, onRetry }: CanvasLoadingScreenProps) {
-  if (error) {
-    return (
-      <div className="absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center z-50 p-6 text-center backdrop-blur-md">
-        <div className="max-w-md w-full bg-zinc-900 border-2 border-red-500/70 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-3">
-          <AlertTriangle className="w-12 h-12 text-red-500 animate-bounce" />
-          <h3 className="text-xl font-black text-red-400">武将模型加载失败</h3>
-          <p className="text-xs text-zinc-400 font-mono leading-relaxed bg-black/60 p-3 rounded-xl border border-zinc-800 w-full text-left overflow-x-auto">
-            {error}
-          </p>
-          <button
-            onClick={onRetry}
-            className="mt-2 w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg transition-all"
-          >
-            <RefreshCw className="w-4 h-4" />
-            重新加载模型 (Retry)
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="absolute inset-0 bg-zinc-950 flex flex-col items-center justify-center z-50 text-amber-400 gap-4 p-6">
-      <Loader2 className="w-12 h-12 animate-spin text-amber-500" />
-      <div className="flex flex-col items-center gap-1">
-        <span className="text-lg font-black tracking-widest text-amber-300">
-          正在装载《天阙》狂刃·霍岩 (berserker.glb)
-        </span>
-        <span className="text-xs text-zinc-400 font-mono">
-          解析骨骼权重、去除根骨骼位移并绑定动作切片...
-        </span>
-      </div>
-
-      {/* Progress Bar */}
-      <div className="w-64 max-w-xs h-3 bg-zinc-900 rounded-full border border-amber-500/50 overflow-hidden p-0.5 shadow-inner">
-        <div
-          className="h-full bg-gradient-to-r from-red-600 via-amber-500 to-yellow-400 rounded-full transition-all duration-200"
-          style={{ width: `${Math.max(8, progress)}%` }}
-        />
-      </div>
-      <span className="text-xs font-mono font-bold text-amber-400">{progress}%</span>
-    </div>
-  );
-}
 
 export default function App() {
   const settings = useSettings();
@@ -979,7 +928,8 @@ export default function App() {
       {/* in the lobby the models download in the background (出征 shows the progress); the full-screen bar only
           when a match is waiting on them, or on an error */}
       {modelProgress.isLoading && (!isMapSelectOpen || !!modelProgress.error) && (
-        <CanvasLoadingScreen
+        <LoadingScreen
+          hero={`${CLASS_CONFIGS[playerClass]?.name ?? ''}·${(CLASS_CONFIGS[playerClass] as any)?.defaultCharacter ?? ''}`}
           progress={modelProgress.progress}
           error={modelProgress.error}
           onRetry={() => window.location.reload()}
@@ -997,13 +947,7 @@ export default function App() {
         className="flex-1 w-full min-h-0 relative bg-slate-950 overflow-hidden cursor-crosshair"
       >
         <Suspense
-          fallback={
-            <CanvasLoadingScreen
-              progress={modelProgress.progress}
-              error={modelProgress.error}
-              onRetry={() => window.location.reload()}
-            />
-          }
+          fallback={null}
         >
           <Canvas
             shadows
