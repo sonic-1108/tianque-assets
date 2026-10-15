@@ -14,7 +14,7 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   Ranger: `${import.meta.env.BASE_URL}ranger.glb`,
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
   Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
-  Emperor: BERSERKER_MODEL_URL, // 皇上: 霍岩's frame in a gold dragon robe, crowned
+  Emperor: `${import.meta.env.BASE_URL}emperor.glb`, // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
 };
 /** 影刃's throwing dagger (Tripo prop, laid along +Y with the grip at the origin; see tools/optimize-prop.mjs) */
 export const DAGGER_URL = `${import.meta.env.BASE_URL}dagger.glb`;
@@ -491,6 +491,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     progressListeners.add(listener);
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)
+      // 皇上 brought only a few gestures of his own (angry_01, agree…): every fighting move is borrowed from 霍岩 (same skeleton)
+      .then((a) => (classId === 'Emperor' && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
       .then((a) => (a.raw.some((c) => c.name.toLowerCase().startsWith('swim')) ? a : loadGLB(EXTRA_ANIMS_URL).then((e) => ({ ...a, raw: [...a.raw, ...e.raw] })).catch(() => a)))
       .then((a) => {
         if (!alive) return;
@@ -528,8 +530,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.color = new THREE.Color(isPlayer ? '#f0c27a' : '#d8c4ff');
         }
         m.emissive = new THREE.Color('#000000');
-        if (classId === 'Emperor') {
-          // 龙袍: everything goes imperial yellow and gold
+        if (classId === 'Emperor' && asset.fallback) {
+          // no model yet: 龙袍: everything goes imperial yellow and gold
           const lum = m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
           m.color = new THREE.Color('#f2c14a').multiplyScalar(0.55 + lum * 0.9);
           m.emissive = new THREE.Color('#3a2400');
@@ -586,7 +588,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (classId === 'BuddhistMage') right.group.visible = left.group.visible = false; // 梵音 fights bare-handed
     let crown: THREE.Group | null = null;
     if (classId === 'Emperor') {
-      // 天子剑: one gilded blade; and the 冕冠 (a flat board with bead strings) on his head
+      // 天子剑: one gilded blade (and, only while his own model is missing, a stand-in 冕冠)
       left.group.visible = false;
       right.group.traverse((o: any) => {
         if (o.isMesh && o.material?.isMeshStandardMaterial) {
@@ -596,8 +598,10 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           o.material.roughness = 0.25;
         }
       });
-      crown = buildCrown();
-      if (bones.head) bones.head.add(crown);
+      if (asset.fallback) {
+        crown = buildCrown();
+        if (bones.head) bones.head.add(crown);
+      }
     }
     crownRef.current = crown;
     // Hand-local frame (Mixamo): +Y runs along the fingers, the knuckle line is X.
