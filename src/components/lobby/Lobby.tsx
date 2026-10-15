@@ -64,8 +64,6 @@ export function Lobby(p: LobbyProps) {
   return (
     <div className="tq-lobby fixed inset-0 z-50 select-none">
       <style>{LOBBY_CSS}</style>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;600;900&display=swap" rel="stylesheet" />
       <InkBackdrop />
       <div className="tq-l-wrap">
         {/* ---- title and name ---- */}
@@ -399,8 +397,6 @@ export function NameGate({ value, onChange, onSubmit, onCancel }: { value: strin
   return (
     <div className="tq-lobby tq-gate">
       <style>{LOBBY_CSS}</style>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+SC:wght@400;600;900&display=swap" rel="stylesheet" />
       <InkBackdrop />
       <div className="tq-gate-card">
         <h1>天阙</h1>

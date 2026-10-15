@@ -1,3 +1,8 @@
+// fonts are self-hosted (Google Fonts is unreachable from mainland China and stalls the page there)
+import '@fontsource/ma-shan-zheng/400.css';
+import '@fontsource/noto-serif-sc/400.css';
+import '@fontsource/noto-serif-sc/600.css';
+import '@fontsource/noto-serif-sc/900.css';
 import './index.css';
 import {createRoot} from 'react-dom/client';
 import App from './App';

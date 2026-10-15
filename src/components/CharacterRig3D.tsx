@@ -3,7 +3,14 @@ import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
 import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose } from './climbPose';
 import { useFrame } from '@react-three/fiber';
-import { GLTFLoader, SkeletonUtils } from 'three-stdlib';
+import { GLTFLoader, SkeletonUtils, MeshoptDecoder } from 'three-stdlib';
+
+/** the models are meshopt-compressed (tools: gltf-transform meshopt), so every loader needs the decoder */
+function newLoader() {
+  const l = new GLTFLoader();
+  l.setMeshoptDecoder(typeof MeshoptDecoder === 'function' ? (MeshoptDecoder as any)() : MeshoptDecoder);
+  return l;
+}
 import { CombatantState, CharacterActionState, CharacterClassId } from '../types';
 
 export const BERSERKER_MODEL_URL = `${import.meta.env.BASE_URL}berserker.glb`;
@@ -379,7 +386,7 @@ let daggerProto: Promise<THREE.Object3D> | null = null;
 function daggerModel() {
   if (!daggerProto)
     daggerProto = new Promise((resolve, reject) =>
-      new GLTFLoader().load(
+      newLoader().load(
         DAGGER_URL,
         (g) => {
           g.scene.traverse((o: any) => {
@@ -400,7 +407,7 @@ let swordProto: Promise<THREE.Object3D> | null = null;
 function swordModel() {
   if (!swordProto)
     swordProto = new Promise((resolve, reject) =>
-      new GLTFLoader().load(
+      newLoader().load(
         EMPEROR_SWORD_URL,
         (g) => {
           g.scene.traverse((o: any) => {
@@ -477,7 +484,7 @@ function loadGLB(url: string): Promise<LoadedAsset> {
   const hit = assetPromises.get(url);
   if (hit) return hit;
   const p = new Promise<LoadedAsset>((resolve, reject) => {
-    new GLTFLoader().load(
+    newLoader().load(
       url,
       (gltf) => {
         gltf.scene.updateMatrixWorld(true);

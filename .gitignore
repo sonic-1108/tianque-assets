@@ -3,3 +3,4 @@ dist
 .DS_Store
 .preview/
 relay/.wrangler/
+public/_cmp/
