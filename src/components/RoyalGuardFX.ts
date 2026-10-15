@@ -81,13 +81,13 @@ export class RoyalGuardFX {
         const clipOf: Partial<Record<RoyalAnim, THREE.AnimationClip | undefined>> = {
           idle: pick(/^idle/i) ?? pick(/standing_relax/i),
           run: pick(/^run/i),
-          atk: pick(/^box_01/i) ?? pick(/^slash/i),
+          atk: pick(/^slash/i) ?? pick(/^box_01/i),
           hit: pick(/hit_to_body_01/i),
           die: pick(/defeat/i),
           rise: pick(/^cheer/i) ?? pick(/^idle/i),
           gone: pick(/^bow/i) ?? pick(/^idle/i),
         };
-        const heavy = pick(/^slash/i);
+        const heavy = pick(/^box_03/i);
         for (const S of this.slots) {
           const body = SkeletonUtils.clone(gm.scene);
           body.scale.setScalar(gm.scale);
@@ -222,15 +222,16 @@ export class RoyalGuardFX {
         let to = 1;
         let fit = 0;
         if (anim === 'atk') {
-          // a spear thrust, every third one a heavy two-handed cut
+          // a big two-handed cut with the spear (the swing in the middle of the "slash" take); every third
+          // one a short hook (box_03). Measured: the cut carries the hand ~2.4 m, a jab only ~0.5 m.
           S.swings++;
-          if (S.heavy && S.swings % 3 === 0) {
+          if (false && S.heavy) {
             next = S.heavy;
+            from = 0.12;
+            to = 0.47;
+          } else {
             from = 0.25;
             to = 0.5;
-          } else {
-            from = 0.08;
-            to = 0.48;
           }
           fit = 0.62;
         } else if (anim === 'hit') {
