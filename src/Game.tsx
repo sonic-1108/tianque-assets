@@ -1220,6 +1220,8 @@ function GameImpl({
       else t.left.update(rawDt, null, null, now);
       vfx.followFighter(i, vC.set(c.pos[0], c.pos[1], c.pos[2]));
     });
+    // 画地为牢: whichever palace wall stands between the camera and the player fades out of the way
+    vfx.emperor.imperial.setView(camera.position, vC.set(fighters[ME].pos[0], fighters[ME].pos[1] + 1.2, fighters[ME].pos[2]));
     vfx.update(dt);
 
     // ================= HUD =================

@@ -127,8 +127,15 @@ interface Charge {
   yaw: number;
   active: boolean;
 }
+interface CageSide {
+  mats: THREE.Material[];
+  a: [number, number]; // wall ends, relative to the cage centre (x, z)
+  b: [number, number];
+  op: number;
+}
 interface Cage {
   g: THREE.Group;
+  sides: CageSide[];
   t: number;
   dur: number;
   active: boolean;
@@ -197,28 +204,39 @@ export class ImperialFX {
     const L = 5.4;
     for (let k = 0; k < 2; k++) {
       const g = new THREE.Group();
+      const sides: CageSide[] = [];
       for (let s = 0; s < 4; s++) {
         const side = new THREE.Group();
-        const base = new THREE.Mesh(new THREE.BoxGeometry(L + 0.5, 0.35, 0.55), baseMat);
+        // each wall has its own materials, so the one between the camera and the player can fade on its own
+        const m = [baseMat.clone(), wallMat.clone(), tileMat.clone(), glowMat.clone()];
+        const base = new THREE.Mesh(new THREE.BoxGeometry(L + 0.5, 0.35, 0.55), m[0]);
         base.position.y = 0.17;
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(L, 2.1, 0.36), wallMat);
+        const wall = new THREE.Mesh(new THREE.BoxGeometry(L, 2.1, 0.36), m[1]);
         wall.position.y = 1.35;
         // a gabled cap of glazed tiles
-        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, L + 0.7, 3, 1), tileMat);
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, L + 0.7, 3, 1), m[2]);
         cap.rotation.z = Math.PI / 2;
         cap.rotation.x = Math.PI / 6;
         cap.position.y = 2.55;
         cap.scale.set(1, 1, 1);
-        const ridge = new THREE.Mesh(new THREE.BoxGeometry(L + 0.8, 0.06, 0.06), glowMat);
+        const ridge = new THREE.Mesh(new THREE.BoxGeometry(L + 0.8, 0.06, 0.06), m[3]);
         ridge.position.y = 2.82;
         side.add(base, wall, cap, ridge);
         side.position.set(s === 0 ? 0 : s === 1 ? L / 2 : s === 2 ? 0 : -L / 2, 0, s === 0 ? L / 2 : s === 1 ? 0 : s === 2 ? -L / 2 : 0);
         side.rotation.y = s % 2 ? Math.PI / 2 : 0;
         g.add(side);
+        const h = L / 2 + 0.3;
+        const ends: [number, number][][] = [
+          [[-h, L / 2], [h, L / 2]],
+          [[L / 2, -h], [L / 2, h]],
+          [[-h, -L / 2], [h, -L / 2]],
+          [[-L / 2, -h], [-L / 2, h]],
+        ];
+        sides.push({ mats: m, a: ends[s][0] as [number, number], b: ends[s][1] as [number, number], op: 1 });
       }
       g.visible = false;
       root.add(g);
-      this.cages.push({ g, t: 0, dur: 3, active: false });
+      this.cages.push({ g, sides, t: 0, dur: 3, active: false });
     }
     // the jade seal: a block of green jade, a gold band, a coiled dragon on top; its imprint left on the ground
     const jade = new THREE.MeshStandardMaterial({ color: '#3fae7f', roughness: 0.15, metalness: 0.1, emissive: '#145a3a', emissiveIntensity: 0.9, transparent: true, opacity: 0.93 });
@@ -251,6 +269,16 @@ export class ImperialFX {
       root.add(g, imprint);
       this.seals.push({ g, imprint, t: 0, fall: 0.55, pos: new THREE.Vector3(), active: false, landed: false });
     }
+  }
+
+  private eye = new THREE.Vector3();
+  private focus = new THREE.Vector3();
+  private hasView = false;
+  /** where the camera is and whom it follows: a palace wall between the two fades out of the way */
+  setView(eye: THREE.Vector3, focus: THREE.Vector3) {
+    this.eye.copy(eye);
+    this.focus.copy(focus);
+    this.hasView = true;
   }
 
   /** load the guard model for the spectral charge (once, in the background) */
@@ -430,6 +458,25 @@ export class ImperialFX {
       const down = C.t > C.dur ? Math.min(1, (C.t - C.dur) / 0.35) : 0;
       const ease = 1 - Math.pow(1 - up, 3);
       C.g.position.y = y0 - 2.9 * (1 - ease) - 2.9 * down + (up < 1 ? Math.sin(time * 60) * 0.03 : 0);
+      // a wall standing between the camera and the player turns to glass
+      for (const S of C.sides) {
+        let block = false;
+        if (this.hasView) {
+          const ax = C.g.position.x + S.a[0];
+          const az = C.g.position.z + S.a[1];
+          const bx = C.g.position.x + S.b[0];
+          const bz = C.g.position.z + S.b[1];
+          block = segmentsCross(this.eye.x, this.eye.z, this.focus.x, this.focus.z, ax, az, bx, bz);
+        }
+        const target = block ? 0.18 : 1;
+        S.op += (target - S.op) * Math.min(1, dt * 12);
+        const see = S.op < 0.98;
+        for (const m of S.mats) {
+          m.transparent = see;
+          m.opacity = S.op;
+          m.depthWrite = !see;
+        }
+      }
       if (C.t > C.dur + 0.35) {
         C.active = false;
         C.g.visible = false;
@@ -468,4 +515,13 @@ export class ImperialFX {
       }
     }
   }
+}
+
+/** do segments p1-p2 and p3-p4 cross (in the ground plane)? */
+function segmentsCross(x1: number, z1: number, x2: number, z2: number, x3: number, z3: number, x4: number, z4: number) {
+  const d = (x2 - x1) * (z4 - z3) - (z2 - z1) * (x4 - x3);
+  if (Math.abs(d) < 1e-9) return false;
+  const u = ((x3 - x1) * (z4 - z3) - (z3 - z1) * (x4 - x3)) / d;
+  const v = ((x3 - x1) * (z2 - z1) - (z3 - z1) * (x2 - x1)) / d;
+  return u > 0 && u < 1 && v > 0 && v < 1;
 }
