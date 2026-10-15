@@ -569,7 +569,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)
       // 皇上 brought only a few gestures of his own (angry_01, agree…): every fighting move is borrowed from 霍岩 (same skeleton)
-      .then((a) => (classId === 'Emperor' && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
+      .then((a) => ((classId === 'Emperor' || classId === 'Guard') && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
       .then((a) => (a.raw.some((c) => c.name.toLowerCase().startsWith('swim')) ? a : loadGLB(EXTRA_ANIMS_URL).then((e) => ({ ...a, raw: [...a.raw, ...e.raw] })).catch(() => a)))
       .then((a) => {
         if (!alive) return;
