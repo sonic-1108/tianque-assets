@@ -8,6 +8,7 @@ import { useFrame, useThree, advance } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
+import { Effect } from 'postprocessing';
 import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
 import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
@@ -74,6 +75,14 @@ interface GameSceneProps {
   onLoadProgress?: (progress: ModelLoadProgress) => void;
 }
 
+// Saturation and contrast act on HDR colour before tone mapping, and push the weak channels of bright saturated
+// colours (red lanterns, fire) below zero; ACES and the sRGB curve turn that into NaN, i.e. black. Clamp it.
+class ClampNegativeEffect extends Effect {
+  constructor() {
+    super('ClampNegative', 'void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){ outputColor = vec4(max(inputColor.rgb, vec3(0.0)), inputColor.a); }');
+  }
+}
+const clampNegative = new ClampNegativeEffect();
 const ACES_FILMIC = 6; // postprocessing ToneMappingMode.ACES_FILMIC
 
 const vA = new THREE.Vector3();
@@ -5170,9 +5179,8 @@ function GameImpl({
         gameAudio.playGong();
       }
       if (wrath && Math.random() < dt * 8) vfx.embers(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 1, '#ffb347', 0.5, 2, 0.06);
-      // left alone, he recovers
+      // no regeneration: damage dealt to him stays dealt
       E.calm = near > 12 ? E.calm + dt : 0;
-      if (E.calm > 4 && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.015 * dt);
       const free = e.isGrounded && (e.actionState === 'idle' || e.actionState === 'run' || e.actionState === 'block');
       E.might -= dt;
       E.arrows -= dt;
@@ -7065,6 +7073,7 @@ function GameImpl({
         {quality === 'high' && perfTier === 0 && <N8AO halfRes quality="medium" aoRadius={2.4} distanceFalloff={1.0} intensity={3.5} color="#1a1410" />}
         <HueSaturation saturation={0.08} />
         <BrightnessContrast brightness={0} contrast={0.06} />
+        <primitive object={clampNegative} />
         <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
