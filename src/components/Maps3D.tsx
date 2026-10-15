@@ -765,6 +765,8 @@ function LavaCliffMap() {
         rimStrength={0.12}
         baseY={-8}
         pines={false}
+        spire
+        footGlow="#ff4a10"
         layers={[
           { dist: 60, count: 9, height: [10, 26], radius: [2.5, 5], haze: 0.05 },
           { dist: 120, count: 14, height: [16, 40], radius: [4, 8], haze: 0.35 },

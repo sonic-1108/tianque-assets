@@ -128,7 +128,8 @@ function vnoise(x: number, y: number, px = 0) {
 }
 
 /** A sandstone pillar: near-vertical fluted walls, ledges of strata, a rounded wooded crown */
-function peakGeometry(rand: () => number, height: number, radius: number) {
+function peakGeometry(rand: () => number, height: number, radius: number, spire = false) {
+  if (spire) return spireGeometry(rand, height, radius);
   const steps = 44;
   const radial = 30;
   const off = rand() * 100;
@@ -159,6 +160,39 @@ function peakGeometry(rand: () => number, height: number, radius: number) {
   return g;
 }
 
+/** A volcanic spire: a faceted, leaning basalt fang with broken shoulders and a sharp, slightly hooked tip */
+function spireGeometry(rand: () => number, height: number, radius: number) {
+  const steps = 36;
+  const radial = 9;
+  const off = rand() * 100;
+  const lean = (rand() - 0.5) * 0.35;
+  const leanDir = rand() * Math.PI * 2;
+  const pts: THREE.Vector2[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    // broad foot, a shoulder or two where columns broke off, then a narrowing fang
+    const shoulder = t < 0.45 ? 1 : t < 0.5 ? 1 - (t - 0.45) * 4 : 0.8;
+    const r = radius * (1.25 - 1.15 * Math.pow(t, 1.25)) * (0.85 + 0.15 * shoulder);
+    pts.push(new THREE.Vector2(Math.max(0.02, r), t * height));
+  }
+  const g = new THREE.LatheGeometry(pts, radial).toNonIndexed();
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const y = pos.getY(i);
+    const th = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * radial;
+    const t = y / height;
+    const crag = (vnoise(th * 1.3, t * 6 + off, radial) - 0.5) * 0.45 + (vnoise(th * 3, t * 18 + off) - 0.5) * 0.18;
+    const k = 1 + crag;
+    const bend = lean * t * t * height;
+    pos.setX(i, x * k + Math.cos(leanDir) * bend);
+    pos.setZ(i, z * k + Math.sin(leanDir) * bend);
+  }
+  g.computeVertexNormals(); // non-indexed: hard facets like cooled basalt
+  return g;
+}
+
 export function KarstPeaks({
   seed = 7,
   layers,
@@ -170,7 +204,13 @@ export function KarstPeaks({
   pines = true,
   exclude,
   rimStrength = 0.35,
+  spire = false,
+  footGlow,
 }: {
+  /** faceted volcanic spires instead of rounded sandstone pillars */
+  spire?: boolean;
+  /** a hot glow licking up the base of each rock (lava seas) */
+  footGlow?: string;
   seed?: number;
   layers: { dist: number; count: number; height: [number, number]; radius: [number, number]; haze: number }[];
   baseY?: number;
@@ -201,11 +241,12 @@ export function KarstPeaks({
         const h = layer.height[0] + rand() * (layer.height[1] - layer.height[0]);
         const r = layer.radius[0] + rand() * (layer.radius[1] - layer.radius[0]);
         const rot = rand() * 6;
-        const geo = peakGeometry(rand, h, r);
+        const geo = peakGeometry(rand, h, r, spire);
         const pos = geo.attributes.position as THREE.BufferAttribute;
         const nor = geo.attributes.normal as THREE.BufferAttribute;
         const cols = new Float32Array(pos.count * 3);
         const hz = new Float32Array(pos.count);
+        const ft = new Float32Array(pos.count);
         const c = new THREE.Color();
         const light2 = rockC.clone().multiplyScalar(1.7).lerp(lightC, pines ? 0.25 : 0.05);
         for (let i = 0; i < pos.count; i++) {
@@ -218,10 +259,12 @@ export function KarstPeaks({
           if (pines && up > 0.35) c.lerp(moss, Math.min(1, (up - 0.35) * 2) * (layer.haze < 0.6 ? 0.85 : 0.4));
           cols.set([c.r, c.g, c.b], i * 3);
           // aerial perspective: distant layers and the misty feet dissolve into the haze
-          hz[i] = Math.min(1, layer.haze + Math.pow(Math.max(0, 1 - t), 2) * 0.55);
+          hz[i] = Math.min(1, layer.haze + Math.pow(Math.max(0, 1 - t), 2) * (footGlow ? 0.15 : 0.55));
+          ft[i] = Math.max(0, 1 - pos.getY(i) / Math.min(h, 14)) * (1 - layer.haze);
         }
         geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
         geo.setAttribute('aHaze', new THREE.BufferAttribute(hz, 1));
+        geo.setAttribute('aFoot', new THREE.BufferAttribute(ft, 1));
         out.push({
           geo,
           pos: [Math.cos(a) * d, baseY, Math.sin(a) * d],
@@ -237,33 +280,35 @@ export function KarstPeaks({
     // keyed on the values, not the array identities: callers pass inline arrays, and rebuilding
     // these meshes on every re-render leaked GPU memory until the tab crashed
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify({ seed, layers, baseY, haze, rock, light, lightDir, pines, exclude, rimStrength })]);
+  }, [JSON.stringify({ seed, layers, baseY, haze, rock, light, lightDir, pines, exclude, rimStrength, spire })]);
   React.useEffect(() => () => items.forEach((it) => it.geo.dispose()), [items]);
   // lit by the scene (so the sun side glows and the shadow side reads), then hazed after lighting
   const mat = useMemo(() => {
-    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, fog: false });
+    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, fog: false, flatShading: spire });
     const sun = new THREE.Vector3(...lightDir).normalize();
     m.onBeforeCompile = (sh) => {
       sh.uniforms.uHaze = { value: new THREE.Color(haze) };
       sh.uniforms.uSun = { value: sun };
       sh.uniforms.uRim = { value: new THREE.Color(light).multiplyScalar(rimStrength * 0.7) };
+      sh.uniforms.uFoot = { value: new THREE.Color(footGlow ?? '#000000') };
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aHaze;\nvarying float vHaze;\nvarying vec3 vWN;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHaze = aHaze;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
+        .replace('#include <common>', '#include <common>\nattribute float aHaze;\nattribute float aFoot;\nvarying float vHaze;\nvarying float vFoot;\nvarying vec3 vWN;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHaze = aHaze;\nvFoot = aFoot;\nvWN = normalize(mat3(modelMatrix) * objectNormal);');
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 uHaze; uniform vec3 uSun; uniform vec3 uRim;\nvarying float vHaze;\nvarying vec3 vWN;')
+        .replace('#include <common>', '#include <common>\nuniform vec3 uHaze; uniform vec3 uSun; uniform vec3 uRim; uniform vec3 uFoot;\nvarying float vHaze;\nvarying float vFoot;\nvarying vec3 vWN;')
         .replace(
           '#include <dithering_fragment>',
           `#include <dithering_fragment>
           // warm rim where the low sun grazes the rock
           float rim = pow(max(dot(normalize(vec3(vWN.x, 0.0, vWN.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0), 3.0);
           gl_FragColor.rgb += uRim * rim * (1.0 - vHaze);
+          gl_FragColor.rgb += uFoot * pow(vFoot, 3.0);
           gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, vHaze);`
         );
     };
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [haze, light, rimStrength, JSON.stringify(lightDir)]);
+  }, [haze, light, rimStrength, spire, footGlow, JSON.stringify(lightDir)]);
   return (
     <group>
       {items.map((it, i) => (
