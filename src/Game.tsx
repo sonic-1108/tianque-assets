@@ -216,7 +216,7 @@ interface AIMemory {
 const EMP = {
   sweep: { boss: { wind: 0.75, r: 5.8, dmg: 160 }, hero: { wind: 0.1, r: 5.4, dmg: 95 } }, // the hero cuts twice
   might: { boss: { wind: 0.45, r: 5.2, dmg: 140 }, hero: { wind: 0.12, r: 5, dmg: 130 } },
-  dragon: { boss: { dmg: 210, r: 3.2 }, hero: { dmg: 240, r: 3.4 } },
+  dragon: { boss: { dmg: 210, r: 3.2 }, hero: { dmg: 400, r: 3.4 } },
   arrows: { boss: { dmg: 170, r: 2.2, t: 1.4 }, hero: { dmg: 60, r: 3.4, t: 0.6 } }, // the hero calls three volleys
   // the hero's imperial kit
   edict: { wind: 0.25, r: 7.5, half: 0.62, dmg: 70, kneel: 1.3 },
@@ -5480,7 +5480,7 @@ function GameImpl({
           if (g.anim === 'atk') {
             // the thrust lands a third of the way in
             const f = fighters[g.tgt];
-            if (!g.struck && g.st > 0.32) {
+            if (!g.struck && g.st > 0.24) {
               g.struck = true;
               if (f && f.hp > 0 && Math.hypot(f.pos[0] - g.x, f.pos[2] - g.z) < R.reach + 0.6 && Math.abs(f.pos[1] - g.y) < 1.8) {
                 applyHit(g.owner, own, f, R.dmg, { dur: 0.28, flinch: true, noMark: true });

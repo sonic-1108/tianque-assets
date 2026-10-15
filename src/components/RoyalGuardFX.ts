@@ -22,6 +22,10 @@ interface Slot {
   fill: THREE.Mesh;
   pillar: THREE.Mesh;
   used: boolean;
+  heavy?: THREE.AnimationAction;
+  swings: number;
+  playing?: THREE.AnimationAction;
+  lastSt: number;
 }
 
 export const ROYAL_SLOTS = 8;
@@ -57,7 +61,7 @@ export class RoyalGuardFX {
       pillar.visible = false;
       g.add(bar, pillar);
       root.add(g);
-      this.slots.push({ root: g, body: null, mixer: null, acts: {}, cur: '', mats: [], bar, fill, pillar, used: false });
+      this.slots.push({ root: g, body: null, mixer: null, acts: {}, cur: '', mats: [], bar, fill, pillar, used: false, swings: 0, lastSt: 0 });
     }
   }
 
@@ -71,15 +75,19 @@ export class RoyalGuardFX {
       .then(([gm, bm]) => {
         const clips = (bm.raw.length ? bm.raw : gm.raw).map(removeRootMotion);
         const pick = (re: RegExp) => clips.find((c) => re.test(c.name));
+        // the clips are long takes; each move uses only its useful stretch (fractions of the clip), played to fit
+        // the time the game gives it. The swing in "slash" is a third of the way into a 6.6 s take: played
+        // from the start, a 0.75 s attack never got past the wind-up.
         const clipOf: Partial<Record<RoyalAnim, THREE.AnimationClip | undefined>> = {
           idle: pick(/^idle/i) ?? pick(/standing_relax/i),
           run: pick(/^run/i),
-          atk: pick(/^slash/i) ?? pick(/^box_01/i),
+          atk: pick(/^box_01/i) ?? pick(/^slash/i),
           hit: pick(/hit_to_body_01/i),
           die: pick(/defeat/i),
           rise: pick(/^cheer/i) ?? pick(/^idle/i),
           gone: pick(/^bow/i) ?? pick(/^idle/i),
         };
+        const heavy = pick(/^slash/i);
         for (const S of this.slots) {
           const body = SkeletonUtils.clone(gm.scene);
           body.scale.setScalar(gm.scale);
@@ -131,6 +139,12 @@ export class RoyalGuardFX {
               a.clampWhenFinished = true;
             }
             S.acts[k] = a;
+          }
+          if (heavy) {
+            const a = S.mixer.clipAction(heavy);
+            a.setLoop(THREE.LoopOnce, 1);
+            a.clampWhenFinished = true;
+            S.heavy = a;
           }
           S.cur = '';
         }
@@ -201,17 +215,47 @@ export class RoyalGuardFX {
     }
     // animation
     if (S.mixer) {
-      if (anim !== S.cur) {
-        const next = S.acts[anim] ?? S.acts.idle;
-        const prev = S.cur ? (S.acts[S.cur] ?? S.acts.idle) : undefined;
+      if (anim !== S.cur || (anim === 'atk' && st < S.lastSt)) {
+        // which stretch of which take, and how long the game gives it
+        let next = S.acts[anim] ?? S.acts.idle;
+        let from = 0;
+        let to = 1;
+        let fit = 0;
+        if (anim === 'atk') {
+          // a spear thrust, every third one a heavy two-handed cut
+          S.swings++;
+          if (S.heavy && S.swings % 3 === 0) {
+            next = S.heavy;
+            from = 0.25;
+            to = 0.5;
+          } else {
+            from = 0.08;
+            to = 0.48;
+          }
+          fit = 0.62;
+        } else if (anim === 'hit') {
+          from = 0;
+          to = 0.45;
+          fit = 0.35;
+        } else if (anim === 'rise') {
+          from = 0.1;
+          to = 0.6;
+          fit = 0.55;
+        }
+        const prev = S.playing;
         if (next) {
+          const D = next.getClip().duration;
           next.reset();
-          next.setEffectiveTimeScale(anim === 'run' ? 1.25 : anim === 'atk' ? 1.5 : 1);
+          next.time = from * D;
+          next.setEffectiveTimeScale(anim === 'run' ? 1.25 : fit ? ((to - from) * D) / fit : 1);
+          next.setEffectiveWeight(1);
           next.play();
-          if (prev && prev !== next) next.crossFadeFrom(prev, 0.12, false);
+          if (prev && prev !== next) next.crossFadeFrom(prev, 0.1, false);
+          S.playing = next;
         }
         S.cur = anim;
       }
+      S.lastSt = st;
       S.mixer.update(dt);
     }
     if (anim === 'rise' && st < 0.5 && Math.random() < 0.7) this.embers?.(this.v.set(x + (Math.random() - 0.5) * 1, y + Math.random() * 2.5, z + (Math.random() - 0.5) * 1), 1, '#ffd36a');
