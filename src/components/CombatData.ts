@@ -533,7 +533,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     role: '御剑重装 / 控场 (Bruiser)',
     roleType: 'tank',
     description: '金甲在身，手提天子剑，一声断喝震退四方，召来金龙从天而降。出招前都要蓄一下，看准了再放。（长安上元夜里，正殿屋脊上的那位皇上是中立首领，血量是英雄的三倍多。）',
-    hp: 1500,
+    hp: 2500,
     mp: 100,
     speedRatio: 0.9,
     attackSpeedRatio: 0.9,
