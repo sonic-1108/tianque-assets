@@ -4861,21 +4861,30 @@ function GameImpl({
     }
     /** AI: go help a downed teammate up when no enemy is right on top of you */
     function aiGoRevive(i: number, c: CombatantState, it: Intent) {
+      // a human teammate down (you, or a friend online) comes first, from anywhere on the map; other AIs within 16 m
+      const human = (k: number) => k === ME || seatsNow[k]?.ctl === 'local' || seatsNow[k]?.ctl === 'remote';
       let best: CombatantState | null = null;
-      let bd = 16;
-      for (const f of fighters)
-        if (f !== c && (f.side ?? 0) === (c.side ?? 0) && revivable(f)) {
-          const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) + Math.abs(f.pos[1] - c.pos[1]) * 2;
-          if (d < bd) {
-            bd = d;
-            best = f;
-          }
+      let bestHuman = false;
+      let bd = 1e9;
+      for (let k = 0; k < N; k++) {
+        const f = fighters[k];
+        if (f === c || (f.side ?? 0) !== (c.side ?? 0) || !revivable(f)) continue;
+        const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) + Math.abs(f.pos[1] - c.pos[1]) * 2;
+        const h = human(k);
+        if (!h && d > 16) continue;
+        // humans first, then the nearest
+        if ((h && !bestHuman) || (h === bestHuman && d < bd)) {
+          bd = d;
+          best = f;
+          bestHuman = h;
         }
+      }
       if (!best) return false;
       if (map.id === 'desert' && mapRuntime.desert.swarmWarn > 0) return false; // run for cover first
-      // an enemy close by and swinging: deal with them first
+      // an enemy close by and swinging: deal with them first (for a downed player, only one right on top of you)
+      const guardR = bestHuman ? (bd < 2.5 ? 1.6 : 2.4) : bd < 2.5 ? 2.2 : 5;
       for (const f of fighters)
-        if ((f.side ?? 0) !== (c.side ?? 0) && f.hp > 0 && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < (bd < 2.5 ? 2.2 : 5)) return false;
+        if ((f.side ?? 0) !== (c.side ?? 0) && f.hp > 0 && Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < guardR) return false;
       const dist = Math.hypot(best.pos[0] - c.pos[0], best.pos[2] - c.pos[2]);
       it.faceYaw = yawTo(c.pos, best.pos);
       it.request = null;
@@ -4893,6 +4902,18 @@ function GameImpl({
       if (map.id === 'desert') {
         const st = desertSteer(desertNavRefs.current[i], c.pos[0], c.pos[1], c.pos[2], best.pos[0], best.pos[1], best.pos[2], dt);
         if (st) it.move.set(st.x - c.pos[0], 0, st.z - c.pos[2]).normalize();
+      }
+      if (map.id === 'rooftop' && c.isGrounded && c.pos[1] < ROOF.street + 0.8) {
+        // round the halls by the streets; up onto a roof with a double jump if they fell up there
+        const up = best.pos[1] > ROOF.street + 1.2;
+        if (up || !streetLineClear(c.pos[0], c.pos[2], best.pos[0], best.pos[2])) {
+          const st = streetSteer(streetNavRefs.current[i], c.pos[0], c.pos[2], best.pos[0], best.pos[2], up, dt);
+          if (st) {
+            it.move.set(st.x - c.pos[0], 0, st.z - c.pos[2]);
+            if (it.move.lengthSq() > 0.01) it.move.normalize();
+            if (st.arrived && up) it.request = 'jump';
+          }
+        }
       }
       return true;
     }
