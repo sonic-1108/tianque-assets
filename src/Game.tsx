@@ -105,7 +105,7 @@ const SLOT_SIDE = [0, 1, 0, 1, 2, 2, 2, 2, 2];
 /** 长安: the procession starts on the east side of the avenue; a guard's place around the emperor (across, along) */
 const PARADE_START = 35.5;
 const GUARD_SLOTS: [number, number][] = [[-1.7, 1.6], [1.7, 1.6], [-1.7, -1.9], [1.7, -1.9]];
-const SEAL_HOLD = 15;
+const SEAL_HOLD = 30;
 const sideA = (slot: number) => (SLOT_SIDE[slot] ?? 1) === 0;
 const colorFor = (slot: number, c: CombatantState) =>
   c.classId === 'Shadowblade'
@@ -5081,10 +5081,10 @@ function GameImpl({
         // 皇上出征: only the seal decides it. Cutting the other side down doesn't win; everyone down is a draw.
         if (isBossFighter(def)) {
           def.revived = 9;
-          dropSeal(def.pos[0], def.pos[2]);
+          dropSeal(def.pos[0], def.pos[2], def.pos[1]);
           gameAudio.playBoom();
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,215,120,0.4)' });
-          onRoundEvent?.({ type: 'toast', text: '皇上驾崩！传国玉玺掉了，抢到手守住 15 秒就赢' });
+          onRoundEvent?.({ type: 'toast', text: `皇上驾崩！传国玉玺掉在他倒下的地方，抢到手守住 ${SEAL_HOLD} 秒就赢` });
           return;
         }
         if ((def.side ?? 0) === 2) {
@@ -5290,15 +5290,21 @@ function GameImpl({
 
     /** 长安: knocked off the roofs into a courtyard. Hurts, then you are helped back up onto the nearest roof. */
     /** the 传国玉玺 falls to the roof here (never into a courtyard) */
-    function dropSeal(x: number, z: number) {
+    function dropSeal(x: number, z: number, y?: number) {
       let sx = x;
       let sz = z;
-      if (terrainHeight(map.id, sx, sz) < 0) [sx, sz] = safeSpot(sx, sz);
-      mapRuntime.seal = { state: 1, x: sx, y: terrainHeight(map.id, sx, sz), z: sz, holder: -1, t: 0 };
+      // right where he fell: on the roof (or ridge) under his feet, not the top of whatever roof is highest there
+      let sy = y !== undefined ? fy(sx, sz, y) : terrainHeight(map.id, sx, sz);
+      if (sy < 0 || (y !== undefined && sy < y - 6)) {
+        // knocked off into a courtyard: it lands on the nearest roof instead
+        [sx, sz] = safeSpot(sx, sz);
+        sy = terrainHeight(map.id, sx, sz);
+      }
+      mapRuntime.seal = { state: 1, x: sx, y: sy, z: sz, holder: -1, t: 0 };
       vfx.flash(vA.set(sx, mapRuntime.seal.y + 1, sz), '#9ff5c9', 50, 0.4, 10);
       vfx.ring(vA.set(sx, mapRuntime.seal.y + 0.05, sz), 3, '#9ff5c9', 0.6, 0.14, 0.4);
     }
-    /** 长安上元夜: pick the seal up by walking over it; hold it 15 s to win; whoever holds it and falls drops it */
+    /** 长安上元夜: pick the seal up by walking over it; hold it 30 s to win; whoever holds it and falls drops it */
     function updateSeal() {
       const S = mapRuntime.seal;
       if (!S || S.state === 0) return;
@@ -5306,7 +5312,7 @@ function GameImpl({
         const h = fighters[S.holder];
         if (!h || h.hp <= 0 || (h.devoured ?? 0) > 0) {
           const k = S.holder;
-          dropSeal(h ? h.pos[0] : S.x, h ? h.pos[2] : S.z);
+          dropSeal(h ? h.pos[0] : S.x, h ? h.pos[2] : S.z, h ? h.pos[1] : S.y);
           onRoundEvent?.({ type: 'toast', text: k === ME ? '你倒下了，玉玺掉了！' : `${h?.tag || '有人'}倒下，玉玺掉了！快抢` });
           return;
         }

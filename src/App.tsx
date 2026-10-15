@@ -1195,7 +1195,7 @@ export default function App() {
           else if (hudMirror.sandWarn > 0 && hudMirror.sandWarn < 1) meChips.push({ text: '沙暴将至', tone: 'amber' });
           if (hudMirror.beacon) meChips.push({ text: `${hudMirror.beacon > 0 ? '我方' : '敌方'}烽火 ${Math.ceil(hudMirror.beaconT)}s${hudMirror.beacon > 0 ? ' · 伤害 +12%' : ''}`, tone: hudMirror.beacon > 0 ? 'gold' : 'red', pulse: hudMirror.beacon < 0 });
           if (hudMirror.seal === 1) meChips.push({ text: '传国玉玺掉在屋顶上！快去抢', tone: 'gold', pulse: true });
-          else if (hudMirror.seal === 2) meChips.push({ text: `${hudMirror.sealWho}手握玉玺 ${Math.min(15, hudMirror.sealT).toFixed(0)}/15 秒${hudMirror.sealMine ? ' · 守住' : ' · 快抢回来'}`, tone: hudMirror.sealMine ? 'gold' : 'red', pulse: !hudMirror.sealMine });
+          else if (hudMirror.seal === 2) meChips.push({ text: `${hudMirror.sealWho}手握玉玺 ${Math.min(30, hudMirror.sealT).toFixed(0)}/30 秒${hudMirror.sealMine ? ' · 守住' : ' · 快抢回来'}`, tone: hudMirror.sealMine ? 'gold' : 'red', pulse: !hudMirror.sealMine });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',
