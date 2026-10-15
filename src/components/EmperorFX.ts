@@ -194,7 +194,7 @@ export class EmperorFX {
     // the dragon: scaled body pearls, a dorsal fin row, a head with horns, whiskers and a pearl of light
     const tubeGeo = new THREE.BufferGeometry();
     tubeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TS * TR * 3), 3));
-    tubeGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TS * TR * 3), 3));
+    tubeGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TS * TR * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
     const tuv: number[] = [];
     const tidx: number[] = [];
     for (let i = 0; i < TS; i++)
@@ -214,7 +214,7 @@ export class EmperorFX {
       side: THREE.DoubleSide,
       uniforms: { uT: { value: 0 }, uA: { value: 1 } },
       vertexShader: /* glsl */ `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-        void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
+        void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal + vec3(0.0, 1e-4, 0.0)); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
       fragmentShader: /* glsl */ `uniform float uT; uniform float uA; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
         void main(){
           // overlapping scales: offset rows of rounded cells, darker at each scale's rim
@@ -279,8 +279,10 @@ export class EmperorFX {
       this.head.add(horn, wh, eye);
     }
     this.head.visible = false;
+    // the dragon's light lives in the root and is never hidden, only dimmed to 0: a light that appears or disappears
+    // changes the scene's light count, which makes three.js recompile every material (a black flash while it does)
     this.glow = new THREE.PointLight('#ffc04a', 0, 14, 1.6);
-    this.head.add(this.glow);
+    root.add(this.glow);
     root.add(this.head);
     this.dragon = { active: false, t: 0, origin: new THREE.Vector3(), target: new THREE.Vector3(), rise: 1.3, dive: 0.7, hist: [], histN: 0, impacted: false, dir: 1 };
     for (let i = 0; i < HIST; i++) this.dragon.hist.push(new THREE.Vector3());
@@ -552,6 +554,7 @@ export class EmperorFX {
       if (this.w.lengthSq() > 1e-6) this.head.lookAt(this.v.copy(h0).add(this.w));
       this.head.scale.setScalar(2.1 * fade);
       this.glow.intensity = 30 * fade;
+      this.glow.position.copy(this.head.position);
       if (this.embers && Math.random() < 0.9) this.embers(this.pts[Math.floor(Math.random() * TS)], 2, '#ffcf5a');
       if (!D.impacted && D.t >= total) {
         D.impacted = true;
