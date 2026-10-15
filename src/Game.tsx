@@ -11,7 +11,7 @@ import { RoomEnvironment } from 'three-stdlib';
 import { Effect } from 'postprocessing';
 import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
-import { CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
+import { EmpMove, CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
 import { FX, muteable } from './fxMute';
 import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
@@ -221,6 +221,8 @@ interface AIMemory {
   airFollow: number; // >0: jumped, will press 1 mid-air for 钉地斩
 }
 
+/** 天子 the neutral boss of 长安 (side 2); a hero 天子 on a team is an ordinary fighter */
+const isBossFighter = (f: CombatantState | undefined) => !!f && f.classId === 'Emperor' && (f.side ?? 0) === 2;
 const yawTo = (from: number[], to: number[]) => Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
 /** 怒海战船 rogue wave: seconds it rears up before it breaks, then seconds the water stays sloshing on deck */
 const WAVE_WARN = 3.5;
@@ -346,8 +348,7 @@ function GameImpl({
   const eruptRef = useRef({ timer: 9 });
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   /** 长安上元夜 emperor: 龙威 / 箭雨 cooldowns, the arrow circles about to be hit, wrath, out-of-fight timer */
-  type EmpMove = { kind: 'might' | 'sweep' | 'dragon'; t: number; yaw: number; target: number; fired: boolean; lock: boolean; x: number; y: number; z: number };
-  const emperorRef = useRef({ might: 5, arrows: 7, sweep: 3, dragon: 8, move: null as EmpMove | null, zones: [] as { x: number; z: number; r: number; t: number }[], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 });
+    const emperorRef = useRef({ might: 5, arrows: 7, sweep: 3, dragon: 8, zones: [] as { x: number; z: number; r: number; t: number; owner: number; dmg: number }[], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 });
   const forestRef = useRef({ timer: 14 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
   const bgSand = useMemo(() => new THREE.Color('#c08a4e'), []);
@@ -560,7 +561,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * (c.classId === 'Emperor' && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const fighters = fightersRef.current;
@@ -599,7 +600,7 @@ function GameImpl({
       if (aiPick && map.id === 'rooftop' && (c.side ?? 0) !== 2) {
         let nearOther = 1e9;
         for (const f of fighters) if (f.hp > 0 && f !== c && (f.side ?? 0) !== (c.side ?? 0) && (f.side ?? 0) !== 2) nearOther = Math.min(nearOther, Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]));
-        const e = fighters.findIndex((f) => f.classId === 'Emperor' && f.hp > 0);
+        const e = fighters.findIndex((f) => isBossFighter(f) && f.hp > 0);
         if (e >= 0 && nearOther > 12) {
           // the emperor is the prize: go at him (or at the guard in the way)
           let pick = e;
@@ -1747,6 +1748,9 @@ function GameImpl({
       if (c.classId === 'Shadowblade' && ((c.burrowT ?? 0) > 0 || req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
         return executeShadow(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
       }
+      if (c.classId === 'Emperor' && (req.startsWith('skill') || req === 'ultimate' || ((req === 'attack' || req === 'dodge' || req === 'jump') && c.empMove))) {
+        return executeEmperor(slot, c, foe, req, { canSkill, paySkill, report });
+      }
       if (c.classId === 'BuddhistMage' && (req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
         return executeMonk(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
       }
@@ -1919,7 +1923,7 @@ function GameImpl({
     function applyMovement(c: CombatantState, intent: Intent) {
       const st = c.actionState;
       const ranger = c.classId === 'Ranger';
-      const bers = c.classId === 'Berserker' || c.classId === 'Emperor';
+      const bers = c.classId === 'Berserker';
       const monk = c.classId === 'BuddhistMage';
       const whirl = bers && st === 'skill_2';
       const charge = bers && st === 'skill_3';
@@ -1941,7 +1945,7 @@ function GameImpl({
       c.localMove = [intent.move.x * rX + intent.move.z * rZ, intent.move.x * f.x + intent.move.z * f.z];
 
       if (map.id === 'forest' && (ladderClimb(c, intent) || treeClimb(c, intent))) return;
-      const canMove = !dodging && !charge && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || whirl || rangerThrow);
+      const canMove = !dodging && !charge && !c.empMove && c.hp > 0 && (c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || whirl || rangerThrow);
       if (canMove) {
         if (intent.move.lengthSq() > 0.01) {
           vA.copy(intent.move);
@@ -2250,7 +2254,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : att.classId === 'Emperor' ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -2369,7 +2373,7 @@ function GameImpl({
       // light darts only make you flinch: they chip HP but never interrupt, so a ranged fighter can't stun-lock
       let flinchOnly = !!o.flinch;
       // 金甲护体: the emperor is never launched, knocked down or flung far; only a heavy blow makes him stagger
-      if (def.classId === 'Emperor') {
+      if (isBossFighter(def)) {
         if (o.launch || o.state === 'knockdown' || o.state === 'buried' || o.state === 'launched') {
           o.launch = 0;
           o.state = 'hitstun';
@@ -2687,6 +2691,68 @@ function GameImpl({
       return false;
     }
 
+    /** 天子 as a hero: 1 横扫千军, 2 龙威, 3 御林箭雨, 4 龙颜大怒, R 真龙降世 (the sword combo and block are the shared ones) */
+    function executeEmperor(
+      slot: number,
+      c: CombatantState,
+      foe: CombatantState,
+      req: string,
+      h: { canSkill: boolean; paySkill: (idx: number, key: string, label: string) => boolean; report: (a: string, r: string) => void }
+    ): boolean {
+      if (c.empMove) return h.report('出招', '正在施展'), false;
+      if (!c.isGrounded) return h.report('出招', '落地才能施展'), false;
+      const fi = fighters.indexOf(foe);
+      const d = foe && foe.hp > 0 ? Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) : 99;
+      const ahead = (m: number) => [c.pos[0] - Math.sin(c.rotY) * m, c.pos[2] - Math.cos(c.rotY) * m] as const;
+      switch (req) {
+        case 'skill1': {
+          if (!h.paySkill(0, 'skill1', '1')) return false;
+          startEmpMove(slot, 'sweep', d < 7 ? fi : -1);
+          gameAudio.playCharge();
+          return true;
+        }
+        case 'skill2': {
+          if (!h.paySkill(1, 'skill2', '2')) return false;
+          startEmpMove(slot, 'might', -1);
+          return true;
+        }
+        case 'skill3': {
+          if (!h.paySkill(2, 'skill3', '3')) return false;
+          // a wave of the hand: the arrows fall where the opponent stands (or ahead, if no one is in range)
+          const [x, z] = d < 24 ? [foe.pos[0], foe.pos[2]] : ahead(9);
+          empArrows(slot, x, z);
+          c.actionState = 'skill_4';
+          c.stateTimer = 0;
+          c.stateDuration = 0.45;
+          vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.6, c.pos[2]), '放箭！', true, '#fca5a5');
+          gameAudio.playGong();
+          return true;
+        }
+        case 'skill4': {
+          if (!h.paySkill(3, 'skill4', '4')) return false;
+          c.buffs = c.buffs.filter((b) => b.type !== 'blood_rage');
+          c.buffs.push({ id: `wrath_${slot}_${Date.now()}`, type: 'blood_rage', duration: 7, value: 0.35 });
+          c.actionState = 'skill_4';
+          c.stateTimer = 0;
+          c.stateDuration = 0.6;
+          vfx.pillarAt(1.1, '#ffd36a', slot);
+          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 2.8, '#ffd36a', 0.6, 0.16, 0.5);
+          vfx.embers(vC.set(c.pos[0], c.pos[1] + 0.2, c.pos[2]), 45, '#ffcf5a', 0.8, 3.5, 0.08);
+          vfx.flash(vA.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), '#ffd36a', 70, 0.5, 12);
+          vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.8, c.pos[2]), '龙颜大怒', true, '#ffd36a');
+          gameAudio.playGong();
+          if (slot === ME) controller?.addShake(0.2);
+          return true;
+        }
+        case 'ultimate': {
+          if (!h.paySkill(4, 'ultimate', 'R')) return false;
+          startEmpMove(slot, 'dragon', d < 26 ? fi : -1);
+          if (slot === ME) controller?.addShake(0.25);
+          return true;
+        }
+      }
+      return false;
+    }
     function executeMonk(
       slot: number,
       c: CombatantState,
@@ -3021,7 +3087,7 @@ function GameImpl({
           }
           vfx.chain(hand, end, caught ? 0.6 : 0.5);
           if (caught) {
-            if (foe.classId !== 'Emperor') foe.pull = { x: c.pos[0] + f.x * 1.4, z: c.pos[2] + f.z * 1.4, t: 0.5 };
+            if (!isBossFighter(foe)) foe.pull = { x: c.pos[0] + f.x * 1.4, z: c.pos[2] + f.z * 1.4, t: 0.5 };
             applyHit(slot, c, foe, 40, { knock: 0, state: 'hitstun', dur: 0.8, noStop: true });
             vfx.ring(vB.set(foe.pos[0], foe.pos[1] + 1.0, foe.pos[2]), 0.9, '#d1d5db', 0.3, 0.08, 0.2);
             vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.3, foe.pos[2]), '钩!', true, '#e5e7eb');
@@ -3865,7 +3931,7 @@ function GameImpl({
       });
       for (const c of fighters) {
         const cc = CLASS_CONFIGS[c.classId];
-        c.maxHp = cc.hp;
+        c.maxHp = isBossFighter(c) ? 5200 : cc.hp;
         c.maxMp = cc.mp;
         c.name = cc.name;
         c.characterName = cc.defaultCharacter;
@@ -3966,7 +4032,8 @@ function GameImpl({
       for (const h of hitMaskRef.current) h.mask = 0;
       mapTimeRef.current = 0;
       mapRuntime.seal = { state: 0, x: 0, y: 0, z: 0, holder: -1, t: 0 };
-      emperorRef.current = { might: 5, arrows: 7, sweep: 3, dragon: 8, move: null, zones: [], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 };
+      emperorRef.current = { might: 5, arrows: 7, sweep: 3, dragon: 8, zones: [], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 };
+      for (const f of fighters) f.empMove = undefined;
       eruptRef.current = { timer: 9 };
       bombZonesRef.current = [];
       mapRuntime.branches.length = 0;
@@ -4875,9 +4942,9 @@ function GameImpl({
       vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       if (def.ballista !== undefined) leaveBallista(defSlot, def);
-      if (map.id === 'rooftop' && fighters.some((f) => f.classId === 'Emperor')) {
+      if (map.id === 'rooftop' && fighters.some(isBossFighter)) {
         // 皇上出征: only the seal decides it. Cutting the other side down doesn't win; everyone down is a draw.
-        if (def.classId === 'Emperor') {
+        if (isBossFighter(def)) {
           def.revived = 9;
           dropSeal(def.pos[0], def.pos[2]);
           gameAudio.playBoom();
@@ -5142,11 +5209,94 @@ function GameImpl({
         break;
       }
     }
-    /** 皇上: 龙威 when crowded, 御林箭雨 on whoever hangs back, wrath when low, and he heals when left alone */
-    function updateEmperor() {
+    /** 天子 the neutral boss of 长安 (a hero 天子 is on a team and plays like anyone else) */
+    const isBoss = isBossFighter;
+    /** whom an emperor's moves hurt: the boss hits everyone but his own court; a hero, everyone not on his side */
+    function empFoe(e: CombatantState, f: CombatantState) {
+      if (f === e || f.hp <= 0) return false;
+      return isBoss(e) ? (f.side ?? 0) !== 2 : (f.side ?? 0) !== (e.side ?? 0);
+    }
+    /** 天子's moves, boss or hero: tuned per user (the boss's numbers are scaled up again by his damage factor) */
+    const EMP = {
+      sweep: { boss: { wind: 0.75, r: 5.8, dmg: 160 }, hero: { wind: 0.42, r: 5.2, dmg: 150 } },
+      might: { boss: { wind: 0.45, r: 5.2, dmg: 140 }, hero: { wind: 0.3, r: 4.5, dmg: 115 } },
+      dragon: { boss: { dmg: 210, r: 3.2 }, hero: { dmg: 240, r: 3.4 } },
+      arrows: { boss: { dmg: 170, r: 2.2, t: 1.4 }, hero: { dmg: 150, r: 2.8, t: 1.15 } },
+    };
+    function startEmpMove(i: number, kind: EmpMove['kind'], target: number) {
+      const e = fighters[i];
+      const boss = isBoss(e);
+      const wrath = boss && e.hp < e.maxHp * 0.35;
+      const tg = fighters[target];
+      const yaw = tg && target !== i ? Math.atan2(tg.pos[0] - e.pos[0], tg.pos[2] - e.pos[2]) : e.rotY - Math.PI;
+      (globalThis as any).__TQ_EMPLOG?.push(kind);
+      // no target (a hero casting at nothing in particular): straight ahead
+      const ax = e.pos[0] + Math.sin(yaw) * 9;
+      const az = e.pos[2] + Math.cos(yaw) * 9;
+      const M: EmpMove = { kind, t: 0, yaw, target, fired: false, lock: false, x: tg && target !== i ? tg.pos[0] : ax, y: tg && target !== i ? tg.pos[1] : fy(ax, az, e.pos[1]), z: tg && target !== i ? tg.pos[2] : az, dragon: -1 };
+      e.empMove = M;
+      e.vel[0] = e.vel[2] = 0;
+      if (kind === 'might') {
+        e.actionState = 'skill_4';
+        e.stateTimer = 0;
+        e.stateDuration = 0.9;
+        vfx.ring(vA.set(e.pos[0], e.pos[1] + 0.08, e.pos[2]), (boss ? EMP.might.boss : EMP.might.hero).r, '#ffd36a', 0.45, 0.06, 0.25);
+      } else if (kind === 'sweep') {
+        const S = boss ? EMP.sweep.boss : EMP.sweep.hero;
+        const wind = wrath ? 0.55 : S.wind;
+        e.actionState = 'idle';
+        e.stateTimer = 0;
+        e.stateDuration = 0;
+        vfx.emperor.fan(vA.set(e.pos[0], e.pos[1], e.pos[2]), yaw, S.r, 2.7, wind);
+        vfx.flash(vB.set(e.pos[0], e.pos[1] + 1.4, e.pos[2]), '#ffcf5a', 30, wind, 6);
+      } else {
+        e.actionState = 'skill_4';
+        e.stateTimer = 0;
+        e.stateDuration = 1.3;
+        vfx.flash(vB.set(e.pos[0], e.pos[1] + 2, e.pos[2]), '#ffcf5a', 70, 1.2, 14);
+        vfx.damageNumber(vB.set(e.pos[0], e.pos[1] + 3, e.pos[2]), '真龙降世', true, '#ffd36a');
+        gameAudio.playGong();
+        const D = boss ? EMP.dragon.boss : EMP.dragon.hero;
+        M.dragon = vfx.emperor.summonDragon(vA.set(e.pos[0], e.pos[1], e.pos[2]), vB.set(M.x, M.y, M.z), 1.15, 0.8, () => {
+          // the dive lands: a burst of gold where the mark was
+          const p = new THREE.Vector3(M.x, M.y + 0.08, M.z);
+          vfx.ring(p, 1.6, '#ffffff', 0.25, 0.35, 1);
+          vfx.ring(p, D.r + 0.2, '#ffcf5a', 0.6, 0.18, 0.4);
+          vfx.ring(p, D.r + 2.3, '#ff8a1a', 0.9, 0.06);
+          vfx.flash(new THREE.Vector3(p.x, p.y + 1.5, p.z), '#ffd36a', 140, 0.5, 16);
+          vfx.sparkBurst(new THREE.Vector3(p.x, p.y + 0.3, p.z), 90, '#ffcf5a', 12, 0.13, new THREE.Vector3(0, 1, 0), 1.5);
+          vfx.embers(p, 40, '#ffb347', 2.2, 4, 0.09);
+          vfx.rocks(p, 24, 8, 0.12);
+          vfx.dustPuff(p, 36, 2, 5, 1, '#d8c49a');
+          for (let k = 0; k < 6; k++) {
+            const a = (k / 6) * Math.PI * 2;
+            vfx.fireColumn(new THREE.Vector3(p.x + Math.cos(a) * 2.2, p.y, p.z + Math.sin(a) * 2.2), 1.8, '#ffb02a');
+          }
+          gameAudio.playBoom();
+          controller?.addShake(0.6);
+          const em = fighters[i];
+          if (!em || em.hp <= 0) return;
+          for (let j = 0; j < N; j++) {
+            const f = fighters[j];
+            if (!empFoe(em, f) || Math.hypot(f.pos[0] - p.x, f.pos[2] - p.z) > D.r || Math.abs(f.pos[1] - M.y) > 2.5) continue;
+            applyHit(i, em, f, D.dmg, { heavy: true, knock: 6, launch: 7, state: 'launched', dur: 0.9, shake: 0.4 });
+          }
+        });
+      }
+    }
+    /** 御林箭雨: a red circle now, arrows out of the sky `t` seconds later */
+    function empArrows(i: number, x: number, z: number) {
+      const e = fighters[i];
+      const A = isBoss(e) ? EMP.arrows.boss : EMP.arrows.hero;
+      const zn = { x, z, r: A.r, t: A.t, owner: i, dmg: A.dmg };
+      emperorRef.current.zones.push(zn);
+      bombZonesRef.current.push({ x, z, r: A.r });
+      vfx.ring(vB.set(x, terrainHeight(map.id, x, z) + 0.08, z), A.r, '#ff4040', 0.6, 0.1, A.t);
+      vfx.emperor.volley(vB.set(x, 0, z), A.r, A.t, (xx, zz) => terrainHeight(map.id, xx, zz));
+    }
+    /** every tick, on every map: emperors' moves under way, arrows in flight, auras */
+    function stepEmperors() {
       const E = emperorRef.current;
-      const ei = fighters.findIndex((f) => f.classId === 'Emperor');
-      // arrows already loosed still land
       for (let k = E.zones.length - 1; k >= 0; k--) {
         const z = E.zones[k];
         z.t -= dt;
@@ -5159,14 +5309,121 @@ function GameImpl({
         for (let a = 0; a < 10; a++) vfx.sparkBurst(vB.set(z.x + (Math.random() - 0.5) * z.r * 1.6, gy + 0.15, z.z + (Math.random() - 0.5) * z.r * 1.6), 1, '#e7d3a8', 3, 0.04, vC.set(0, 1, 0), 0.3);
         vfx.dustPuff(vB.set(z.x, gy + 0.1, z.z), 10, z.r * 0.6, 2, 0.6, '#8b7a66');
         gameAudio.playDartHit();
-        const emp = fighters[ei];
+        const emp = fighters[z.owner];
         if (!emp) continue;
         for (let j = 0; j < N; j++) {
           const f = fighters[j];
-          if (j === ei || f.hp <= 0 || (f.side ?? 0) === 2 || Math.hypot(f.pos[0] - z.x, f.pos[2] - z.z) > z.r || Math.abs(f.pos[1] - gy) > 2.5) continue;
-          applyHit(ei, emp, f, 170, { heavy: true, ranged: true, knock: 2, dur: 0.4, noMark: true });
+          if (!empFoe(emp, f) || Math.hypot(f.pos[0] - z.x, f.pos[2] - z.z) > z.r || Math.abs(f.pos[1] - gy) > 2.5) continue;
+          applyHit(z.owner, emp, f, z.dmg, { heavy: true, ranged: true, knock: 2, dur: 0.4, noMark: true });
         }
       }
+      for (let ei = 0; ei < N; ei++) {
+        const e = fighters[ei];
+        if (e.classId !== 'Emperor') continue;
+        const boss = isBoss(e);
+        const wrath = boss ? e.hp < e.maxHp * 0.35 : e.buffs.some((b) => b.type === 'blood_rage');
+        vfx.emperor.setAura(ei, wrath && e.hp > 0 ? vA.set(e.pos[0], e.pos[1], e.pos[2]) : null);
+        if (wrath && e.hp > 0 && Math.random() < dt * 8) vfx.embers(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 1, '#ffb347', 0.5, 2, 0.06);
+        const M = e.empMove;
+        if (!M) continue;
+        M.t += dt;
+        e.vel[0] = e.vel[2] = 0;
+        if (e.hp <= 0 || e.actionState === 'launched' || e.actionState === 'knockdown' || e.actionState === 'hitstun') {
+          // knocked out of it (a hero can be interrupted; the boss is never launched)
+          e.empMove = undefined;
+          continue;
+        }
+        const ex = e.pos[0];
+        const ez = e.pos[2];
+        const flat = (f: CombatantState) => Math.hypot(f.pos[0] - ex, f.pos[2] - ez);
+        const level = (f: CombatantState) => Math.abs(f.pos[1] - e.pos[1]) < 2.4;
+        const hitAll = (inside: (f: CombatantState) => boolean, dmg: number, opts: Parameters<typeof applyHit>[4]) => {
+          for (let j = 0; j < N; j++) if (empFoe(e, fighters[j]) && inside(fighters[j])) applyHit(ei, e, fighters[j], dmg, opts);
+        };
+        if (M.kind === 'might') {
+          const S = boss ? EMP.might.boss : EMP.might.hero;
+          // 龙威: gathers for a beat (gold closing in on him), then the blast
+          if (!M.fired && Math.random() < dt * 30) vfx.sparkBurst(vB.set(ex + (Math.random() - 0.5) * S.r, e.pos[1] + 0.2, ez + (Math.random() - 0.5) * S.r), 1, '#ffd36a', 2, 0.07, vC.set(ex, e.pos[1] + 1, ez).sub(vB).normalize(), 0.2);
+          if (!M.fired && M.t >= S.wind) {
+            M.fired = true;
+            const p = vA.set(ex, e.pos[1] + 0.08, ez).clone();
+            vfx.ring(p, 2.2, '#ffffff', 0.25, 0.3, 1);
+            vfx.ring(p, S.r, '#ffd36a', 0.55, 0.22, 0.35);
+            vfx.ring(p, S.r + 1.8, '#ff9a2a', 0.8, 0.08);
+            vfx.later(0.08, () => vfx.ring(p, S.r + 0.8, '#fff1b8', 0.5, 0.1));
+            vfx.pillarAt(0.6, '#ffd36a', ei);
+            vfx.flash(vB.set(ex, e.pos[1] + 1.4, ez), '#ffd36a', 110, 0.5, 16);
+            vfx.dustPuff(p, 30, 2.6, 6, 0.9, '#e8d7a8');
+            vfx.rocks(p, 18, 7, 0.1);
+            vfx.sparkBurst(vB.set(ex, e.pos[1] + 0.5, ez), 70, '#ffd36a', 11, 0.12, vC.set(0, 1, 0), 1.6);
+            vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '龙威', true, '#ffd36a');
+            gameAudio.playBoom();
+            gameAudio.playGong();
+            controller?.addShake(0.45);
+            hitAll((f) => flat(f) < S.r && level(f), S.dmg, { heavy: true, knock: 10, launch: 5.5, state: 'launched', dur: 0.8, shake: 0.3 });
+          }
+          if (M.t > S.wind + 0.45) e.empMove = undefined;
+        } else if (M.kind === 'sweep') {
+          // 横扫千军: the fan reddens on the ground while the sword gathers fire, then one huge golden crescent
+          const S = boss ? EMP.sweep.boss : EMP.sweep.hero;
+          const wind = boss && e.hp < e.maxHp * 0.35 ? 0.55 : S.wind;
+          const tgt = fighters[M.target];
+          if (boss && !M.fired && M.t < 0.3 && tgt && tgt.hp > 0) M.yaw = Math.atan2(tgt.pos[0] - ex, tgt.pos[2] - ez);
+          e.rotY = e.targetRotY = M.yaw + Math.PI; // the game's yaw faces -Z; M.yaw is the effects' (+Z) angle
+          if (!M.fired && Math.random() < dt * 40) {
+            const k = Math.random();
+            vfx.embers(vB.set(ex + Math.sin(M.yaw + 0.6) * 0.6, e.pos[1] + 0.8 + k * 1.2, ez + Math.cos(M.yaw + 0.6) * 0.6), 1, '#ffcf5a', 0.15, 3, 0.09);
+          }
+          if (!M.fired && M.t >= wind) {
+            M.fired = true;
+            e.actionState = 'skill_1';
+            e.stateTimer = 0;
+            e.stateDuration = 0.55;
+            const p = vA.set(ex, e.pos[1], ez).clone();
+            vfx.emperor.crescent(p, M.yaw, S.r);
+            vfx.flash(vB.set(ex + Math.sin(M.yaw) * 2, e.pos[1] + 1.2, ez + Math.cos(M.yaw) * 2), '#ffcf5a', 80, 0.3, 12);
+            for (let k = 0; k < 12; k++) {
+              const a = M.yaw - 1.2 + (k / 11) * 2.4;
+              const r = 2 + Math.random() * (S.r - 2.2);
+              vfx.sparkBurst(vB.set(ex + Math.sin(a) * r, e.pos[1] + 0.9, ez + Math.cos(a) * r), 3, '#ffe08a', 6, 0.09, vC.set(Math.sin(a), 0.3, Math.cos(a)), 0.6);
+            }
+            vfx.dustPuff(vB.set(ex + Math.sin(M.yaw) * 3, e.pos[1] + 0.1, ez + Math.cos(M.yaw) * 3), 16, 2, 4, 0.7, '#cdb88f');
+            vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '横扫千军', true, '#ffd36a');
+            gameAudio.playSlam();
+            controller?.addShake(0.35);
+            hitAll((f) => {
+              const d = flat(f);
+              if (d > S.r || !level(f)) return false;
+              const ang = Math.atan2(f.pos[0] - ex, f.pos[2] - ez) - M.yaw;
+              return Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) < 1.35 || d < 1.2;
+            }, S.dmg, { heavy: true, knock: 9, launch: 3, state: 'knockdown', dur: 0.75, shake: 0.3 });
+          }
+          if (M.t > wind + 0.55) e.empMove = undefined;
+        } else {
+          // 真龙降世: the dragon follows its mark until it commits, then the mark burns on the ground
+          const tgt = fighters[M.target];
+          if (tgt && tgt.hp > 0 && !M.lock) {
+            vfx.emperor.retarget(M.dragon, vB.set(tgt.pos[0], tgt.pos[1], tgt.pos[2]));
+            M.x = tgt.pos[0];
+            M.y = tgt.pos[1];
+            M.z = tgt.pos[2];
+          }
+          if (!M.lock && M.t > 1.35) {
+            M.lock = true;
+            vfx.emperor.retarget(M.dragon, vB.set(M.x, M.y, M.z));
+            const D = boss ? EMP.dragon.boss : EMP.dragon.hero;
+            vfx.ring(vB.set(M.x, M.y + 0.08, M.z), D.r, '#ffcf5a', 0.6, 0.12, 0.6);
+            vfx.emperor.fan(vB.set(M.x, M.y, M.z), 0, D.r, Math.PI * 2 - 0.001, 0.55);
+          }
+          // the hero is free again once the dragon is away; the boss stands and watches it land
+          if (M.t > (boss ? 2.6 : 1.3)) e.empMove = undefined;
+        }
+      }
+    }
+    /** 皇上 the boss (长安): 龙威 when crowded, 横扫千军 on whoever is in front, 真龙降世 and 御林箭雨 on those who keep away */
+    function updateEmperor() {
+      const E = emperorRef.current;
+      const ei = fighters.findIndex(isBoss);
       if (ei < 0) return;
       const e = fighters[ei];
       if (e.hp <= 0) return;
@@ -5180,189 +5437,44 @@ function GameImpl({
         onRoundEvent?.({ type: 'toast', text: '龙颜大怒！皇上出手更快更狠了' });
         gameAudio.playGong();
       }
-      if (wrath && Math.random() < dt * 8) vfx.embers(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 1, '#ffb347', 0.5, 2, 0.06);
       // no regeneration: damage dealt to him stays dealt
       E.calm = near > 12 ? E.calm + dt : 0;
-      vfx.emperor.setAura(wrath ? vA.set(e.pos[0], e.pos[1], e.pos[2]) : null);
-      const free = e.isGrounded && (e.actionState === 'idle' || e.actionState === 'run' || e.actionState === 'block');
       E.might -= dt;
       E.arrows -= dt;
       E.sweep -= dt;
       E.dragon -= dt;
+      if (e.empMove) return;
+      const free = e.isGrounded && (e.actionState === 'idle' || e.actionState === 'run' || e.actionState === 'block');
+      if (!free) return;
       const ex = e.pos[0];
       const ez = e.pos[2];
       const flat = (f: CombatantState) => Math.hypot(f.pos[0] - ex, f.pos[2] - ez);
       const level = (f: CombatantState) => Math.abs(f.pos[1] - e.pos[1]) < 2.4;
-      const hitAll = (inside: (f: CombatantState) => boolean, dmg: number, opts: Parameters<typeof applyHit>[4]) => {
-        for (let j = 0; j < N; j++) {
-          const f = fighters[j];
-          if (j === ei || f.hp <= 0 || (f.side ?? 0) === 2 || !inside(f)) continue;
-          applyHit(ei, e, f, dmg, opts);
-        }
-      };
-      // ---------- a move under way ----------
-      const M = E.move;
-      if (M) {
-        M.t += dt;
-        e.vel[0] = e.vel[2] = 0;
-        if (e.hp <= 0) E.move = null;
-        else if (M.kind === 'might') {
-          // 龙威: gathers for a beat (gold closing in on him), then the blast
-          if (!M.fired && Math.random() < dt * 30) vfx.sparkBurst(vB.set(ex + (Math.random() - 0.5) * 5, e.pos[1] + 0.2, ez + (Math.random() - 0.5) * 5), 1, '#ffd36a', 2, 0.07, vC.set(ex, e.pos[1] + 1, ez).sub(vB).normalize(), 0.2);
-          if (!M.fired && M.t >= 0.45) {
-            M.fired = true;
-            const p = vA.set(ex, e.pos[1] + 0.08, ez).clone();
-            vfx.ring(p, 2.2, '#ffffff', 0.25, 0.3, 1);
-            vfx.ring(p, 5.2, '#ffd36a', 0.55, 0.22, 0.35);
-            vfx.ring(p, 7, '#ff9a2a', 0.8, 0.08);
-            vfx.later(0.08, () => vfx.ring(p, 6, '#fff1b8', 0.5, 0.1));
-            vfx.pillarAt(0.6, '#ffd36a', ei);
-            vfx.flash(vB.set(ex, e.pos[1] + 1.4, ez), '#ffd36a', 110, 0.5, 16);
-            vfx.dustPuff(p, 30, 2.6, 6, 0.9, '#e8d7a8');
-            vfx.rocks(p, 18, 7, 0.1);
-            vfx.sparkBurst(vB.set(ex, e.pos[1] + 0.5, ez), 70, '#ffd36a', 11, 0.12, vC.set(0, 1, 0), 1.6);
-            vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '龙威', true, '#ffd36a');
-            gameAudio.playBoom();
-            gameAudio.playGong();
-            controller?.addShake(0.45);
-            hitAll((f) => flat(f) < 5.2 && level(f), 140, { heavy: true, knock: 10, launch: 5.5, state: 'launched', dur: 0.8, shake: 0.3 });
-          }
-          if (M.t > 0.9) E.move = null;
-        } else if (M.kind === 'sweep') {
-          // 横扫千军: the fan reddens on the ground while the sword gathers fire, then one huge golden crescent
-          const wind = wrath ? 0.55 : 0.75;
-          const tgt = fighters[M.target];
-          if (!M.fired && M.t < 0.3 && tgt && tgt.hp > 0) M.yaw = Math.atan2(tgt.pos[0] - ex, tgt.pos[2] - ez);
-          e.rotY = e.targetRotY = M.yaw + Math.PI; // the game's yaw faces -Z; M.yaw is the effects' (+Z) angle
-          if (!M.fired && Math.random() < dt * 40) {
-            const k = Math.random();
-            vfx.embers(vB.set(ex + Math.sin(M.yaw + 0.6) * 0.6, e.pos[1] + 0.8 + k * 1.2, ez + Math.cos(M.yaw + 0.6) * 0.6), 1, '#ffcf5a', 0.15, 3, 0.09);
-          }
-          if (!M.fired && M.t >= wind) {
-            M.fired = true;
-            e.actionState = 'skill_1';
-            e.stateTimer = 0;
-            e.stateDuration = 0.55;
-            const p = vA.set(ex, e.pos[1], ez).clone();
-            vfx.emperor.crescent(p, M.yaw, 5.8);
-            vfx.flash(vB.set(ex + Math.sin(M.yaw) * 2, e.pos[1] + 1.2, ez + Math.cos(M.yaw) * 2), '#ffcf5a', 80, 0.3, 12);
-            for (let k = 0; k < 12; k++) {
-              const a = M.yaw - 1.2 + (k / 11) * 2.4;
-              const r = 2 + Math.random() * 3.6;
-              vfx.sparkBurst(vB.set(ex + Math.sin(a) * r, e.pos[1] + 0.9, ez + Math.cos(a) * r), 3, '#ffe08a', 6, 0.09, vC.set(Math.sin(a), 0.3, Math.cos(a)), 0.6);
-            }
-            vfx.dustPuff(vB.set(ex + Math.sin(M.yaw) * 3, e.pos[1] + 0.1, ez + Math.cos(M.yaw) * 3), 16, 2, 4, 0.7, '#cdb88f');
-            vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '横扫千军', true, '#ffd36a');
-            gameAudio.playSlam();
-            controller?.addShake(0.35);
-            hitAll((f) => {
-              const d = flat(f);
-              if (d > 5.8 || !level(f)) return false;
-              const ang = Math.atan2(f.pos[0] - ex, f.pos[2] - ez) - M.yaw;
-              return Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) < 1.35 || d < 1.2;
-            }, 160, { heavy: true, knock: 9, launch: 3, state: 'knockdown', dur: 0.75, shake: 0.3 });
-          }
-          if (M.t > wind + 0.55) E.move = null;
-        } else if (M.kind === 'dragon') {
-          // 真龙降世: he raises the sword, a golden dragon coils up round him and dives on its mark
-          const tgt = fighters[M.target];
-          if (tgt && tgt.hp > 0 && !M.lock) {
-            vfx.emperor.retarget(vB.set(tgt.pos[0], tgt.pos[1], tgt.pos[2]));
-            M.x = tgt.pos[0];
-            M.y = tgt.pos[1];
-            M.z = tgt.pos[2];
-          }
-          if (!M.lock && M.t > 1.35) {
-            // committed: the mark burns on the ground, there's a moment to get out of it
-            M.lock = true;
-            vfx.emperor.retarget(vB.set(M.x, M.y, M.z)); // last update before it commits
-            vfx.ring(vB.set(M.x, M.y + 0.08, M.z), 3.2, '#ffcf5a', 0.6, 0.12, 0.6);
-            vfx.emperor.fan(vB.set(M.x, M.y, M.z), 0, 3.2, Math.PI * 2 - 0.001, 0.55);
-          }
-          if (M.t > 2.6) E.move = null;
-        }
-        return;
-      }
-      if (!free) return;
       const front = others.filter((f) => level(f) && flat(f) < 5);
-      // 龙威: crowded, or someone right on top of him
       if (E.might <= 0 && (front.filter((f) => flat(f) < 3.5).length >= 2 || near < 2.2)) {
         E.might = wrath ? 6 : 9;
-        (globalThis as any).__TQ_EMPLOG?.push('might');
-        E.move = { kind: 'might', t: 0, yaw: e.rotY - Math.PI, target: -1, fired: false, lock: false, x: 0, y: 0, z: 0 };
-        e.actionState = 'skill_4';
-        e.stateTimer = 0;
-        e.stateDuration = 0.9;
-        vfx.ring(vA.set(ex, e.pos[1] + 0.08, ez), 5.2, '#ffd36a', 0.45, 0.06, 0.25);
+        startEmpMove(ei, 'might', -1);
         return;
       }
-      // 横扫千军: someone within the sword's reach
       if (E.sweep <= 0 && front.length) {
-        const tgt = front.sort((a, b) => flat(a) - flat(b))[0];
         E.sweep = wrath ? 5 : 7;
-        const yaw = Math.atan2(tgt.pos[0] - ex, tgt.pos[2] - ez);
-        (globalThis as any).__TQ_EMPLOG?.push('sweep');
-        E.move = { kind: 'sweep', t: 0, yaw, target: fighters.indexOf(tgt), fired: false, lock: false, x: 0, y: 0, z: 0 };
-        vfx.emperor.fan(vA.set(ex, e.pos[1], ez), yaw, 5.8, 2.7, wrath ? 0.55 : 0.75);
-        vfx.flash(vB.set(ex, e.pos[1] + 1.4, ez), '#ffcf5a', 30, wrath ? 0.55 : 0.75, 6);
+        startEmpMove(ei, 'sweep', fighters.indexOf(front.sort((a, b) => flat(a) - flat(b))[0]));
         return;
       }
-      // 真龙降世: on someone keeping their distance (or anyone, when he's furious)
       const mid = others.filter((f) => flat(f) > (wrath ? 2.5 : 5) && flat(f) < 22);
       if (E.dragon <= 0 && mid.length) {
         const tgt = mid.find((f) => mapRuntime.seal?.state === 2 && fighters.indexOf(f) === mapRuntime.seal.holder) ?? mid[Math.floor(Math.random() * mid.length)];
         E.dragon = wrath ? 11 : 16;
-        const ti = fighters.indexOf(tgt);
-        (globalThis as any).__TQ_EMPLOG?.push('dragon');
-        E.move = { kind: 'dragon', t: 0, yaw: Math.atan2(tgt.pos[0] - ex, tgt.pos[2] - ez), target: ti, fired: false, lock: false, x: tgt.pos[0], y: tgt.pos[1], z: tgt.pos[2] };
-        e.actionState = 'skill_4';
-        e.stateTimer = 0;
-        e.stateDuration = 1.3;
-        vfx.flash(vB.set(ex, e.pos[1] + 2, ez), '#ffcf5a', 70, 1.2, 14);
-        vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '真龙降世', true, '#ffd36a');
-        gameAudio.playGong();
-        const mv = E.move;
-        vfx.emperor.summonDragon(vA.set(ex, e.pos[1], ez), vB.set(tgt.pos[0], tgt.pos[1], tgt.pos[2]), 1.15, 0.8, () => {
-          // the dive lands: a burst of gold where the mark was
-          const p = new THREE.Vector3(mv.x, mv.y + 0.08, mv.z);
-          vfx.ring(p, 1.6, '#ffffff', 0.25, 0.35, 1);
-          vfx.ring(p, 3.4, '#ffcf5a', 0.6, 0.18, 0.4);
-          vfx.ring(p, 5.5, '#ff8a1a', 0.9, 0.06);
-          vfx.flash(new THREE.Vector3(p.x, p.y + 1.5, p.z), '#ffd36a', 140, 0.5, 16);
-          vfx.sparkBurst(new THREE.Vector3(p.x, p.y + 0.3, p.z), 90, '#ffcf5a', 12, 0.13, new THREE.Vector3(0, 1, 0), 1.5);
-          vfx.embers(p, 40, '#ffb347', 2.2, 4, 0.09);
-          vfx.rocks(p, 24, 8, 0.12);
-          vfx.dustPuff(p, 36, 2, 5, 1, '#d8c49a');
-          for (let k = 0; k < 6; k++) {
-            const a = (k / 6) * Math.PI * 2;
-            vfx.fireColumn(new THREE.Vector3(p.x + Math.cos(a) * 2.2, p.y, p.z + Math.sin(a) * 2.2), 1.8, '#ffb02a');
-          }
-          gameAudio.playBoom();
-          controller?.addShake(0.6);
-          const emp = fighters[ei];
-          if (!emp || emp.hp <= 0) return;
-          for (let j = 0; j < N; j++) {
-            const f = fighters[j];
-            if (j === ei || f.hp <= 0 || (f.side ?? 0) === 2 || Math.hypot(f.pos[0] - p.x, f.pos[2] - p.z) > 3.2 || Math.abs(f.pos[1] - mv.y) > 2.5) continue;
-            applyHit(ei, emp, f, 210, { heavy: true, knock: 6, launch: 7, state: 'launched', dur: 0.9, shake: 0.4 });
-          }
-        });
+        startEmpMove(ei, 'dragon', fighters.indexOf(tgt));
         return;
       }
-      // 御林箭雨: on up to two who keep their distance
       if (E.arrows <= 0) {
         E.arrows = 1;
-        const far = others.filter((f) => (f.side ?? 0) !== 2 && flat(f) > 5 && flat(f) < 26);
+        const far = others.filter((f) => flat(f) > 5 && flat(f) < 26);
         if (far.length) {
           E.arrows = wrath ? 8 : 12;
           far.sort(() => Math.random() - 0.5);
-          for (const f of far.slice(0, 2)) {
-            const z = { x: f.pos[0], z: f.pos[2], r: 2.2, t: 1.4 };
-            E.zones.push(z);
-            bombZonesRef.current.push({ x: z.x, z: z.z, r: z.r });
-            vfx.ring(vB.set(z.x, terrainHeight(map.id, z.x, z.z) + 0.08, z.z), z.r, '#ff4040', 0.6, 0.1, 1.4);
-            vfx.emperor.volley(vB.set(z.x, 0, z.z), z.r, z.t, (x, zz) => terrainHeight(map.id, x, zz));
-          }
+          for (const f of far.slice(0, 2)) empArrows(ei, f.pos[0], f.pos[2]);
           (globalThis as any).__TQ_EMPLOG?.push('arrows');
           vfx.damageNumber(vA.set(ex, e.pos[1] + 2.8, ez), '放箭！', true, '#fca5a5');
           gameAudio.playGong();
@@ -5374,8 +5486,8 @@ function GameImpl({
       if (c.wallBlock) c.wallBlock = Math.max(0, c.wallBlock - dt);
       if (c.parkour) c.parkour = Math.max(0, c.parkour - dt);
       const E = emperorRef.current;
-      const emp = fighters.find((f) => f.classId === 'Emperor');
-      if (c.classId === 'Emperor') {
+      const emp = fighters.find(isBossFighter);
+      if (isBossFighter(c)) {
         // 出巡: walk the avenue round the palace; stop and fight whoever comes at him (or hurts him), then walk on
         if (E.lastHp && c.hp < E.lastHp - 1) E.engaged = 4;
         E.lastHp = c.hp;
@@ -5386,12 +5498,12 @@ function GameImpl({
         const [rx, rz] = paradeAt(E.paradeT);
         const off = Math.hypot(rx - c.pos[0], rz - c.pos[2]);
         const reachable = Math.abs(foe.pos[1] - c.pos[1]) < 2.4 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) < 11;
-        if (E.move) {
+        if (c.empMove) {
           // mid move: planted
           it.move.set(0, 0, 0);
           it.request = null;
           it.block = false;
-          it.faceYaw = E.move.yaw + Math.PI;
+          it.faceYaw = c.empMove.yaw + Math.PI;
           return;
         }
         if (E.engaged > 0 && reachable && off < 14) {
@@ -5505,7 +5617,7 @@ function GameImpl({
     }
     function courtyardFall(i: number) {
       const c = fighters[i];
-      if (c.classId === 'Emperor') {
+      if (isBossFighter(c)) {
         // his guards haul him straight back up to the ridge
         const [px, pz] = paradeAt(emperorRef.current.paradeT);
         c.pos = [px, ROOF.street + 1.5, pz];
@@ -5644,6 +5756,7 @@ function GameImpl({
         }
       }
 
+      stepEmperors();
       if (map.id === 'sea') updateSea();
       if (map.id === 'glacier') updateGlacier();
       if (map.id === 'rooftop') updateRooftop();

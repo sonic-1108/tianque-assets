@@ -128,6 +128,20 @@ export interface CombatantBuff {
   value: number;
 }
 
+export interface EmpMove {
+  kind: 'might' | 'sweep' | 'dragon';
+  t: number;
+  /** effects' yaw (+Z forward); the game's facing is this + PI */
+  yaw: number;
+  target: number;
+  fired: boolean;
+  lock: boolean;
+  x: number;
+  y: number;
+  z: number;
+  dragon: number; // which pooled dragon
+}
+
 export interface CombatantState {
   id: string;
   isPlayer: boolean;
@@ -198,6 +212,8 @@ export interface CombatantState {
   swarmSafe?: number; // 大漠玉门关: this swarm (its start time) already had you; it won't again
   wallBlock?: number; // walked into a wall just now (an AI jumps it)
   parkour?: number; // 长安: an AI on its way up a wall with a double jump
+  /** 天子: the move under way (横扫千军 / 龙威 / 真龙降世), whoever plays him, boss or hero */
+  empMove?: EmpMove;
   wading?: boolean; // 青冥古林: in or at the edge of the river (no body shadow: it would ghost on the river bed)
   pull?: { x: number; z: number; t: number }; // 锁链钩: being dragged toward (x, z)
   mantraShots?: number; // 六字真言 syllables released so far

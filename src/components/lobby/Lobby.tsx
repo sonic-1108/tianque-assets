@@ -10,6 +10,7 @@ const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Ranger: './portraits/ranger.png?v=2',
   BuddhistMage: './portraits/monk.png',
   Shadowblade: './portraits/shadowblade.png',
+  Emperor: './portraits/emperor.png',
 };
 /** one short line per hero instead of a paragraph */
 const TAG: Partial<Record<CharacterClassId, string>> = {

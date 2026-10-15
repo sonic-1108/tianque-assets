@@ -650,6 +650,7 @@ export class VFXSystem {
     this.monk = new MonkFX(this.root);
     this.emperor = new EmperorFX(this.root);
     this.emperor.embers = (p, n, c) => this.embers(p, n, c, 0.25, 1.5, 0.08);
+    this.emperor.clouds = (p) => this.dustPuff(p, 2, 0.35, 0.5, 1.1, '#fff0c8'); // 祥云 trailing the dragon
     this.root.add(this.sparks.points, this.dust.points, this.debris.mesh);
     for (const ch of this.chains) this.root.add(ch.links, ch.hook);
     for (const sl of this.slots) this.root.add(sl.vortex.group, sl.pillar.group);

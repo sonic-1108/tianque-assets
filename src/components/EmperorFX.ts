@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DragonFX } from './DragonFX';
 
 // ==================================================================
 // 天子 effects: the red warning fan before 横扫千军 and the golden crescent that sweeps it, the golden dragon of
@@ -99,24 +100,7 @@ interface Volley {
   dur: number;
   base: number; // first instance index
 }
-interface Dragon {
-  active: boolean;
-  t: number;
-  origin: THREE.Vector3;
-  target: THREE.Vector3;
-  rise: number;
-  dive: number;
-  hist: THREE.Vector3[];
-  histN: number;
-  onImpact?: () => void;
-  impacted: boolean;
-  dir: number;
-}
 
-const TS = 64; // rings along the dragon
-const TR = 10; // sides round the body
-const FINS = 18;
-const HIST = 150;
 
 export class EmperorFX {
   private root: THREE.Object3D;
@@ -125,17 +109,8 @@ export class EmperorFX {
   private arrowMesh: THREE.InstancedMesh;
   private arrowSlots = 0;
   private volleys: Volley[] = [];
-  private body: THREE.Mesh;
-  private tubeMat: THREE.ShaderMaterial;
-  private fins: THREE.InstancedMesh;
-  private claws: THREE.InstancedMesh;
-  private pts: THREE.Vector3[] = [];
-  private frameN: THREE.Vector3[] = [];
-  private head: THREE.Group;
-  private glow: THREE.PointLight;
-  private dragon: Dragon;
-  private aura: THREE.Mesh;
-  private auraOn = 0;
+  private dragons: DragonFX[] = [];
+  private auras: { mesh: THREE.Mesh; owner: number; on: number; seen: boolean }[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private s = new THREE.Vector3();
@@ -144,6 +119,7 @@ export class EmperorFX {
   private c = new THREE.Color();
   /** set by the owner: where to throw embers along the dragon */
   embers?: (p: THREE.Vector3, n: number, color: THREE.ColorRepresentation) => void;
+  clouds?: (p: THREE.Vector3) => void;
 
   constructor(root: THREE.Object3D) {
     this.root = root;
@@ -191,106 +167,14 @@ export class EmperorFX {
     this.arrowMesh.count = 0;
     this.arrowMesh.frustumCulled = false;
     root.add(this.arrowMesh);
-    // the dragon: scaled body pearls, a dorsal fin row, a head with horns, whiskers and a pearl of light
-    const tubeGeo = new THREE.BufferGeometry();
-    tubeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TS * TR * 3), 3));
-    tubeGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(TS * TR * 3).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
-    const tuv: number[] = [];
-    const tidx: number[] = [];
-    for (let i = 0; i < TS; i++)
-      for (let j = 0; j < TR; j++) {
-        tuv.push(i / (TS - 1), j / TR);
-        if (i < TS - 1) {
-          const a0 = i * TR + j;
-          const a1 = i * TR + ((j + 1) % TR);
-          tidx.push(a0, a0 + TR, a1, a1, a0 + TR, a1 + TR);
-        }
-      }
-    tubeGeo.setAttribute('uv', new THREE.Float32BufferAttribute(tuv, 2));
-    tubeGeo.setIndex(tidx);
-    this.tubeMat = new THREE.ShaderMaterial({
-      transparent: true,
-      toneMapped: false,
-      side: THREE.DoubleSide,
-      uniforms: { uT: { value: 0 }, uA: { value: 1 } },
-      vertexShader: /* glsl */ `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-        void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.0); vN = normalize(mat3(modelMatrix) * normal + vec3(0.0, 1e-4, 0.0)); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
-      fragmentShader: /* glsl */ `uniform float uT; uniform float uA; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-        void main(){
-          // overlapping scales: offset rows of rounded cells, darker at each scale's rim
-          vec2 g = vec2(vUv.x * 42.0, vUv.y * 8.0);
-          g.y += step(1.0, mod(floor(g.x), 2.0)) * 0.5;
-          vec2 f = fract(g) - vec2(0.15, 0.5);
-          float cell = 1.0 - smoothstep(0.25, 0.5, length(f * vec2(1.0, 0.8)));
-          float fres = pow(1.0 - abs(dot(vN, vV)), 2.0);
-          // gold, warming to fire toward the tail, a shimmer running down the body
-          float run = 0.5 + 0.5 * sin(vUv.x * 30.0 - uT * 14.0);
-          vec3 gold = mix(vec3(1.0, 0.78, 0.3), vec3(1.0, 0.45, 0.1), vUv.x * 0.8);
-          vec3 c = gold * (0.55 + 0.6 * cell) + vec3(1.0, 0.9, 0.6) * fres * 1.3 + gold * run * 0.25;
-          // the tail dissolves into flame
-          float a = uA * (1.0 - smoothstep(0.82, 1.0, vUv.x) * (0.6 + 0.4 * sin(vUv.y * 40.0 + uT * 20.0)));
-          gl_FragColor = vec4(c * 1.25, a); }`,
-    });
-    this.body = new THREE.Mesh(tubeGeo, this.tubeMat);
-    this.body.frustumCulled = false;
-    this.body.visible = false;
-    // flame fins along the spine
-    const fin = new THREE.ConeGeometry(0.5, 1.4, 4);
-    fin.translate(0, 0.7, 0);
-    this.fins = new THREE.InstancedMesh(fin, new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff6a1a').multiplyScalar(1.5), toneMapped: false, transparent: true, opacity: 0.9 }), FINS);
-    this.fins.frustumCulled = false;
-    this.fins.visible = false;
-    // four claws
-    const claw = new THREE.ConeGeometry(0.09, 0.5, 5);
-    claw.translate(0, -0.25, 0);
-    this.claws = new THREE.InstancedMesh(claw, new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0c0').multiplyScalar(1.5), toneMapped: false }), 4);
-    this.claws.frustumCulled = false;
-    this.claws.visible = false;
-    root.add(this.body, this.fins, this.claws);
-    this.head = new THREE.Group();
-    const hm = new THREE.MeshStandardMaterial({ color: '#ffc84a', emissive: '#ff9a20', emissiveIntensity: 0.85, metalness: 0.55, roughness: 0.35, flatShading: true });
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), hm);
-    skull.scale.set(1, 0.8, 1.3);
-    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.26, 0.6), hm);
-    snout.position.set(0, -0.06, 0.55);
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.1, 0.5), new THREE.MeshStandardMaterial({ color: '#e06a1a', emissive: '#ff3a0a', emissiveIntensity: 0.9, roughness: 0.5 }));
-    jaw.position.set(0, -0.24, 0.5);
-    jaw.rotation.x = 0.35;
-    this.head.add(skull, snout, jaw);
-    const hornMat = new THREE.MeshStandardMaterial({ color: '#fff0c8', emissive: '#ffcf7a', emissiveIntensity: 0.6, roughness: 0.4 });
-    // a flaming mane swept back from the skull
-    const maneMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff7a1a').multiplyScalar(1.6), toneMapped: false, transparent: true, opacity: 0.9 });
-    for (let k = 0; k < 7; k++) {
-      const mane = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.75, 4), maneMat);
-      const a = (k / 6 - 0.5) * 2.4;
-      mane.position.set(Math.sin(a) * 0.3, 0.1 + Math.cos(a) * 0.22, -0.45);
-      mane.rotation.set(-1.9, 0, -a * 0.6);
-      this.head.add(mane);
-    }
-    for (const sg of [-1, 1]) {
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.8, 6), hornMat);
-      horn.position.set(sg * 0.2, 0.32, -0.25);
-      horn.rotation.set(-1.05, 0, sg * 0.35);
-      const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.03, 1.2, 4), hornMat);
-      wh.position.set(sg * 0.32, -0.1, 0.45);
-      wh.rotation.set(1.2, 0, sg * 1.0);
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2a10').multiplyScalar(2.5), toneMapped: false }));
-      eye.position.set(sg * 0.24, 0.1, 0.25);
-      this.head.add(horn, wh, eye);
-    }
-    this.head.visible = false;
-    // the dragon's light lives in the root and is never hidden, only dimmed to 0: a light that appears or disappears
-    // changes the scene's light count, which makes three.js recompile every material (a black flash while it does)
-    this.glow = new THREE.PointLight('#ffc04a', 0, 14, 1.6);
-    root.add(this.glow);
-    root.add(this.head);
-    this.dragon = { active: false, t: 0, origin: new THREE.Vector3(), target: new THREE.Vector3(), rise: 1.3, dive: 0.7, hist: [], histN: 0, impacted: false, dir: 1 };
-    for (let i = 0; i < HIST; i++) this.dragon.hist.push(new THREE.Vector3());
-    for (let i = 0; i < TS; i++) {
-      this.pts.push(new THREE.Vector3());
-      this.frameN.push(new THREE.Vector3());
+    for (let k = 0; k < 2; k++) {
+      const d = new DragonFX(root);
+      d.embers = (p, n, c) => this.embers?.(p, n, c);
+      d.clouds = (p) => this.clouds?.(p);
+      this.dragons.push(d);
     }
     // wrath aura: a slowly turning golden ring of flame at his feet
+    for (let k = 0; k < 3; k++) {
     const auraMat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -306,11 +190,13 @@ export class EmperorFX {
           vec3 c = mix(vec3(1.0, 0.4, 0.05), vec3(1.0, 0.85, 0.4), lick);
           gl_FragColor = vec4(c * 1.8, band * lick * uA); }`,
     });
-    this.aura = new THREE.Mesh(new THREE.CircleGeometry(1.6, 48), auraMat);
-    this.aura.rotation.x = -Math.PI / 2;
-    this.aura.visible = false;
-    this.aura.renderOrder = 12;
-    root.add(this.aura);
+    const aura = new THREE.Mesh(new THREE.CircleGeometry(1.6, 48), auraMat);
+    aura.rotation.x = -Math.PI / 2;
+    aura.visible = false;
+    aura.renderOrder = 12;
+    root.add(aura);
+    this.auras.push({ mesh: aura, owner: -1, on: 0, seen: false });
+    }
   }
 
   /** a red warning sector on the ground that fills over `dur` seconds (radius in m, arc in radians, yaw = middle) */
@@ -354,66 +240,32 @@ export class EmperorFX {
     this.arrowMesh.count = Math.max(this.arrowMesh.count, this.arrowSlots);
   }
 
-  get dragonActive() {
-    return this.dragon.active;
-  }
-
-  /** 真龙降世: the dragon coils up round `origin` for `rise` s, then dives on `target` (which may be moved while it flies) */
+  /** 真龙降世: the dragon coils up round `origin` for `rise` s, then dives on `target`; returns its handle */
   summonDragon(origin: THREE.Vector3, target: THREE.Vector3, rise: number, dive: number, onImpact: () => void) {
-    const D = this.dragon;
-    D.active = true;
-    D.t = 0;
-    D.origin.copy(origin);
-    D.target.copy(target);
-    D.rise = rise;
-    D.dive = dive;
-    D.onImpact = onImpact;
-    D.impacted = false;
-    D.dir = Math.random() < 0.5 ? 1 : -1;
-    for (const h of D.hist) h.copy(origin);
-    D.histN = 0;
-    this.body.visible = this.fins.visible = this.claws.visible = this.head.visible = true;
+    let k = this.dragons.findIndex((d) => !d.active);
+    if (k < 0) k = 0;
+    this.dragons[k].start(origin, target, rise, dive, onImpact);
+    return k;
   }
-  /** keep the dive homing on the target until it commits */
-  retarget(p: THREE.Vector3) {
-    if (this.dragon.active && this.dragon.t < this.dragon.rise + this.dragon.dive * 0.35) this.dragon.target.copy(p);
-  }
-  get dragonTarget() {
-    return this.dragon.target;
+  /** keep a dive homing on its target until it commits */
+  retarget(k: number, p: THREE.Vector3) {
+    this.dragons[k]?.retarget(p);
   }
 
-  setAura(pos: THREE.Vector3 | null) {
-    if (!pos) {
-      this.auraOn = Math.max(0, this.auraOn - 0.05);
-      if (this.auraOn <= 0) this.aura.visible = false;
-      return;
+  /** the wrath aura under emperor `owner` (a fighter index); null puts it out */
+  setAura(owner: number, pos: THREE.Vector3 | null) {
+    let A = this.auras.find((a) => a.owner === owner);
+    if (!A && pos) {
+      A = this.auras.find((a) => a.on <= 0);
+      if (A) A.owner = owner;
     }
-    this.auraOn = Math.min(1, this.auraOn + 0.05);
-    this.aura.visible = true;
-    this.aura.position.set(pos.x, pos.y + 0.05, pos.z);
-  }
-
-  private headAt(t: number, out: THREE.Vector3) {
-    const D = this.dragon;
-    if (t < D.rise) {
-      // coiling up: two turns round him, widening and climbing
-      const u = t / D.rise;
-      const a = D.dir * u * Math.PI * 4;
-      const r = 1.4 + u * 1.6;
-      return out.set(D.origin.x + Math.cos(a) * r, D.origin.y + 0.6 + u * 5.4, D.origin.z + Math.sin(a) * r);
-    }
-    // diving: from the top of the coil, up and over, then straight down on the mark
-    const u = Math.min(1, (t - D.rise) / D.dive);
-    const a = D.dir * Math.PI * 4;
-    const sx = D.origin.x + Math.cos(a) * 3;
-    const sy = D.origin.y + 6;
-    const sz = D.origin.z + Math.sin(a) * 3;
-    const mx = (sx + D.target.x) / 2;
-    const mz = (sz + D.target.z) / 2;
-    const my = Math.max(sy, D.target.y) + 3.5;
-    const e = u * u; // accelerating
-    const i1 = 1 - e;
-    return out.set(i1 * i1 * sx + 2 * i1 * e * mx + e * e * D.target.x, i1 * i1 * sy + 2 * i1 * e * my + e * e * (D.target.y + 0.3), i1 * i1 * sz + 2 * i1 * e * mz + e * e * D.target.z);
+    if (!A) return;
+    A.seen = true;
+    if (!pos) return;
+    A.on = Math.min(1, A.on + 0.05);
+    A.mesh.visible = true;
+    A.mesh.position.set(pos.x, pos.y + 0.05, pos.z);
+    A.mesh.userData.lit = true;
   }
 
   update(dt: number, time: number) {
@@ -461,116 +313,19 @@ export class EmperorFX {
       this.arrowMesh.count = 0;
       this.arrowSlots = 0;
     }
-    // the dragon
-    const D = this.dragon;
-    if (D.active) {
-      D.t += dt;
-      const total = D.rise + D.dive;
-      const hp = this.headAt(Math.min(D.t, total), this.v);
-      // history: newest first
-      const last = D.hist[D.hist.length - 1];
-      for (let k = D.hist.length - 1; k > 0; k--) D.hist[k] = D.hist[k - 1];
-      D.hist[0] = last.copy(hp);
-      D.histN = Math.min(D.hist.length, D.histN + 1);
-      const fade = D.t > total ? Math.max(0, 1 - (D.t - total) / 0.35) : Math.min(1, D.t / 0.2);
-      // the body follows the head's trail: sample it evenly by distance, so the dragon keeps its length at any speed
-      const LEN = 9;
-      let acc = 0;
-      let hi = 0;
-      this.pts[0].copy(D.hist[0]);
-      for (let k = 1; k < TS; k++) {
-        const want = (k / (TS - 1)) * LEN;
-        while (hi < D.histN - 1) {
-          const seg = D.hist[hi].distanceTo(D.hist[hi + 1]);
-          if (acc + seg >= want) {
-            this.pts[k].lerpVectors(D.hist[hi], D.hist[hi + 1], seg > 1e-5 ? (want - acc) / seg : 0);
-            break;
-          }
-          acc += seg;
-          hi++;
-        }
-        if (hi >= D.histN - 1) this.pts[k].copy(D.hist[Math.max(0, D.histN - 1)]).y -= (want - acc) * 0.02; // early on: bunched at the start
+    for (const d of this.dragons) d.update(dt, time);
+    for (const A of this.auras) {
+      if (!A.mesh.userData.lit) A.on = Math.max(0, A.on - 0.05);
+      A.mesh.userData.lit = false;
+      if (A.on <= 0) {
+        A.mesh.visible = false;
+        A.owner = -1;
       }
-      const P = this.body.geometry.attributes.position as THREE.BufferAttribute;
-      const Nn = this.body.geometry.attributes.normal as THREE.BufferAttribute;
-      const up = new THREE.Vector3(0, 1, 0);
-      const T = this.w;
-      const Nv = new THREE.Vector3();
-      const Bv = new THREE.Vector3();
-      for (let i = 0; i < TS; i++) {
-        const a0 = this.pts[Math.max(0, i - 1)];
-        const a1 = this.pts[Math.min(TS - 1, i + 1)];
-        T.copy(a0).sub(a1);
-        if (T.lengthSq() < 1e-8) T.set(0, 0, 1);
-        T.normalize();
-        Nv.copy(up).addScaledVector(T, -up.dot(T));
-        if (Nv.lengthSq() < 1e-4) Nv.set(1, 0, 0);
-        Nv.normalize();
-        Bv.crossVectors(T, Nv);
-        this.frameN[i].copy(Nv);
-        const u = i / (TS - 1);
-        // thick behind the head, a slim neck, tapering to the tail; a slow breathing ripple
-        const r = (0.14 + 0.46 * Math.sin(Math.min(1, u * 6 + 0.25) * Math.PI * 0.5) * (1 - u * 0.85)) * (1 + 0.06 * Math.sin(u * 20 - time * 9)) * fade;
-        for (let j = 0; j < TR; j++) {
-          const ang = (j / TR) * Math.PI * 2;
-          const cx = Math.cos(ang);
-          const cy = Math.sin(ang);
-          const nx = Nv.x * cx + Bv.x * cy;
-          const ny = Nv.y * cx + Bv.y * cy;
-          const nz = Nv.z * cx + Bv.z * cy;
-          const o = i * TR + j;
-          P.setXYZ(o, this.pts[i].x + nx * r, this.pts[i].y + ny * r, this.pts[i].z + nz * r);
-          Nn.setXYZ(o, nx, ny, nz);
-        }
-      }
-      P.needsUpdate = true;
-      Nn.needsUpdate = true;
-      this.tubeMat.uniforms.uT.value = time;
-      this.tubeMat.uniforms.uA.value = fade;
-      // fins on the spine, claws under the forebody and the hindquarters
-      for (let k = 0; k < FINS; k++) {
-        const i = 3 + Math.floor((k / FINS) * (TS - 10));
-        const u = i / (TS - 1);
-        const r = 0.14 + 0.46 * (1 - u * 0.85);
-        this.v.copy(this.pts[i]).addScaledVector(this.frameN[i], r * 0.8);
-        this.q.setFromUnitVectors(up, this.frameN[i]);
-        this.s.set(r * 0.5, r * (0.9 + 0.3 * Math.sin(time * 14 + k)) * fade, r * 0.5);
-        this.fins.setMatrixAt(k, this.m.compose(this.v, this.q, this.s));
-      }
-      this.fins.instanceMatrix.needsUpdate = true;
-      [12, 13, 34, 35].forEach((i, k) => {
-        this.v.copy(this.pts[i]).addScaledVector(this.frameN[i], -0.3);
-        this.q.setFromUnitVectors(up, this.frameN[i]);
-        this.v.x += (k % 2 ? 0.25 : -0.25) * Math.cos(time * 8 + k);
-        this.s.setScalar(fade);
-        this.claws.setMatrixAt(k, this.m.compose(this.v, this.q, this.s));
-      });
-      this.claws.instanceMatrix.needsUpdate = true;
-      // head looks along its path
-      const h0 = D.hist[0];
-      const h1 = D.hist[Math.min(D.histN - 1, 2)];
-      this.head.position.copy(h0);
-      this.w.copy(h0).sub(h1);
-      if (this.w.lengthSq() > 1e-6) this.head.lookAt(this.v.copy(h0).add(this.w));
-      this.head.scale.setScalar(2.1 * fade);
-      this.glow.intensity = 30 * fade;
-      this.glow.position.copy(this.head.position);
-      if (this.embers && Math.random() < 0.9) this.embers(this.pts[Math.floor(Math.random() * TS)], 2, '#ffcf5a');
-      if (!D.impacted && D.t >= total) {
-        D.impacted = true;
-        D.onImpact?.();
-      }
-      if (D.t > total + 0.35) {
-        D.active = false;
-        this.body.visible = this.fins.visible = this.claws.visible = this.head.visible = false;
-        this.glow.intensity = 0;
-      }
+      const am = A.mesh.material as THREE.ShaderMaterial;
+      am.uniforms.uT.value = time;
+      am.uniforms.uA.value = A.on;
+      A.mesh.rotation.z = time * 0.6;
     }
-    // aura
-    const am = this.aura.material as THREE.ShaderMaterial;
-    am.uniforms.uT.value = time;
-    am.uniforms.uA.value = this.auraOn;
-    this.aura.rotation.z = time * 0.6;
   }
 }
 
