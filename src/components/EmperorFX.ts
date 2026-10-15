@@ -124,7 +124,7 @@ export class EmperorFX {
   constructor(root: THREE.Object3D) {
     this.root = root;
     // warning fans
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const mat = fanMat();
       const m = new THREE.Mesh(sectorGeo(Math.PI * 0.8, 0.0), mat);
       m.visible = false;
@@ -133,7 +133,7 @@ export class EmperorFX {
       this.fans.push({ m, mat, t: 0, dur: 1 });
     }
     // crescents: an outer gold blade and an inner, tighter echo a beat behind
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       const g = new THREE.Group();
       const mats = [crescentMat(), crescentMat()];
       const a = new THREE.Mesh(crescentGeo(Math.PI * 0.8), mats[0]);
@@ -163,7 +163,7 @@ export class EmperorFX {
     });
     const arrowGeo = mergeSimple(parts);
     arrowGeo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-    this.arrowMesh = new THREE.InstancedMesh(arrowGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide, emissive: '#2a1a08' }), 160);
+    this.arrowMesh = new THREE.InstancedMesh(arrowGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide, emissive: '#3a1a06' }), 240);
     this.arrowMesh.count = 0;
     this.arrowMesh.frustumCulled = false;
     root.add(this.arrowMesh);
@@ -213,10 +213,10 @@ export class EmperorFX {
   }
 
   /** the golden crescent of 横扫千军, sweeping out to `radius` */
-  crescent(pos: THREE.Vector3, yaw: number, radius: number) {
+  crescent(pos: THREE.Vector3, yaw: number, radius: number, tilt = 0, height = 0.9) {
     const c = this.crescents.find((x) => !x.g.visible) ?? this.crescents[0];
-    c.g.position.set(pos.x, pos.y + 0.9, pos.z);
-    c.g.rotation.set(0, yaw, 0);
+    c.g.position.set(pos.x, pos.y + height, pos.z);
+    c.g.rotation.set(0, yaw, tilt);
     c.g.scale.set(0.6, 1, 0.6);
     c.radius = radius;
     c.t = 0;
@@ -224,9 +224,8 @@ export class EmperorFX {
   }
 
   /** 御林箭雨: arrows pour into the circle over the last part of `dur`, then stand in the ground for a while */
-  volley(pos: THREE.Vector3, r: number, dur: number, groundAt: (x: number, z: number) => number) {
-    const n = 30;
-    if (this.arrowSlots + n > 160) this.arrowSlots = 0;
+  volley(pos: THREE.Vector3, r: number, dur: number, groundAt: (x: number, z: number) => number, n = 30) {
+    if (this.arrowSlots + n > 240) this.arrowSlots = 0;
     const v: Volley = { arrows: [], t: 0, dur, base: this.arrowSlots };
     this.arrowSlots += n;
     for (let k = 0; k < n; k++) {
@@ -241,10 +240,10 @@ export class EmperorFX {
   }
 
   /** 真龙降世: the dragon coils up round `origin` for `rise` s, then dives on `target`; returns its handle */
-  summonDragon(origin: THREE.Vector3, target: THREE.Vector3, rise: number, dive: number, onImpact: () => void) {
+  summonDragon(origin: THREE.Vector3, target: THREE.Vector3, rise: number, dive: number, onImpact: () => void, fwdYaw?: number) {
     let k = this.dragons.findIndex((d) => !d.active);
     if (k < 0) k = 0;
-    this.dragons[k].start(origin, target, rise, dive, onImpact);
+    this.dragons[k].start(origin, target, rise, dive, onImpact, fwdYaw);
     return k;
   }
   /** keep a dive homing on its target until it commits */

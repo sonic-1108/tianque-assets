@@ -223,10 +223,10 @@ interface AIMemory {
 
 /** 天子's moves, boss or hero: tuned per user (the boss's numbers are scaled up again by his damage factor) */
 const EMP = {
-  sweep: { boss: { wind: 0.75, r: 5.8, dmg: 160 }, hero: { wind: 0.42, r: 5.2, dmg: 150 } },
-  might: { boss: { wind: 0.45, r: 5.2, dmg: 140 }, hero: { wind: 0.3, r: 4.5, dmg: 115 } },
+  sweep: { boss: { wind: 0.75, r: 5.8, dmg: 160 }, hero: { wind: 0.1, r: 5.4, dmg: 95 } }, // the hero cuts twice
+  might: { boss: { wind: 0.45, r: 5.2, dmg: 140 }, hero: { wind: 0.12, r: 5, dmg: 130 } },
   dragon: { boss: { dmg: 210, r: 3.2 }, hero: { dmg: 240, r: 3.4 } },
-  arrows: { boss: { dmg: 170, r: 2.2, t: 1.4 }, hero: { dmg: 150, r: 2.8, t: 1.15 } },
+  arrows: { boss: { dmg: 170, r: 2.2, t: 1.4 }, hero: { dmg: 60, r: 3.4, t: 0.6 } }, // the hero calls three volleys
 };
 /** 天子 the neutral boss of 长安 (side 2); a hero 天子 on a team is an ordinary fighter */
 const isBossFighter = (f: CombatantState | undefined) => !!f && f.classId === 'Emperor' && (f.side ?? 0) === 2;
@@ -2747,8 +2747,15 @@ function GameImpl({
           vfx.embers(vC.set(c.pos[0], c.pos[1] + 0.2, c.pos[2]), 45, '#ffcf5a', 0.8, 3.5, 0.08);
           vfx.flash(vA.set(c.pos[0], c.pos[1] + 1.4, c.pos[2]), '#ffd36a', 70, 0.5, 12);
           vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.8, c.pos[2]), '龙颜大怒', true, '#ffd36a');
+          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 5, '#ff9a2a', 0.7, 0.08);
+          vfx.sparkBurst(vC.set(c.pos[0], c.pos[1] + 0.6, c.pos[2]), 60, '#ffcf5a', 9, 0.11, vA.set(0, 1, 0), 1.2);
+          for (let k = 0; k < 6; k++) {
+            const a = (k / 6) * Math.PI * 2;
+            vfx.fireColumn(vB.set(c.pos[0] + Math.cos(a) * 1.6, c.pos[1], c.pos[2] + Math.sin(a) * 1.6), 1.6, '#ffb02a');
+          }
           gameAudio.playGong();
-          if (slot === ME) controller?.addShake(0.2);
+          gameAudio.playBoom();
+          if (slot === ME) controller?.addShake(0.3);
           return true;
         }
         case 'ultimate': {
@@ -5243,11 +5250,19 @@ function GameImpl({
       } else if (kind === 'sweep') {
         const S = boss ? EMP.sweep.boss : EMP.sweep.hero;
         const wind = wrath ? 0.55 : S.wind;
-        e.actionState = 'idle';
-        e.stateTimer = 0;
-        e.stateDuration = 0;
-        vfx.emperor.fan(vA.set(e.pos[0], e.pos[1], e.pos[2]), yaw, S.r, 2.7, wind);
-        vfx.flash(vB.set(e.pos[0], e.pos[1] + 1.4, e.pos[2]), '#ffcf5a', 30, wind, 6);
+        if (boss) {
+          // the boss telegraphs: a red fan fills on the ground
+          e.actionState = 'idle';
+          e.stateTimer = 0;
+          e.stateDuration = 0;
+          vfx.emperor.fan(vA.set(e.pos[0], e.pos[1], e.pos[2]), yaw, S.r, 2.7, wind);
+        } else {
+          e.actionState = 'skill_1';
+          e.stateTimer = 0;
+          e.stateDuration = 0.6;
+          gameAudio.playSwingHeavy();
+        }
+        vfx.flash(vB.set(e.pos[0], e.pos[1] + 1.4, e.pos[2]), '#ffcf5a', 30, Math.max(0.15, wind), 6);
       } else {
         e.actionState = 'skill_4';
         e.stateTimer = 0;
@@ -5256,7 +5271,7 @@ function GameImpl({
         vfx.damageNumber(vB.set(e.pos[0], e.pos[1] + 3, e.pos[2]), '真龙降世', true, '#ffd36a');
         gameAudio.playGong();
         const D = boss ? EMP.dragon.boss : EMP.dragon.hero;
-        M.dragon = vfx.emperor.summonDragon(vA.set(e.pos[0], e.pos[1], e.pos[2]), vB.set(M.x, M.y, M.z), 1.15, 0.8, () => {
+        M.dragon = vfx.emperor.summonDragon(vA.set(e.pos[0], e.pos[1], e.pos[2]), vB.set(M.x, M.y, M.z), boss ? 1.15 : 0.9, boss ? 0.8 : 0.6, () => {
           // the dive lands: a burst of gold where the mark was
           const p = new THREE.Vector3(M.x, M.y + 0.08, M.z);
           vfx.ring(p, 1.6, '#ffffff', 0.25, 0.35, 1);
@@ -5280,18 +5295,22 @@ function GameImpl({
             if (!empFoe(em, f) || Math.hypot(f.pos[0] - p.x, f.pos[2] - p.z) > D.r || Math.abs(f.pos[1] - M.y) > 2.5) continue;
             applyHit(i, em, f, D.dmg, { heavy: true, knock: 6, launch: 7, state: 'launched', dur: 0.9, shake: 0.4 });
           }
-        });
+        }, yaw);
       }
     }
     /** 御林箭雨: a red circle now, arrows out of the sky `t` seconds later */
     function empArrows(i: number, x: number, z: number) {
       const e = fighters[i];
-      const A = isBossFighter(e) ? EMP.arrows.boss : EMP.arrows.hero;
-      const zn = { x, z, r: A.r, t: A.t, owner: i, dmg: A.dmg };
-      emperorRef.current.zones.push(zn);
-      bombZonesRef.current.push({ x, z, r: A.r });
+      const boss = isBossFighter(e);
+      const A = boss ? EMP.arrows.boss : EMP.arrows.hero;
+      const waves = boss ? 1 : 3;
       vfx.ring(vB.set(x, terrainHeight(map.id, x, z) + 0.08, z), A.r, '#ff4040', 0.6, 0.1, A.t);
-      vfx.emperor.volley(vB.set(x, 0, z), A.r, A.t, (xx, zz) => terrainHeight(map.id, xx, zz));
+      for (let w = 0; w < waves; w++) {
+        const t = A.t + w * 0.32;
+        emperorRef.current.zones.push({ x, z, r: A.r, t, owner: i, dmg: A.dmg });
+        if (w === 0) bombZonesRef.current.push({ x, z, r: A.r });
+        vfx.emperor.volley(vB.set(x, 0, z), A.r, t, (xx, zz) => terrainHeight(map.id, xx, zz), boss ? 30 : 34);
+      }
     }
     /** every tick, on every map: emperors' moves under way, arrows in flight, auras */
     function stepEmperors() {
@@ -5303,9 +5322,10 @@ function GameImpl({
         if (z.t > 0) continue;
         E.zones.splice(k, 1);
         const bz = bombZonesRef.current.findIndex((b) => b.x === z.x && b.z === z.z);
-        if (bz >= 0) bombZonesRef.current.splice(bz, 1);
+        if (bz >= 0 && !E.zones.some((o) => o.x === z.x && o.z === z.z)) bombZonesRef.current.splice(bz, 1);
         const gy = terrainHeight(map.id, z.x, z.z);
-        for (let a = 0; a < 10; a++) vfx.sparkBurst(vB.set(z.x + (Math.random() - 0.5) * z.r * 1.6, gy + 0.15, z.z + (Math.random() - 0.5) * z.r * 1.6), 1, '#e7d3a8', 3, 0.04, vC.set(0, 1, 0), 0.3);
+        for (let a = 0; a < 18; a++) vfx.sparkBurst(vB.set(z.x + (Math.random() - 0.5) * z.r * 1.6, gy + 0.15, z.z + (Math.random() - 0.5) * z.r * 1.6), 2, a % 3 ? '#ffd08a' : '#ff6a2a', 4, 0.06, vC.set(0, 1, 0), 0.5);
+        controller?.addShake(0.12);
         vfx.dustPuff(vB.set(z.x, gy + 0.1, z.z), 10, z.r * 0.6, 2, 0.6, '#8b7a66');
         gameAudio.playDartHit();
         const emp = fighters[z.owner];
@@ -5322,7 +5342,7 @@ function GameImpl({
         const boss = isBossFighter(e);
         const wrath = boss ? e.hp < e.maxHp * 0.35 : e.buffs.some((b) => b.type === 'blood_rage');
         vfx.emperor.setAura(ei, wrath && e.hp > 0 ? vA.set(e.pos[0], e.pos[1], e.pos[2]) : null);
-        if (wrath && e.hp > 0 && Math.random() < dt * 8) vfx.embers(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 1, '#ffb347', 0.5, 2, 0.06);
+        if (wrath && e.hp > 0 && Math.random() < dt * (boss ? 8 : 40)) vfx.embers(vB.set(e.pos[0], e.pos[1] + 0.4 + Math.random() * 1.4, e.pos[2]), 1, Math.random() < 0.5 ? '#ffcf5a' : '#ff7a1a', 0.45, 3, 0.08);
         const M = e.empMove;
         if (!M) continue;
         M.t += dt;
@@ -5356,6 +5376,11 @@ function GameImpl({
             vfx.rocks(p, 18, 7, 0.1);
             vfx.sparkBurst(vB.set(ex, e.pos[1] + 0.5, ez), 70, '#ffd36a', 11, 0.12, vC.set(0, 1, 0), 1.6);
             vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '龙威', true, '#ffd36a');
+            for (let k = 0; k < 8; k++) {
+              const a = (k / 8) * Math.PI * 2;
+              vfx.chargeWave(vB.set(ex, e.pos[1] + 0.2, ez), vC.set(Math.sin(a), 0, Math.cos(a)), '#ffd36a');
+            }
+            vfx.later(0.12, () => vfx.ring(p, S.r * 1.4, '#ffe9a8', 0.6, 0.06));
             gameAudio.playBoom();
             gameAudio.playGong();
             controller?.addShake(0.45);
@@ -5373,11 +5398,39 @@ function GameImpl({
             const k = Math.random();
             vfx.embers(vB.set(ex + Math.sin(M.yaw + 0.6) * 0.6, e.pos[1] + 0.8 + k * 1.2, ez + Math.cos(M.yaw + 0.6) * 0.6), 1, '#ffcf5a', 0.15, 3, 0.09);
           }
+          const cut = (second: boolean) => {
+            const p = vA.set(ex, e.pos[1], ez).clone();
+            vfx.emperor.crescent(p, M.yaw + (second ? -0.12 : 0.12), S.r, boss ? 0 : second ? -0.28 : 0.28, second ? 1.1 : 0.8);
+            vfx.flash(vB.set(ex + Math.sin(M.yaw) * 2, e.pos[1] + 1.2, ez + Math.cos(M.yaw) * 2), '#ffcf5a', 80, 0.3, 12);
+            vfx.decal(vB.set(ex + Math.sin(M.yaw) * 2.5, e.pos[1] + 0.02, ez + Math.cos(M.yaw) * 2.5), 3.2, 1.8);
+            for (let k = 0; k < 14; k++) {
+              const a = M.yaw - 1.2 + (k / 13) * 2.4;
+              const r = 2 + Math.random() * (S.r - 2.2);
+              vfx.sparkBurst(vB.set(ex + Math.sin(a) * r, e.pos[1] + 0.9, ez + Math.cos(a) * r), 3, '#ffe08a', 7, 0.1, vC.set(Math.sin(a), 0.3, Math.cos(a)), 0.6);
+            }
+            vfx.dustPuff(vB.set(ex + Math.sin(M.yaw) * 3, e.pos[1] + 0.1, ez + Math.cos(M.yaw) * 3), 16, 2, 4, 0.7, '#cdb88f');
+            gameAudio.playSlam();
+            controller?.addShake(second ? 0.4 : 0.25);
+            hitAll((f) => {
+              const d = flat(f);
+              if (d > S.r || !level(f)) return false;
+              const ang = Math.atan2(f.pos[0] - ex, f.pos[2] - ez) - M.yaw;
+              return Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) < 1.35 || d < 1.2;
+            }, S.dmg, second || boss ? { heavy: true, knock: 9, launch: 3, state: 'knockdown', dur: 0.75, shake: 0.3 } : { knock: 3, dur: 0.35 });
+          };
+          if (!boss && M.fired && !M.lock && M.t >= wind + 0.2) {
+            M.lock = true; // the second, returning cut
+            cut(true);
+          }
           if (!M.fired && M.t >= wind) {
             M.fired = true;
             e.actionState = 'skill_1';
             e.stateTimer = 0;
-            e.stateDuration = 0.55;
+            e.stateDuration = boss ? 0.55 : 0.5;
+            if (!boss) {
+              vfx.damageNumber(vB.set(ex, e.pos[1] + 3, ez), '横扫千军', true, '#ffd36a');
+              cut(false);
+            } else {
             const p = vA.set(ex, e.pos[1], ez).clone();
             vfx.emperor.crescent(p, M.yaw, S.r);
             vfx.flash(vB.set(ex + Math.sin(M.yaw) * 2, e.pos[1] + 1.2, ez + Math.cos(M.yaw) * 2), '#ffcf5a', 80, 0.3, 12);
@@ -5396,8 +5449,9 @@ function GameImpl({
               const ang = Math.atan2(f.pos[0] - ex, f.pos[2] - ez) - M.yaw;
               return Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) < 1.35 || d < 1.2;
             }, S.dmg, { heavy: true, knock: 9, launch: 3, state: 'knockdown', dur: 0.75, shake: 0.3 });
+            }
           }
-          if (M.t > wind + 0.55) e.empMove = undefined;
+          if (M.t > wind + (boss ? 0.55 : 0.45)) e.empMove = undefined;
         } else {
           // 真龙降世: the dragon follows its mark until it commits, then the mark burns on the ground
           const tgt = fighters[M.target];
@@ -5407,7 +5461,7 @@ function GameImpl({
             M.y = tgt.pos[1];
             M.z = tgt.pos[2];
           }
-          if (!M.lock && M.t > 1.35) {
+          if (!M.lock && M.t > (boss ? 1.35 : 0.95)) {
             M.lock = true;
             vfx.emperor.retarget(M.dragon, vB.set(M.x, M.y, M.z));
             const D = boss ? EMP.dragon.boss : EMP.dragon.hero;
@@ -5415,7 +5469,7 @@ function GameImpl({
             vfx.emperor.fan(vB.set(M.x, M.y, M.z), 0, D.r, Math.PI * 2 - 0.001, 0.55);
           }
           // the hero is free again once the dragon is away; the boss stands and watches it land
-          if (M.t > (boss ? 2.6 : 1.3)) e.empMove = undefined;
+          if (M.t > (boss ? 2.6 : 0.8)) e.empMove = undefined;
         }
       }
     }

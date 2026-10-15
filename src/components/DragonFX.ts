@@ -23,7 +23,8 @@ const bodyMat = () =>
   new THREE.ShaderMaterial({
     transparent: true,
     toneMapped: false,
-    side: THREE.DoubleSide,
+    depthWrite: false, // out of the depth buffer, so ambient occlusion never darkens the screen round it
+    side: THREE.FrontSide,
     uniforms: { uT: { value: 0 }, uA: { value: 1 } },
     vertexShader: BODY_VS,
     fragmentShader: /* glsl */ `uniform float uT; uniform float uA; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
@@ -246,10 +247,12 @@ export class DragonFX {
     H.visible = false;
   }
 
-  start(origin: THREE.Vector3, target: THREE.Vector3, rise: number, dive: number, onImpact: () => void) {
+  start(origin: THREE.Vector3, target: THREE.Vector3, rise: number, dive: number, onImpact: () => void, fwdYaw?: number) {
     this.active = true;
     this.t = 0;
     this.origin.copy(origin);
+    // it rises in front of him, not round him: the camera sits behind the caster and the body must never sweep through it
+    if (fwdYaw !== undefined) this.origin.add(new THREE.Vector3(Math.sin(fwdYaw) * 4, 0, Math.cos(fwdYaw) * 4));
     this.target.copy(target);
     this.rise = rise;
     this.dive = dive;

@@ -541,11 +541,11 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     passiveName: '金甲护体',
     passiveDesc: '作为长安首领时：普通攻击打不出硬直，击不飞、打不倒。作为英雄时没有这个被动。',
     skills: [
-      { id: 'sweep_army', name: '横扫千军', key: '1', description: '剑上聚起金火，面前地上亮起一片扇形，0.4秒后一记金色弧光横扫5.2米（150伤害并击倒）。蓄力时被打飞会断招。', mpCost: 20, cooldown: 6, icon: '⚔️' },
-      { id: 'dragon_might', name: '龙威', key: '2', description: '金光往身上一收，随即一声断喝炸开金色气浪：4.5米内的人全部击飞（115伤害）。被围住时用。', mpCost: 25, cooldown: 10, icon: '🐉' },
-      { id: 'imperial_arrows', name: '御林箭雨', key: '3', description: '一挥手，对手脚下亮起红圈（24米内，没人就落在前方），1.15秒后箭雨落下（150伤害）。出手后可以立刻走动。', mpCost: 20, cooldown: 9, icon: '🏹' },
-      { id: 'dragon_wrath', name: '龙颜大怒', key: '4', description: '7秒内脚下燃起金焰：伤害提升35%，移动更快，打中人回血。', mpCost: 30, cooldown: 18, icon: '👑' },
-      { id: 'true_dragon', name: '真龙降世', key: 'R', description: '举剑召出一条金龙，绕身盘旋升空后扑向对手（26米内，没人就扑向前方）。俯冲前对手脚下亮起金圈，约半秒后落下（240伤害并击飞）。金龙一离手就能继续行动。', mpCost: 60, cooldown: 24, icon: '🐲', isSuper: true },
+      { id: 'sweep_army', name: '横扫千军', key: '1', description: '天子剑来回两刀，两道金色弧光横扫面前5.4米：第一刀95伤害打出硬直，第二刀反扫95伤害并击倒。几乎没有前摇。', mpCost: 20, cooldown: 6, icon: '⚔️' },
+      { id: 'dragon_might', name: '龙威', key: '2', description: '一声断喝，金色气浪连同八道金光向四周炸开：5米内的人全部击飞（130伤害）。被围住时用。', mpCost: 25, cooldown: 10, icon: '🐉' },
+      { id: 'imperial_arrows', name: '御林箭雨', key: '3', description: '一挥手，对手脚下亮起红圈（24米内，没人就落在前方），0.6秒后御林军连放三轮箭雨，每轮60伤害，站满三轮共180。出手后可以立刻走动。', mpCost: 20, cooldown: 9, icon: '🏹' },
+      { id: 'dragon_wrath', name: '龙颜大怒', key: '4', description: '7秒内金焰缠身：伤害提升35%，移动更快，打中人回血。开启时身边窜起一圈火柱。', mpCost: 30, cooldown: 18, icon: '👑' },
+      { id: 'true_dragon', name: '真龙降世', key: 'R', description: '举剑召出一条金龙，在身前盘旋升空后扑向对手（26米内，没人就扑向前方）。俯冲前对手脚下亮起金圈，约半秒后落下（240伤害并击飞）。0.8秒后就能继续行动。', mpCost: 60, cooldown: 24, icon: '🐲', isSuper: true },
     ],
   },
   Guard: {
