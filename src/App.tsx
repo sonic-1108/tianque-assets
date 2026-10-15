@@ -845,13 +845,14 @@ export default function App() {
       )}
 
       {/* NICKNAME: asked before the first match */}
-      {(!nickname || editingName) && !modelProgress.isLoading && (
+      {(!nickname || editingName) && (
         <NameGate value={nameDraft} onChange={setNameDraft} onSubmit={() => saveNickname(nameDraft)} onCancel={editingName && nickname ? () => setEditingName(false) : undefined} />
       )}
 
       {/* LOBBY: hero, opponent, battlefield */}
-      {isMapSelectOpen && !modelProgress.isLoading && (
+      {isMapSelectOpen && (
         <Lobby
+          loadPct={modelProgress.isLoading ? modelProgress.progress : undefined}
           nickname={nickname}
           onRename={() => {
             setNameDraft(nickname);
@@ -975,7 +976,9 @@ export default function App() {
       )}
 
       {/* Model Download Loading Overlay */}
-      {modelProgress.isLoading && (
+      {/* in the lobby the models download in the background (出征 shows the progress); the full-screen bar only
+          when a match is waiting on them, or on an error */}
+      {modelProgress.isLoading && (!isMapSelectOpen || !!modelProgress.error) && (
         <CanvasLoadingScreen
           progress={modelProgress.progress}
           error={modelProgress.error}

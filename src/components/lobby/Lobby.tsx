@@ -53,6 +53,8 @@ export interface LobbyProps {
   onlinePanel: React.ReactNode;
   onlineBadge: string;
   version: string;
+  /** the hero models are still downloading: the lobby shows straight away, 出征 waits (0..100) */
+  loadPct?: number;
 }
 
 export function Lobby(p: LobbyProps) {
@@ -238,8 +240,12 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          <button className="tq-go" disabled={p.hostPicks || !map.available || !p.ready} onClick={() => p.onStart(pick)}>
-            {p.hostPicks ? (
+          <button className="tq-go" disabled={p.hostPicks || !map.available || !p.ready || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
+            {p.loadPct !== undefined && !p.hostPicks ? (
+              <small>载入
+                <br />
+                {Math.round(p.loadPct)}%</small>
+            ) : p.hostPicks ? (
               <small>等房主
                 <br />
                 选战场</small>
