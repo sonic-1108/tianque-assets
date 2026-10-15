@@ -255,7 +255,8 @@ export class ImperialFX {
 
   /** load the guard model for the spectral charge (once, in the background) */
   preload() {
-    if (this.loading) return;
+    if (this.loading || (globalThis as any).__TQ_NOGHOST) return; // tests on a software GPU skip the extra models
+
     this.loading = true;
     const base = (import.meta as any).env?.BASE_URL ?? '/';
     const loader = new GLTFLoader();
