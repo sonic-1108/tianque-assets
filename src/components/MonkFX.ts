@@ -229,7 +229,7 @@ function bellMaterial() {
       uniform float uTime, uOpacity, uHit; uniform vec3 uColor;
       varying vec3 vN; varying vec3 vV; varying vec2 vUv;
       void main(){
-        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);
+        float fres = pow(max(0.0, 1.0 - abs(dot(normalize(vN), normalize(vV)))), 2.2);
         // bands of scripture scrolling round the bell
         float band = step(0.5, fract(vUv.y * 6.0)) * (0.5 + 0.5 * step(0.55, fract(vUv.x * 28.0 + uTime * 0.6)));
         float rim = smoothstep(0.92, 1.0, vUv.y) + smoothstep(0.08, 0.0, vUv.y);

@@ -481,7 +481,7 @@ function Snowfall() {
         }`,
       fragmentShader: /* glsl */ `
         varying float vA;
-        void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), pow(1.0 - d * 2.0, 1.4) * vA); }`,
+        void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; gl_FragColor = vec4(vec3(0.97, 0.98, 1.0), pow(max(0.0, 1.0 - d * 2.0), 1.4) * vA); }`,
     });
     return { pts: new THREE.Points(g, mat), mat };
   }, []);

@@ -40,7 +40,7 @@ const bodyMat = () =>
         float cell = 1.0 - smoothstep(0.22, 0.5, length(f * vec2(1.0, 0.85)));
         // belly plates: broad cream bands
         float plate = smoothstep(0.0, 0.12, fract(along * 34.0)) * (1.0 - smoothstep(0.82, 1.0, fract(along * 34.0)));
-        float fres = pow(1.0 - abs(dot(vN, vV)), 2.2);
+        float fres = pow(max(0.0, 1.0 - abs(dot(vN, vV))), 2.2);
         float run = 0.5 + 0.5 * sin(along * 26.0 - uT * 12.0);
         vec3 gold = mix(vec3(1.0, 0.74, 0.22), vec3(1.0, 0.42, 0.08), along * 0.85);
         vec3 c = gold * (0.45 + 0.65 * cell);
@@ -62,7 +62,7 @@ const haloMat = () =>
     uniforms: { uA: { value: 1 } },
     vertexShader: BODY_VS,
     fragmentShader: /* glsl */ `uniform float uA; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-      void main(){ float fres = pow(abs(dot(vN, vV)), 1.5);
+      void main(){ float fres = pow(min(1.0, abs(dot(vN, vV))), 1.5);
         float tail = 1.0 - smoothstep(0.7, 1.0, vUv.x);
         gl_FragColor = vec4(vec3(1.0, 0.7, 0.25) * fres * 0.9, fres * 0.6 * tail * uA); }`,
   });

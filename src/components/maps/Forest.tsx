@@ -1247,7 +1247,7 @@ function GodRays() {
         uniform float uTime; uniform float uRain; uniform float uNight; uniform vec3 uColor; varying vec2 vUv; varying float vSeed; varying vec3 vWP;
         void main(){
           // soft across the beam, fading in under the canopy and out toward the ground
-          float across = pow(sin(vUv.x * 3.14159), 2.0);
+          float across = ((sin(vUv.x * 3.14159)) * (sin(vUv.x * 3.14159)));
           float along = smoothstep(0.0, 0.25, vUv.y) * (1.0 - smoothstep(0.75, 1.0, vUv.y));
           float flick = 0.75 + 0.25 * sin(uTime * 0.7 + vSeed * 9.0) * sin(uTime * 0.31 + vSeed * 3.0);
           float a = across * along * flick * 0.26 * smoothstep(-0.5, 1.0, vWP.y) * (1.0 - smoothstep(0.05, 0.5, uRain)) * (1.0 - uNight);

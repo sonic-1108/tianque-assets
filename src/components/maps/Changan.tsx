@@ -891,7 +891,7 @@ function City() {
           vec3 n = normalize(vN);
           // moonlight from above-left, warm bounce from the street lamps below
           float moon = max(dot(n, normalize(vec3(-0.4, 0.8, -0.45))), 0.0);
-          vec3 col = vec3(0.022, 0.024, 0.032) + vec3(0.05, 0.058, 0.09) * moon + vec3(0.22, 0.08, 0.03) * pow(1.0 - vY, 3.0) * 0.5;
+          vec3 col = vec3(0.022, 0.024, 0.032) + vec3(0.05, 0.058, 0.09) * moon + vec3(0.22, 0.08, 0.03) * pow(max(0.0, 1.0 - vY), 3.0) * 0.5;
           // tile courses
           col *= 0.8 + 0.2 * step(0.5, fract(vY * 9.0));
           col = mix(col, uFog, smoothstep(uNear, uFar, vDepth));

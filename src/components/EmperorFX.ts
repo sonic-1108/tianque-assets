@@ -47,7 +47,7 @@ const crescentMat = () =>
     fragmentShader: /* glsl */ `uniform float uAlpha; varying vec2 vUv;
       void main(){
         // across the band: hot white core at the leading edge, gold tailing off behind
-        float x = vUv.y;
+        float x = clamp(vUv.y, 0.0, 1.0);
         float core = pow(x, 10.0) * 0.6;
         float body = pow(x, 1.6);
         // along the arc: fade at both tips

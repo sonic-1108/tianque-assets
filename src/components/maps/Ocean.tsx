@@ -199,7 +199,7 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
           const float WF = 11.0; // front: steep but wide enough for the mesh to draw it smoothly
           const float WB = 140.0; // back: a long slope
           float prof = u < 0.0 ? exp(-u * u / WF) : exp(-u * u / WB);
-          float along = exp(-pow(p.y / 34.0, 2.0)) * (0.74 + 0.16 * sin(p.y * 0.21 + 1.3) + 0.1 * sin(p.y * 0.57 + uTime * 0.7));
+          float along = exp(-((p.y / 34.0) * (p.y / 34.0))) * (0.74 + 0.16 * sin(p.y * 0.21 + 1.3) + 0.1 * sin(p.y * 0.57 + uTime * 0.7));
           float h = uRogue.z * prof * along;
           float hn = h / max(uRogue.z, 0.01);
           // the crest leans over its face
@@ -245,7 +245,7 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
         float detail = 0.55 * (1.0 - smoothstep(20.0, 120.0, dist));
         vec3 n = normalize(vN + vec3(r0 - rx, 0.0, r0 - rz) * (detail / e) * 0.12);
         float ndv = max(dot(n, V), 0.0);
-        float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+        float fres = 0.02 + 0.98 * pow(max(0.0, 1.0 - ndv), 5.0);
         // storm sky in the reflection: brighter toward the horizon, lit up by lightning
         vec3 R = reflect(-V, n);
         // the same storm sky as the dome overhead: pale near the horizon, the dark cloud deck above, broken up
@@ -256,12 +256,12 @@ export function makeOcean(hull: { halfW: number; z0: number; z1: number }, hold?
         sky += uLightning * vec3(0.75, 0.8, 0.95) * (0.4 + 0.6 * clamp(R.y, 0.0, 1.0));
         // the water body: near-black deep, teal where light comes through the thin crests
         vec3 deep = vec3(0.004, 0.018, 0.026);
-        float thin = smoothstep(0.2, 2.4, vCrest) * pow(1.0 - ndv, 1.5);
+        float thin = smoothstep(0.2, 2.4, vCrest) * pow(max(0.0, 1.0 - ndv), 1.5);
         // the big wave: dark at its foot, light glowing green through the thin water just under the crest
         float glow = smoothstep(0.45, 0.82, vRogue) * (1.0 - smoothstep(0.9, 1.0, vRogue)) * vFace;
         vec3 body = deep + vec3(0.015, 0.11, 0.115) * thin * 1.6 + vec3(0.03, 0.2, 0.2) * thin * uLightning;
         body = mix(body, deep * 0.6, smoothstep(0.05, 0.4, vRogue) * (1.0 - smoothstep(0.4, 0.75, vRogue)) * vFace * 0.6);
-        body += vec3(0.02, 0.16, 0.15) * glow * (0.6 + 0.4 * pow(1.0 - ndv, 1.2)) + vec3(0.05, 0.3, 0.28) * glow * uLightning;
+        body += vec3(0.02, 0.16, 0.15) * glow * (0.6 + 0.4 * pow(max(0.0, 1.0 - ndv), 1.2)) + vec3(0.05, 0.3, 0.28) * glow * uLightning;
         vec3 col = mix(body, sky, fres);
         // lightning glints
         vec3 L = normalize(vec3(0.3, 0.8, -0.5));
@@ -417,7 +417,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             if (rag < 0.05) discard;
             vec3 N = normalize(cross(dFdx(vW), dFdy(vW)));
             vec3 V = normalize(cameraPosition - vW);
-            float fres = pow(1.0 - abs(dot(N, V)), 3.0);
+            float fres = pow(max(0.0, 1.0 - abs(dot(N, V))), 3.0);
             // deep green water low in the sheet, white foam toward the lip
             float foam = smoothstep(0.45, 0.95, vU + vF * 0.35);
             vec3 water = mix(vec3(0.05, 0.2, 0.22), vec3(0.15, 0.38, 0.4), vU);
@@ -448,9 +448,9 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             // as it drains it breaks into runnels and puddles
             float pud = smoothstep(0.1 + smoothstep(2.5, 6.5, t) * 0.4, 0.6, noise(vec2(x * 0.35, uTime * 0.05) + vec2(0.0, uTime * 0.0)) * 0.5 + noise(vec2(x * 0.7 + 3.0, uTime * 0.1)) * 0.5);
             cover *= t > 1.4 ? mix(1.0, pud, smoothstep(1.6, 3.0, t)) : 1.0;
-            float surge = exp(-pow((t - 1.9) * 2.4, 2.0)) + exp(-pow((t - 3.8) * 2.4, 2.0));
+            float surge = exp(-(((t - 1.9) * 2.4) * ((t - 1.9) * 2.4))) + exp(-(((t - 3.8) * 2.4) * ((t - 3.8) * 2.4)));
             float thin = 1.0 - smoothstep(4.0, 6.8, t);
-            float bore = exp(-pow(behind / 0.7, 2.0)) * (t < 1.6 ? 0.45 : 0.15);
+            float bore = exp(-((behind / 0.7) * (behind / 0.7))) * (t < 1.6 ? 0.45 : 0.15);
             return (cover * (0.16 + surge * 0.12) + bore) * thin;
           }
           void main(){
@@ -461,7 +461,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             float rip = (noise(p.xy * 1.3 + vec2(uSide * uTime * 3.0, uTime)) - 0.5) * 0.08 * step(0.01, d);
             p.z += d + rip;
             vD = d;
-            vFoam = noise(vec2(p.x * 2.4 + uSide * t * 6.0, p.y * 3.2 + uTime * 0.6)) * 0.6 + noise(vec2(p.x * 5.0 - uTime, p.y * 6.0)) * 0.4 + exp(-pow(d - 0.4, 2.0) * 30.0) * 0.4;
+            vFoam = noise(vec2(p.x * 2.4 + uSide * t * 6.0, p.y * 3.2 + uTime * 0.6)) * 0.6 + noise(vec2(p.x * 5.0 - uTime, p.y * 6.0)) * 0.4 + exp(-((d - 0.4) * (d - 0.4)) * 30.0) * 0.4;
             vec4 w = modelMatrix * vec4(p, 1.0);
             vW = w.xyz;
             gl_Position = projectionMatrix * viewMatrix * w;
@@ -473,7 +473,7 @@ export function WaveCrash({ beam, deckZ }: { beam: number; deckZ: [number, numbe
             vec3 N = normalize(cross(dFdx(vW), dFdy(vW)));
             if (N.y < 0.0) N = -N;
             vec3 V = normalize(cameraPosition - vW);
-            float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+            float fres = pow(max(0.0, 1.0 - max(dot(N, V), 0.0)), 4.0);
             vec3 L = normalize(vec3(0.2, 0.8, -0.4));
             float spec = pow(max(dot(reflect(-L, N), V), 0.0), 60.0);
             float foam = smoothstep(0.55, 0.95, vFoam) * smoothstep(0.02, 0.2, vD);
@@ -569,7 +569,7 @@ export function CrestSpray({ rogue }: { rogue: THREE.Vector4 }) {
           float z = position.z;
           float L = 1.3;
           float t = fract(uTime / L + aSeed.x) * L;
-          float along = exp(-pow(z / 34.0, 2.0)) * (0.74 + 0.16 * sin(z * 0.21 + 1.3));
+          float along = exp(-((z / 34.0) * (z / 34.0))) * (0.74 + 0.16 * sin(z * 0.21 + 1.3));
           // where the crest is (the same crescent and lean as the wave in the ocean shader)
           float xc = uRogue.y + side * z * z / 140.0 - side * 0.28 * H;
           float yc = H * along;
@@ -634,7 +634,7 @@ export function StormSky({ fog }: { fog: string }) {
             col = mix(col, cloud, smoothstep(0.1, 0.6, dens) * smoothstep(-0.02, 0.12, d.y));
             col += vec3(0.05, 0.06, 0.07) * rim * smoothstep(0.0, 0.3, up);
             // a cold, pale band low on the horizon where the overcast breaks
-            float band = exp(-pow((d.y - 0.035) / 0.05, 2.0)) * (0.55 + 0.45 * fbm5(vec2(atan(d.z, d.x) * 3.0, uTime * 0.02)));
+            float band = exp(-(((d.y - 0.035) / 0.05) * ((d.y - 0.035) / 0.05))) * (0.55 + 0.45 * fbm5(vec2(atan(d.z, d.x) * 3.0, uTime * 0.02)));
             col += vec3(0.09, 0.11, 0.12) * band;
             // rain curtains hanging from the cloud near the horizon
             float az = atan(d.z, d.x);
