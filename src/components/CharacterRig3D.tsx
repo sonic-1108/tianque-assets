@@ -531,6 +531,21 @@ function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallba
     });
 }
 
+/**
+ * Start downloading (and parsing) the models these heroes need right away, before the 3D scene exists: the first
+ * seconds after the page opens go to compiling shaders, and the download used to queue up behind that. The rig
+ * picks up the same cached promise later, so nothing is fetched twice.
+ */
+export function prefetchHeroModels(classes: CharacterClassId[]) {
+  const urls = new Set<string>();
+  for (const c of classes) {
+    urls.add(MODEL_URLS[c] || BERSERKER_MODEL_URL);
+    if (c === 'Emperor' || c === 'Guard') urls.add(BERSERKER_MODEL_URL); // they borrow 霍岩's fighting moves
+  }
+  urls.add(EXTRA_ANIMS_URL);
+  for (const u of urls) loadGLB(u).catch(() => {});
+}
+
 const normBone = (n: string) => n.toLowerCase().replace(/^mixamorig[:_]?/, '').replace(/[^a-z0-9]/g, '');
 
 const ONE_SHOT = new Set<string>(['r_kick', 'r_flip', 'getup', 'attack_1', 'attack_2', 'attack_3', 'skill_1', 'skill_4', 'dodge', 'hit_a', 'hit_b', 'launched', 'knockdown', 'ult_air', 'ult_slam', 'jump']);

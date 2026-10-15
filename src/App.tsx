@@ -21,7 +21,7 @@ import {
   TargetingState,
 } from './types';
 import { CLASS_CONFIGS } from './components/CombatData';
-import { AnimationDebugInfo, ModelLoadProgress } from './components/CharacterRig3D';
+import { AnimationDebugInfo, ModelLoadProgress, prefetchHeroModels } from './components/CharacterRig3D';
 import {
   RotateCw,
   Volume2,
@@ -217,6 +217,11 @@ export default function App() {
   const online = !!net && net.status === 'connected';
   // ---------- the room: four seats, two a side (offline too: the other seats are AIs or empty) ----------
   const [room, setRoom] = useState<RoomSeat[]>(() => defaultRoom('Berserker', '', 'Berserker'));
+  // download the heroes on show straight away, in parallel with the 3D scene starting up
+  useEffect(() => {
+    const extra: CharacterClassId[] = mapId === 'rooftop' ? ['Emperor', 'Guard'] : []; // 长安's court
+    prefetchHeroModels([playerClass, ...room.filter((r) => r.kind !== 'empty').map((r) => r.cls), ...extra]);
+  }, [playerClass, room, mapId]);
   const roomRef = useRef(room);
   roomRef.current = room;
   const localSeat = net && net.role === 'guest' ? room.findIndex((s) => s.kind === 'guest' && s.id === net.myId) : 0;
