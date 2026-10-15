@@ -254,7 +254,17 @@ export default function App() {
   const localSeat = net && net.role === 'guest' ? room.findIndex((s) => s.kind === 'guest' && s.id === net.myId) : 0;
   const lineupKey = JSON.stringify(room.map((s) => [s.kind, s.id, s.cls, s.name])) + '|' + localSeat;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const lineup = useMemo(() => lineupOf(room, Math.max(0, localSeat), mapId), [lineupKey, mapId]);
+  const lineup = useMemo(() => {
+    const l = lineupOf(room, Math.max(0, localSeat), mapId);
+    // nobody on one side (the last AI was just taken out in the lobby): the scene behind the lobby still needs an
+    // opponent to look at, so a stand-in fills the gap until someone is seated (the match can't start like this)
+    for (const sd of [0, 1])
+      if (!l.seats.some((x) => x.side === sd)) {
+        l.seats.splice(l.seats.filter((x) => x.side !== 2).length, 0, { cls: 'Berserker', side: sd, ctl: 'ai', name: aiName('Berserker') });
+        l.seatOf.push(-1);
+      }
+    return l;
+  }, [lineupKey, mapId]);
   const teamFight = lineup.seats.length > 2;
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
