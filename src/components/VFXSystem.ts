@@ -606,13 +606,13 @@ export class VFXSystem {
   private lights: FlashLight[] = [];
   private crackTex = makeCrackTextures();
   // one whirlwind + one rage pillar per fighter slot (0 = player, 1 = opponent)
-  private slots = [0, 1, 2, 3, 4].map(() => ({ vortex: makeVortex(), pillar: makePillar(), vLife: 0, vMax: 0, pLife: 0, pMax: 0 }));
+  private slots = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ vortex: makeVortex(), pillar: makePillar(), vLife: 0, vMax: 0, pLife: 0, pMax: 0 }));
   private time = 0;
   trails: RibbonTrail[] = [];
 
   monk!: MonkFX;
   /** 锁链钩: up to two chains in flight, each a run of iron links ending in a hook */
-  private chains = [0, 1, 2, 3, 4].map(() => {
+  private chains = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => {
     const LINKS = 70;
     const link = new THREE.TorusGeometry(0.055, 0.016, 6, 10);
     const iron = new THREE.MeshStandardMaterial({ color: '#9aa1aa', metalness: 0.85, roughness: 0.35, emissive: '#1b2430', emissiveIntensity: 0.6 });

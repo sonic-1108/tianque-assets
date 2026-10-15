@@ -322,7 +322,7 @@ export class MonkFX {
   private bells: { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; life: number; max: number; hit: number }[] = [];
   private zens: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; life: number; max: number; radius: number }[] = [];
   private time = 0;
-  private targets = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  private targets = Array.from({ length: 9 }, () => new THREE.Vector3()); // one per fighter slot
   private glyphs: { spr: THREE.Sprite; ghosts: THREE.Sprite[]; trail: THREE.Vector3[]; pos: THREE.Vector3; vel: THREE.Vector3; age: number; slot: number; big: boolean; active: boolean; dying: number }[] = [];
   private glyphTex: THREE.Texture[] = [];
   private haloTex: THREE.Texture[] = [];
@@ -365,7 +365,7 @@ export class MonkFX {
     this.buddhaSprite.renderOrder = 4;
     root.add(this.buddhaSprite);
     const bg = bellGeometry();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 9; i++) {
       const mat = bellMaterial();
       const mesh = new THREE.Mesh(bg, mat);
       mesh.visible = false;
@@ -374,7 +374,7 @@ export class MonkFX {
       this.bells.push({ mesh, mat, life: 0, max: 1, hit: 0 });
     }
     const zt = zenTexture();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 9; i++) {
       const mat = new THREE.MeshBasicMaterial({ map: zt, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: new THREE.Color(1.3, 1.0, 0.55), toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4 });
       const mesh = new THREE.Mesh(new THREE.CircleGeometry(1, 64), mat);
       mesh.rotation.x = -Math.PI / 2;

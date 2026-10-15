@@ -14,10 +14,13 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   Ranger: `${import.meta.env.BASE_URL}ranger.glb`,
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
   Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
-  Emperor: `${import.meta.env.BASE_URL}emperor.glb`, // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
+  Emperor: `${import.meta.env.BASE_URL}emperor.glb`,
+  Guard: `${import.meta.env.BASE_URL}guard.glb`, // 御林军 (until it's uploaded, 霍岩's body in red-and-gold armour) // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
 };
 /** 影刃's throwing dagger (Tripo prop, laid along +Y with the grip at the origin; see tools/optimize-prop.mjs) */
 export const DAGGER_URL = `${import.meta.env.BASE_URL}dagger.glb`;
+/** 皇上's 天子剑 (Tripo prop, straightened by tools/optimize-prop.mjs: blade along +Y, origin in the grip) */
+export const EMPEROR_SWORD_URL = `${import.meta.env.BASE_URL}emperor_sword.glb`;
 
 /** Tripo / Mixamo models face +Z. Gameplay forward is -Z, so the visual is turned 180°. */
 export const MODEL_YAW_OFFSET = Math.PI;
@@ -257,6 +260,35 @@ function buildCrown() {
   return g;
 }
 
+/** 御林军 spear: a 2.4 m shaft, gilt ferrules, a leaf blade and a red horsehair tassel; held at the middle */
+function buildSpear() {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: '#4a1e12', roughness: 0.6 });
+  const gold = new THREE.MeshStandardMaterial({ color: '#c9a24a', metalness: 0.9, roughness: 0.3 });
+  const steel = new THREE.MeshStandardMaterial({ color: '#d8dde4', metalness: 0.95, roughness: 0.2 });
+  const red = new THREE.MeshStandardMaterial({ color: '#b3121b', roughness: 0.8 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.02, 2.4, 8), wood);
+  shaft.position.y = 0.3;
+  g.add(shaft);
+  for (const y of [1.48, -0.88]) {
+    const f = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.06, 8), gold);
+    f.position.y = y;
+    g.add(f);
+  }
+  const blade = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.34, 4), steel);
+  blade.scale.set(1, 1, 0.35);
+  blade.position.y = 1.68;
+  g.add(blade);
+  const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 10, 1, true), red);
+  tassel.rotation.x = Math.PI;
+  tassel.position.y = 1.42;
+  g.add(tassel);
+  // laid along the hand's fingers like the blades: shaft runs across the fist
+  g.rotation.set(0, 0, Math.PI / 2);
+  g.position.set(0, 0.08, 0.03);
+  return g;
+}
+
 function buildCleaver(glow: THREE.Color) {
   const group = new THREE.Group();
 
@@ -364,6 +396,49 @@ function daggerModel() {
     );
   return daggerProto;
 }
+let swordProto: Promise<THREE.Object3D> | null = null;
+function swordModel() {
+  if (!swordProto)
+    swordProto = new Promise((resolve, reject) =>
+      new GLTFLoader().load(
+        EMPEROR_SWORD_URL,
+        (g) => {
+          g.scene.traverse((o: any) => {
+            if (o.isMesh) {
+              o.castShadow = true;
+              // a little self-light so the gilt and the blade catch the eye at night
+              const m = (o.material as THREE.MeshStandardMaterial).clone();
+              m.emissive = new THREE.Color('#ffffff');
+              m.emissiveMap = m.map;
+              m.emissiveIntensity = 0.18;
+              o.material = m;
+            }
+          });
+          const box = new THREE.Box3().setFromObject(g.scene);
+          g.scene.scale.setScalar(1.05 / Math.max(0.01, box.max.y - box.min.y)); // about 1 m from pommel to point
+          resolve(g.scene);
+        },
+        undefined,
+        reject
+      )
+    );
+  return swordProto;
+}
+function buildImperialSword(glow: THREE.Color) {
+  const group = new THREE.Group();
+  swordModel()
+    .then((proto) => group.add(proto.clone()))
+    .catch(() => group.add(buildCleaver(glow).group)); // missing file: a cleaver stands in
+  const base = new THREE.Object3D();
+  base.position.y = 0.2;
+  const tip = new THREE.Object3D();
+  tip.position.y = 0.88;
+  group.add(base, tip);
+  const fullerMat = new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0 });
+  const steel = new THREE.MeshStandardMaterial({ color: '#c8d3de', metalness: 0.9, roughness: 0.25 });
+  return { group, base, tip, fullerMat, steel };
+}
+
 function buildDagger(glow: THREE.Color) {
   const group = new THREE.Group();
   daggerModel()
@@ -483,6 +558,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const lastLadderYRef = useRef(0);
   const ladderFwd = useMemo(() => new THREE.Vector3(), []);
   const crownRef = useRef<THREE.Group | null>(null);
+  const spearRef = useRef<THREE.Group | null>(null);
+  const faceLight = useRef<THREE.PointLight>(null);
   const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife>; left?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife> }>({});
 
   useEffect(() => {
@@ -530,6 +607,20 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.color = new THREE.Color(isPlayer ? '#f0c27a' : '#d8c4ff');
         }
         m.emissive = new THREE.Color('#000000');
+        if (classId === 'Guard' && asset.fallback) {
+          // stand-in 御林军: dark crimson lacquer and gilt
+          const lum = m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
+          m.color = new THREE.Color(lum > 0.45 ? '#c9a24a' : '#7a1c16').multiplyScalar(0.6 + lum * 0.6);
+          m.metalness = Math.max(m.metalness ?? 0, 0.3);
+          m.roughness = Math.min(m.roughness ?? 1, 0.6);
+        }
+        if (classId === 'Emperor' && !asset.fallback) {
+          // 皇上's own model: a touch of self-light so his face reads under the night sky
+          m.emissive = new THREE.Color('#ffffff');
+          m.emissiveMap = m.map;
+          m.emissiveIntensity = 0.22;
+          m.envMapIntensity = 1.4;
+        }
         if (classId === 'Emperor' && asset.fallback) {
           // no model yet: 龙袍: everything goes imperial yellow and gold
           const lum = m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
@@ -582,10 +673,18 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const ranger = classId === 'Ranger';
     const shadow = classId === 'Shadowblade';
     const glow = new THREE.Color(classId === 'Emperor' ? '#ffd36a' : ranger ? (isPlayer ? '#2dd4bf' : '#a78bfa') : shadow ? (isPlayer ? '#22d3ee' : '#c084fc') : isPlayer ? '#ff3b1f' : '#7dd3fc');
-    const right = ranger ? buildKnife(glow) : shadow ? buildDagger(glow) : buildCleaver(glow);
+    const right = ranger ? buildKnife(glow) : shadow ? buildDagger(glow) : classId === 'Emperor' ? buildImperialSword(glow) : buildCleaver(glow);
     const left = ranger ? buildKnife(glow) : shadow ? buildDagger(glow) : buildCleaver(glow);
     if (ranger) left.group.visible = false; // 暗器: one knife in the right hand, the rest fly
     if (classId === 'BuddhistMage') right.group.visible = left.group.visible = false; // 梵音 fights bare-handed
+    let spear: THREE.Group | null = null;
+    if (classId === 'Guard') {
+      // 长枪: a long red-tasselled spear in the right hand instead of blades
+      right.group.visible = left.group.visible = false;
+      spear = buildSpear();
+      if (bones.righthand) bones.righthand.add(spear);
+    }
+    spearRef.current = spear;
     let crown: THREE.Group | null = null;
     if (classId === 'Emperor') {
       // 天子剑: one gilded blade (and, only while his own model is missing, a stand-in 冕冠)
@@ -658,6 +757,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       right.group.removeFromParent();
       left.group.removeFromParent();
       crown?.removeFromParent();
+      spear?.removeFromParent();
     };
   }, [model, asset, isPlayer, socketsRef, onAnimationDebug, showBoneAxes, classId]);
 
@@ -721,6 +821,12 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         weaponsRef.current.right.group.scale.setScalar(inv);
         weaponsRef.current.left!.group.scale.setScalar(inv);
         weaponScaledRef.current = true;
+        const sp = spearRef.current;
+        if (sp?.parent) {
+          const ss = new THREE.Vector3();
+          sp.parent.getWorldScale(ss);
+          sp.scale.setScalar(1 / Math.max(ss.x, 0.0001));
+        }
         const cr = crownRef.current;
         if (cr?.parent) {
           const hs = new THREE.Vector3();
@@ -930,6 +1036,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       <group position={[0, asset.floor - HIP_PIVOT, 0]} rotation={[0, MODEL_YAW_OFFSET, 0]} scale={asset.scale}>
         <primitive object={model} />
       </group>
+      {/* 皇上: a soft warm light held in front of his face (the lanterns are all below him) */}
+      {classId === 'Emperor' && <pointLight ref={faceLight} position={[0, 2.0 - HIP_PIVOT, -1.1]} color="#ffe2b0" intensity={3.2} distance={3.2} decay={2} />}
     </group>
   );
 }

@@ -1240,7 +1240,7 @@ export default function App() {
               {teamFight && (
                 <div className="mt-1 flex flex-col gap-1 w-56">
                   {roster.map((r, k) =>
-                    k === lineup.me || r.target ? null : (
+                    k === lineup.me || r.target || r.cls === 'Guard' ? null : (
                       <div key={k} className="flex items-center gap-2 bg-black/60 rounded-md px-2 py-1 border border-zinc-700/60">
                         <span className={`text-[10px] font-black ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'text-emerald-300' : 'text-red-300'}`}>
                           {r.side === 2 ? '皇' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'}

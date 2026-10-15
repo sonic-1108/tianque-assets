@@ -17,7 +17,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, roofFloorAt, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -99,10 +99,11 @@ const SHADOW_ENEMY_COLOR = '#c084fc';
 const phasesFor = (c: CombatantState) =>
   c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : c.classId === 'BuddhistMage' ? MONK_PHASE_CONFIGS : c.classId === 'Shadowblade' ? SHADOW_PHASE_CONFIGS : ACTION_PHASE_CONFIGS;
 /** which side each fighter slot is on (set every frame); side 0 wears the warm colours, side 1 the cold ones */
-const SLOT_SIDE = [0, 1, 0, 1, 2];
+const SLOT_SIDE = [0, 1, 0, 1, 2, 2, 2, 2, 2];
 /** 长安上元夜: where the emperor stands (the middle of the main ridge), how far he'll chase from it, and how long the seal must be held */
-const EMPEROR_HOME: [number, number] = [0, 0];
-const EMPEROR_LEASH = 13;
+/** 长安: the procession starts on the east side of the avenue; a guard's place around the emperor (across, along) */
+const PARADE_START = 35.5;
+const GUARD_SLOTS: [number, number][] = [[-1.7, 1.6], [1.7, 1.6], [-1.7, -1.9], [1.7, -1.9]];
 const SEAL_HOLD = 15;
 const sideA = (slot: number) => (SLOT_SIDE[slot] ?? 1) === 0;
 const colorFor = (slot: number, c: CombatantState) =>
@@ -320,12 +321,12 @@ function GameImpl({
   });
 
   /** one group / rig sockets / combatant ref per fighter slot */
-  const groupRefs = useMemo(() => [0, 1, 2, 3, 4].map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
-  const slotRefs = useMemo(() => [0, 1, 2, 3, 4].map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
+  const groupRefs = useMemo(() => [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
+  const slotRefs = useMemo(() => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const cameraControllerRef = useRef<CameraController | null>(null);
-  const sockets = useMemo(() => [0, 1, 2, 3, 4].map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
+  const sockets = useMemo(() => [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
 
   const slowMoTimerRef = useRef(0);
   const gameTimeRef = useRef(0);
@@ -335,7 +336,7 @@ function GameImpl({
   const eruptRef = useRef({ timer: 9 });
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   /** 长安上元夜 emperor: 龙威 / 箭雨 cooldowns, the arrow circles about to be hit, wrath, out-of-fight timer */
-  const emperorRef = useRef({ might: 5, arrows: 7, zones: [] as { x: number; z: number; r: number; t: number }[], wrath: false, calm: 0 });
+  const emperorRef = useRef({ might: 5, arrows: 7, zones: [] as { x: number; z: number; r: number; t: number }[], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 });
   const forestRef = useRef({ timer: 14 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
   const bgSand = useMemo(() => new THREE.Color('#c08a4e'), []);
@@ -346,26 +347,26 @@ function GameImpl({
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
   const newShipAi = () => ({ helmWait: 10 + Math.random() * 8, goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
-  const shipNavRefs = useRef([0, 1, 2, 3, 4].map(() => newNavState()));
-  const shipAiRefs = useRef([0, 1, 2, 3, 4].map(newShipAi));
-  const desertNavRefs = useRef([0, 1, 2, 3, 4].map(newDesertNav));
+  const shipNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => newNavState()));
+  const shipAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi));
+  const desertNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav));
   /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
-  const desertAiRefs = useRef([0, 1, 2, 3, 4].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
+  const desertAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
-  const footLiftRef = useRef([0, 0, 0, 0, 0]);
-  const visYRef = useRef([0, 0, 0, 0, 0]);
-  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false, false] });
+  const footLiftRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const visYRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false, false, false, false, false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
-  const wallCdRef = useRef([0, 0, 0, 0, 0]);
+  const wallCdRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
   const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
   useEffect(() => {
     pendingResetRef.current = true;
   }, [mapId, playerClass, enemyClass, seats]);
   const projRef = useRef<Projectile[]>([]);
   /** 雪岭: ground height each fighter last stood on (for the no-climbing rule) */
-  const takeoffY = useRef([0, 0, 0, 0, 0]);
+  const takeoffY = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
   /** 六字真言 syllables in flight (host / offline only; the guest sees them through the vfx replay) */
   const glyphRef = useRef<{ idx: number; slot: number; tgt: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
@@ -377,20 +378,20 @@ function GameImpl({
   const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
 
-  const auraTimers = useRef([0, 0, 0, 0, 0]);
-  const footTimers = useRef([0, 0, 0, 0, 0]);
-  const wasGrounded = useRef([true, true, true, true, true]);
+  const auraTimers = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const footTimers = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const wasGrounded = useRef([true, true, true, true, true, true, true, true, true]);
   /** team fights: who each AI is after, and which fighters each attack has already hit this move */
-  const aiTargetRef = useRef([-1, -1, -1, -1, -1]);
+  const aiTargetRef = useRef([-1, -1, -1, -1, -1, -1, -1, -1, -1]);
   /** 怒海战船: this frame's helm orders per ship (+1 toward the other ship, -1 away, 0 none) */
   const helmHold = useRef([0, 0]);
   const lockStepRef = useRef({ n: 0 });
   const spectRef = useRef<{ v: CombatantState | null }>({ v: null });
-  const hitMaskRef = useRef([0, 1, 2, 3, 4].map(() => ({ mask: 0, state: '', t: 0 })));
+  const hitMaskRef = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ mask: 0, state: '', t: 0 })));
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
   const newAiMem = (): AIMemory => ({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
-  const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3, 4].map(newAiMem));
+  const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newAiMem));
 
   // ---------- VFX ----------
   const vfx = useMemo(() => {
@@ -401,7 +402,7 @@ function GameImpl({
     return v;
   }, []);
   const trails = useMemo<{ right: RibbonTrail; left: RibbonTrail }[]>(
-    () => [0, 1, 2, 3, 4].map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
+    () => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
     [vfx]
   );
   useEffect(() => () => vfx.dispose(), [vfx]);
@@ -581,6 +582,26 @@ function GameImpl({
         if (h && h !== c && h.hp > 0 && (h.side ?? 0) !== (c.side ?? 0)) {
           aiTargetRef.current[i] = mapRuntime.seal.holder;
           return h;
+        }
+      }
+      if (aiPick && map.id === 'rooftop' && (c.side ?? 0) !== 2) {
+        let nearOther = 1e9;
+        for (const f of fighters) if (f.hp > 0 && f !== c && (f.side ?? 0) !== (c.side ?? 0) && (f.side ?? 0) !== 2) nearOther = Math.min(nearOther, Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]));
+        const e = fighters.findIndex((f) => f.classId === 'Emperor' && f.hp > 0);
+        if (e >= 0 && nearOther > 12) {
+          // the emperor is the prize: go at him (or at the guard in the way)
+          let pick = e;
+          let pd = Math.hypot(fighters[e].pos[0] - c.pos[0], fighters[e].pos[2] - c.pos[2]);
+          fighters.forEach((f, j) => {
+            if (f.classId !== 'Guard' || f.hp <= 0) return;
+            const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]);
+            if (d < pd - 2.5 && d < 5) {
+              pd = d;
+              pick = j;
+            }
+          });
+          aiTargetRef.current[i] = pick;
+          return fighters[pick];
         }
       }
       let best = -1;
@@ -913,9 +934,9 @@ function GameImpl({
         const y0 = c.pos[1];
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
-        if ((map.id === 'sea' || map.id === 'desert') && c.vel[1] > 0) {
-          // a cabin's (or barracks') ceiling stops a jump
-          const ceil = map.id === 'sea' ? shipCeilAt(c.pos[0], c.pos[2], y0) : desertIndoor(c.pos[0], c.pos[2], y0) ? desertCeil(c.pos[0], c.pos[2]) : 999;
+        if ((map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop') && c.vel[1] > 0) {
+          // a cabin's (or barracks', or a bridge's) ceiling stops a jump
+          const ceil = map.id === 'sea' ? shipCeilAt(c.pos[0], c.pos[2], y0) : map.id === 'rooftop' ? roofCeilAt(c.pos[0], c.pos[2], y0) : desertIndoor(c.pos[0], c.pos[2], y0) ? desertCeil(c.pos[0], c.pos[2]) : 999;
           if (c.pos[1] + 1.85 > ceil) {
             c.pos[1] = Math.max(y0, ceil - 1.85);
             c.vel[1] = 0;
@@ -1754,12 +1775,12 @@ function GameImpl({
         case 'jump': {
           // 暗器: second jump in mid-air (with a somersault)
           const airOk = cur === 'jump' || cur === 'idle' || cur === 'run' || (cur.startsWith('attack_') && phase === 'recovery') || (cur.startsWith('skill_') && phase === 'recovery');
-          if (ranger && !c.isGrounded && !c.doubleJumped && airOk && (c.stamina ?? 100) >= 15) {
+          if ((ranger || map.id === 'rooftop') && !c.isGrounded && !c.doubleJumped && airOk && (c.stamina ?? 100) >= 15) {
             c.stamina = (c.stamina ?? 100) - 15;
             c.staminaDelay = 0.5;
             c.doubleJumped = true;
             c.doubleJumpTimer = 0.45;
-            c.vel[1] = jumpVel * 0.95;
+            c.vel[1] = jumpVel * (map.id === 'rooftop' && !ranger ? 1.12 : 0.95);
             const mv = intent.move;
             if (mv.lengthSq() > 0.01) {
               const sp = speedOf(c);
@@ -2217,7 +2238,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Emperor' ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : att.classId === 'Emperor' ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -3899,7 +3920,18 @@ function GameImpl({
         const total = [0, 1].map((sd) => fighters.filter((f) => (f.side ?? 0) === sd).length);
         fighters.forEach((c) => {
           if ((c.side ?? 0) === 2) {
-            c.pos = [EMPEROR_HOME[0], fy(EMPEROR_HOME[0], EMPEROR_HOME[1], 99), EMPEROR_HOME[1]];
+            // the procession: the emperor on the east avenue, his guards around him
+            const [ex, ez] = paradeAt(PARADE_START);
+            const [fx2, fz2] = paradeAt(PARADE_START + 1);
+            const gi = fighters.filter((f) => f.classId === 'Guard').indexOf(c);
+            let x = ex;
+            let z = ez;
+            if (gi >= 0) {
+              const [ac, al] = GUARD_SLOTS[gi % 4];
+              x += (fx2 - ex) * al - (fz2 - ez) * ac;
+              z += (fz2 - ez) * al + (fx2 - ex) * ac;
+            }
+            c.pos = [x, fy(x, z, 0), z];
             return;
           }
           const sd = (c.side ?? 0) === 0 ? 0 : 1;
@@ -3917,11 +3949,11 @@ function GameImpl({
       }
       if (controller) controller.yaw = p1.rotY;
       for (const a of aiRefs.current) a.think = 1.2;
-      aiTargetRef.current = [-1, -1, -1, -1, -1];
+      aiTargetRef.current = [-1, -1, -1, -1, -1, -1, -1, -1, -1];
       for (const h of hitMaskRef.current) h.mask = 0;
       mapTimeRef.current = 0;
       mapRuntime.seal = { state: 0, x: 0, y: 0, z: 0, holder: -1, t: 0 };
-      emperorRef.current = { might: 5, arrows: 7, zones: [], wrath: false, calm: 0 };
+      emperorRef.current = { might: 5, arrows: 7, zones: [], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 };
       eruptRef.current = { timer: 9 };
       bombZonesRef.current = [];
       mapRuntime.branches.length = 0;
@@ -3944,11 +3976,11 @@ function GameImpl({
       if (map.id === 'sea') setTimeout(() => onRoundEvent?.({ type: 'toast', text: '船舵在主甲板船尾（金色光圈）：走过去按 F 掌舵，朝敌船推就开过去' }), 1500);
       mapRuntime.ballistae = SEA_BALLISTAE.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipNavRefs.current = [0, 1, 2, 3, 4].map(() => newNavState());
+      shipNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => newNavState());
       if (map.id === 'sea') shipGraph();
-      shipAiRefs.current = [0, 1, 2, 3, 4].map(newShipAi);
-      desertNavRefs.current = [0, 1, 2, 3, 4].map(newDesertNav);
-      desertAiRefs.current = [0, 1, 2, 3, 4].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
+      shipAiRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi);
+      desertNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav);
+      desertAiRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
       {
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
         const force = (globalThis as any).__TQ_SWARM;
@@ -3978,6 +4010,7 @@ function GameImpl({
     /** floor height under (x, z): flat everywhere except the glacier valley */
     function fy(x: number, z: number, y = 0.2) {
       if (map.id === 'sea') return shipFloorAt(x, z, y + 0.3);
+      if (map.id === 'rooftop') return roofFloorAt(x, z, y + 0.3);
       return map.terrain ? terrainHeight(map.id, x, z) : 0;
     }
 
@@ -3988,7 +4021,7 @@ function GameImpl({
 
     /** What a fighter at height y would stand on at (x, z): terrain (or the swimming level in deep water) and pillar tops */
     function groundAt(x: number, z: number, y: number, base?: number) {
-      let g = base ?? (map.id === 'sea' ? shipFloorAt(x, z, y) : map.terrain ? terrainHeight(map.id, x, z) : 0);
+      let g = base ?? (map.id === 'sea' ? shipFloorAt(x, z, y) : map.id === 'rooftop' ? roofFloorAt(x, z, y) : map.terrain ? terrainHeight(map.id, x, z) : 0);
       if (map.id === 'forest') g = Math.max(g, FOREST.swimY); // deep water: you float
       for (const pl of map.pillars || []) {
         if (pl.h === undefined || y < pl.h - 0.45) continue;
@@ -4109,7 +4142,7 @@ function GameImpl({
         // knocked into a wall face: the same crunch as a pillar
         if (i >= 0 && sp0 > 0.01) wallSplat(i, c, sp0, c.pos[0] + (vx0 / sp0) * 0.5, c.pos[2] + (vz0 / sp0) * 0.5);
       };
-      if ((map.id !== 'forest' && map.id !== 'desert') || c.treeClimb !== undefined || c.actionState === 'buried') return;
+      if ((map.id !== 'forest' && map.id !== 'desert' && map.id !== 'rooftop') || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
       // the body has some width: test the leading edge (straight ahead and either side of it), not just the
       // centre, or a shoulder sinks a third of a metre into a wall
@@ -4119,18 +4152,19 @@ function GameImpl({
       const fx = mdx / ml;
       const fz = mdz / ml;
       const BR = 0.3;
+      const hAt = (x: number, z: number) => (map.id === 'rooftop' ? roofFloorAt(x, z, c.pos[1] + 0.3) : terrainHeight(map.id, x, z));
       const edgeMax = (x: number, z: number) => {
-        let h = terrainHeight(map.id, x, z);
+        let h = hAt(x, z);
         for (const a of [0, 0.75, -0.75]) {
           const ca = Math.cos(a);
           const sa = Math.sin(a);
-          h = Math.max(h, terrainHeight(map.id, x + (fx * ca - fz * sa) * BR, z + (fx * sa + fz * ca) * BR));
+          h = Math.max(h, hAt(x + (fx * ca - fz * sa) * BR, z + (fx * sa + fz * ca) * BR));
         }
         return h;
       };
       if (!c.isGrounded) {
         // 大漠玉门关, in the air: a wall face stops you; you can only come down on something your feet are above
-        if (map.id !== 'desert') return;
+        if (map.id !== 'desert' && map.id !== 'rooftop') return;
         const above = (x: number, z: number) => edgeMax(x, z) > c.pos[1] + 0.25;
         if (!above(c.pos[0], c.pos[2])) return;
         splat();
@@ -4160,6 +4194,7 @@ function GameImpl({
         return;
       }
       splat();
+      c.wallBlock = 0.35;
       if (!tooHigh(c.pos[0], pz0)) {
         c.pos[2] = pz0;
         c.vel[2] = 0;
@@ -4174,7 +4209,7 @@ function GameImpl({
     }
 
     function ledgeGuard(c: CombatantState, px0: number, pz0: number) {
-      if (!map.terrain || !c.isGrounded || map.id === 'sea' || map.id === 'desert') return; // on the ship (and off the beacon, ramps and walls in the desert) you may step off
+      if (!map.terrain || !c.isGrounded || map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop') return; // on the ship (and off the beacon, ramps and walls in the desert) you may step off
       const s = c.actionState;
       if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || s === 'dodge' || c.hp <= 0) return;
       const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;
@@ -4205,7 +4240,6 @@ function GameImpl({
       }
       if (map.id === 'rooftop') {
         const h = terrainHeight(map.id, x, z);
-        if (h < 0) return true; // courtyard
         if (mapRuntime.ridgeWarn > 0 && h > ROOF.strikeY - 0.6) return true;
         return false;
       }
@@ -4838,6 +4872,11 @@ function GameImpl({
           onRoundEvent?.({ type: 'toast', text: '皇上驾崩！传国玉玺掉了，抢到手守住 15 秒就赢' });
           return;
         }
+        if ((def.side ?? 0) === 2) {
+          def.revived = 9;
+          if (def.classId === 'Guard') vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.2, def.pos[2]), '护驾不力', false, '#fca5a5');
+          return;
+        }
         const up = [0, 1].map((sd) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0));
         if (!up[0] && !up[1]) {
           round.over = true;
@@ -5111,14 +5150,14 @@ function GameImpl({
         if (!emp) continue;
         for (let j = 0; j < N; j++) {
           const f = fighters[j];
-          if (j === ei || f.hp <= 0 || Math.hypot(f.pos[0] - z.x, f.pos[2] - z.z) > z.r || Math.abs(f.pos[1] - gy) > 2.5) continue;
+          if (j === ei || f.hp <= 0 || (f.side ?? 0) === 2 || Math.hypot(f.pos[0] - z.x, f.pos[2] - z.z) > z.r || Math.abs(f.pos[1] - gy) > 2.5) continue;
           applyHit(ei, emp, f, 170, { heavy: true, ranged: true, knock: 2, dur: 0.4, noMark: true });
         }
       }
       if (ei < 0) return;
       const e = fighters[ei];
       if (e.hp <= 0) return;
-      const others = fighters.filter((f, j) => j !== ei && f.hp > 0);
+      const others = fighters.filter((f, j) => j !== ei && f.hp > 0 && (f.side ?? 0) !== 2);
       const near = others.length ? Math.min(...others.map((f) => Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]))) : 99;
       const wrath = e.hp < e.maxHp * 0.35;
       if (wrath && !E.wrath) {
@@ -5151,7 +5190,7 @@ function GameImpl({
         e.stateDuration = 0.5;
         for (let j = 0; j < N; j++) {
           const f = fighters[j];
-          if (j === ei || f.hp <= 0 || Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]) > 5 || Math.abs(f.pos[1] - e.pos[1]) > 2.5) continue;
+          if (j === ei || f.hp <= 0 || (f.side ?? 0) === 2 || Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]) > 5 || Math.abs(f.pos[1] - e.pos[1]) > 2.5) continue;
           applyHit(ei, e, f, 140, { heavy: true, knock: 9, launch: 5, state: 'launched', dur: 0.8, shake: 0.3 });
         }
       }
@@ -5175,20 +5214,79 @@ function GameImpl({
     }
     /** AI on 长安上元夜: the emperor keeps near his ridge; everyone else goes for the seal, and whoever has it keeps away */
     function routeRooftop(i: number, c: CombatantState, foe: CombatantState, it: Intent) {
+      if (c.wallBlock) c.wallBlock = Math.max(0, c.wallBlock - dt);
+      if (c.parkour) c.parkour = Math.max(0, c.parkour - dt);
+      const E = emperorRef.current;
+      const emp = fighters.find((f) => f.classId === 'Emperor');
       if (c.classId === 'Emperor') {
-        const dh = Math.hypot(c.pos[0] - EMPEROR_HOME[0], c.pos[2] - EMPEROR_HOME[1]);
-        const fh = Math.hypot(foe.pos[0] - EMPEROR_HOME[0], foe.pos[2] - EMPEROR_HOME[1]);
-        if (dh > EMPEROR_LEASH || (fh > EMPEROR_LEASH + 2 && dh > 2)) {
-          // too far from the throne: back he goes
-          it.move.set(EMPEROR_HOME[0] - c.pos[0], 0, EMPEROR_HOME[1] - c.pos[2]);
-          if (it.move.lengthSq() > 0.01) it.move.normalize();
-          if (fh > EMPEROR_LEASH + 2) it.request = null;
-        } else if (fh > EMPEROR_LEASH + 2) {
-          it.move.set(0, 0, 0);
-          it.request = null;
-        }
+        // 出巡: walk the avenue round the palace; stop and fight whoever comes at him (or hurts him), then walk on
+        if (E.lastHp && c.hp < E.lastHp - 1) E.engaged = 4;
+        E.lastHp = c.hp;
+        let nd = 1e9;
+        for (const f of fighters) if (f.hp > 0 && (f.side ?? 0) !== 2 && Math.abs(f.pos[1] - c.pos[1]) < 2.4) nd = Math.min(nd, Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]));
+        if (nd < 7) E.engaged = Math.max(E.engaged, 2.5);
+        else E.engaged -= dt;
+        const [rx, rz] = paradeAt(E.paradeT);
+        const off = Math.hypot(rx - c.pos[0], rz - c.pos[2]);
+        const reachable = Math.abs(foe.pos[1] - c.pos[1]) < 2.4 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) < 11;
+        if (E.engaged > 0 && reachable && off < 14) return; // fighting (the AI already steers at them)
+        if (off > 6) E.paradeT = paradeNearest(c.pos[0], c.pos[2]);
+        const [tx, tz] = paradeAt(E.paradeT + 2.5);
+        const d = Math.hypot(tx - c.pos[0], tz - c.pos[2]);
+        if (d < 3) E.paradeT += dt * 1.5;
+        it.move.set(tx - c.pos[0], 0, tz - c.pos[2]);
+        if (d > 0.01) it.move.normalize().multiplyScalar(d > 4 ? 0.55 : 0.2); // a stately walk
+        it.faceYaw = yawTo(c.pos, [tx, 0, tz]);
+        it.request = null;
+        it.block = false;
         return;
       }
+      if (c.classId === 'Guard') {
+        // 护驾: keep their place round the emperor; go for anyone who comes near him, but never far from him
+        if (it.request && it.request !== 'attack' && it.request !== 'dodge') it.request = 'attack'; // a spear, nothing fancier
+        if (!emp || emp.hp <= 0) return;
+        const gi = fighters.filter((f) => f.classId === 'Guard').indexOf(c);
+        const [ax, az] = paradeAt(E.paradeT);
+        const [bx, bz] = paradeAt(E.paradeT + 1);
+        const [ac, al] = GUARD_SLOTS[(gi < 0 ? 0 : gi) % 4];
+        const sx = emp.pos[0] + (bx - ax) * al - (bz - az) * ac;
+        const sz = emp.pos[2] + (bz - az) * al + (bx - ax) * ac;
+        const fromEmp = Math.hypot(c.pos[0] - emp.pos[0], c.pos[2] - emp.pos[2]);
+        const foeToEmp = Math.hypot(foe.pos[0] - emp.pos[0], foe.pos[2] - emp.pos[2]);
+        const foeToMe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+        const threat = foe.hp > 0 && (foe.side ?? 0) !== 2 && Math.abs(foe.pos[1] - c.pos[1]) < 2.4 && (foeToEmp < 6.5 || foeToMe < 4.5);
+        if (threat && fromEmp < 9) return; // at them
+        const d = Math.hypot(sx - c.pos[0], sz - c.pos[2]);
+        it.move.set(sx - c.pos[0], 0, sz - c.pos[2]);
+        if (d > 0.25) it.move.normalize().multiplyScalar(Math.min(1, 0.2 + d * 0.25));
+        else it.move.set(0, 0, 0);
+        it.faceYaw = d > 0.6 ? yawTo(c.pos, [sx, 0, sz]) : emp.rotY;
+        it.request = null;
+        it.block = false;
+        return;
+      }
+      // everyone else: two jumps up a wall that's in the way (stepping out from under the eaves first)
+      if (c.isGrounded && roofCeilAt(c.pos[0], c.pos[2], c.pos[1]) < 900 && (c.wallBlock || foe.pos[1] - c.pos[1] > 1.5)) {
+        let best: [number, number] | null = null;
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * Math.PI * 2;
+          const x = c.pos[0] + Math.cos(a) * 1.6;
+          const z = c.pos[2] + Math.sin(a) * 1.6;
+          if (roofCeilAt(x, z, c.pos[1]) > 900 && roofFloorAt(x, z, c.pos[1]) < c.pos[1] + 0.3) {
+            best = [x, z];
+            break;
+          }
+        }
+        if (best) {
+          it.move.set(best[0] - c.pos[0], 0, best[1] - c.pos[2]).normalize();
+          it.request = null;
+          return;
+        }
+      }
+      if (c.wallBlock && c.isGrounded && !c.parkour && (it.move.lengthSq() > 0.04)) {
+        it.request = 'jump';
+        c.parkour = 1.3;
+      } else if (c.parkour && !c.isGrounded && !c.doubleJumped && c.vel[1] < 1.2) it.request = 'jump';
       const S = mapRuntime.seal;
       if (!S || S.state === 0) return;
       const nearFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
@@ -5227,7 +5325,8 @@ function GameImpl({
       const c = fighters[i];
       if (c.classId === 'Emperor') {
         // his guards haul him straight back up to the ridge
-        c.pos = [EMPEROR_HOME[0], terrainHeight(map.id, EMPEROR_HOME[0], EMPEROR_HOME[1]) + 1.5, EMPEROR_HOME[1]];
+        const [px, pz] = paradeAt(emperorRef.current.paradeT);
+        c.pos = [px, ROOF.street + 1.5, pz];
         c.vel = [0, 0, 0];
         c.isGrounded = false;
         vfx.ring(vA.set(c.pos[0], c.pos[1], c.pos[2]), 2.4, '#ffd36a', 0.5, 0.12, 0.3);
@@ -5274,7 +5373,7 @@ function GameImpl({
           controller?.addShake(0.35);
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,200,120,0.35)' });
           fighters.forEach((c, i) => {
-            if (c.classId !== 'Emperor' && c.pos[1] > ROOF.strikeY - 0.2 && Math.abs(c.pos[2]) < 2.2 && Math.abs(c.pos[0] - mapRuntime.boltX) < 4.5) envHit(i, 140, 7, '烟花'); // the fireworks are for him
+            if ((c.side ?? 0) !== 2 && c.pos[1] > ROOF.strikeY - 0.2 && Math.abs(c.pos[2]) < 2.2 && Math.abs(c.pos[0] - mapRuntime.boltX) < 4.5) envHit(i, 140, 7, '烟花'); // the fireworks are for him
           });
         }
       } else {

@@ -41,10 +41,14 @@ export function lineupOf(room: RoomSeat[], local: number, mapId?: string): { sea
       name: s.kind === 'ai' ? aiName(s.cls) : s.name || (s.kind === 'host' ? '房主' : '侠客'),
     });
   });
-  // 长安上元夜: the emperor stands on the main ridge, on nobody's side
+  // 长安上元夜: the emperor parades round the palace with four guards, on nobody's side
   if (mapId === 'rooftop') {
     seatOf.push(-1);
     seats.push({ cls: 'Emperor', side: 2, ctl: 'ai', name: '皇上' });
+    for (let k = 0; k < 4; k++) {
+      seatOf.push(-1);
+      seats.push({ cls: 'Guard', side: 2, ctl: 'ai', name: '御林军' });
+    }
   }
   return { seats, me, seatOf };
 }

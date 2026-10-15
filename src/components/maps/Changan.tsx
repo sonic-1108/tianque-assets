@@ -454,7 +454,7 @@ function Halls() {
       const wz0 = hl.z0 + 0.9;
       const wz1 = hl.z1 - 0.9;
       const top = hl.eave - 0.9;
-      const bot = ROOF.street + 2.2;
+      const bot = ROOF.street + 0.4;
       const storey = 3.2;
       const faces: [number, number, number, number][] = [
         [wx0, wz1, wx1, wz1],
@@ -470,11 +470,12 @@ function Halls() {
         const ang = Math.atan2(bz - az, bx - ax);
         items.push({ geo: g, mat: wallMat, pos: [(ax + bx) / 2, (top + bot) / 2, (az + bz) / 2], rot: [0, -ang, 0] });
       }
-      const plat = new THREE.BoxGeometry(hl.x1 - hl.x0 - 0.6, 2.2, hl.z1 - hl.z0 - 0.6);
-      items.push({ geo: plat, mat: baseMat, pos: [cx, ROOF.street + 1.1, cz], recv: true });
+      const plat = new THREE.BoxGeometry(hl.x1 - hl.x0 - 1.5, 0.4, hl.z1 - hl.z0 - 1.5);
+      items.push({ geo: plat, mat: baseMat, pos: [cx, ROOF.street + 0.2, cz], recv: true });
     }
     // corridor roofs: flat stone walkways with gilded edges
     const walkMat = new THREE.MeshStandardMaterial({ color: '#2c2624', roughness: 0.45, metalness: 0.05 });
+    const pillarMat = new THREE.MeshStandardMaterial({ color: '#8a1f16', roughness: 0.55 });
     for (const [x0, x1, z0, z1] of ROOF.corridors) {
       const g = new THREE.BoxGeometry(x1 - x0, 0.5, z1 - z0);
       items.push({ geo: g, mat: walkMat, pos: [(x0 + x1) / 2, ROOF.corridor - 0.26, (z0 + z1) / 2], recv: true, cast: true });
@@ -490,8 +491,13 @@ function Halls() {
       const cols = new Float32Array(uv.count * 3).fill(0.85);
       top.setAttribute('color', new THREE.BufferAttribute(cols, 3));
       items.push({ geo: top, mat: roofMat, pos: [(x0 + x1) / 2, ROOF.corridor + 0.002, (z0 + z1) / 2], recv: true });
-      const under = new THREE.BoxGeometry(Math.max(0.3, x1 - x0 - 0.5), ROOF.corridor - ROOF.street - 0.5, Math.max(0.3, z1 - z0 - 0.5));
-      items.push({ geo: under, mat: wallMat, pos: [(x0 + x1) / 2, (ROOF.corridor - 0.5 + ROOF.street) / 2, (z0 + z1) / 2] });
+      // 廊桥: open underneath (the street runs through), carried on four vermilion columns
+      const colH = ROOF.corridor - 0.5 - ROOF.street;
+      const colGeo = new THREE.CylinderGeometry(0.16, 0.18, colH, 10);
+      for (const [px, pz] of [[x0 + 0.3, z0 + 0.3], [x1 - 0.3, z0 + 0.3], [x0 + 0.3, z1 - 0.3], [x1 - 0.3, z1 - 0.3]] as [number, number][])
+        items.push({ geo: colGeo, mat: pillarMat, pos: [px, ROOF.street + colH / 2, pz], cast: true });
+      const beam = new THREE.BoxGeometry(x1 - x0, 0.28, z1 - z0);
+      items.push({ geo: beam, mat: fasciaMat, pos: [(x0 + x1) / 2, ROOF.corridor - 0.62, (z0 + z1) / 2] });
     }
     return items;
   }, [tiles, facade]);
@@ -759,7 +765,7 @@ function Courtyards() {
   return (
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, ROOF.street, 0]} receiveShadow>
-        <planeGeometry args={[54 * GROW, 54 * GROW]} />
+        <planeGeometry args={[100, 100]} />
         <meshStandardMaterial map={paving} roughness={0.6} metalness={0.05} />
       </mesh>
       {items.map(({ x, z }, i) => (
@@ -813,7 +819,7 @@ function City() {
           const x = wx + (rand() - 0.5) * (ward - 12);
           const z = wz + (rand() - 0.5) * (ward - 12);
           const r = Math.hypot(x, z);
-          if (r < 36 * GROW || r > 300) continue;
+          if (r < 70 || r > 300) continue;
           // the 朱雀大街 avenue running north-south stays open
           if (Math.abs(x) < 9) continue;
           const big = rand() < 0.12;
@@ -925,7 +931,7 @@ function City() {
     roofs.instanceMatrix.needsUpdate = true;
     // lantern strings down both sides of the avenue, and a dense glow of street lamps
     for (let z = -300; z < 300; z += 2.2) {
-      if (Math.abs(z) < 32) continue;
+      if (Math.abs(z) < 70) continue;
       for (const sx of [-7.5, 7.5]) {
         lp.push(sx, ROOF.street + 3 + Math.sin(z * 0.7) * 0.4, z);
         col.set(rand() < 0.8 ? '#ff5a2a' : '#ffd27a');
@@ -935,7 +941,7 @@ function City() {
     }
     for (let k = 0; k < 2500; k++) {
       const a = rand() * Math.PI * 2;
-      const r = 30 + Math.pow(rand(), 0.7) * 280;
+      const r = 68 + Math.pow(rand(), 0.7) * 240;
       lp.push(Math.cos(a) * r, ROOF.street + 0.5 + rand() * 3, Math.sin(a) * r);
       col.set(rand() < 0.6 ? '#ff7a30' : '#ffc070');
       lc.push(col.r, col.g, col.b);
@@ -1337,6 +1343,294 @@ function Haze() {
   );
 }
 
+// ---------------------------------------------------------------
+// 上元夜的长街: shops all round the palace square, lit for the festival and crowded with people
+// ---------------------------------------------------------------
+const SHOP_FRONT = 41.6; // the shop fronts stand just outside the street's edge (CHANGAN_EDGE 41)
+const SHOP_DEPTH = 6;
+
+/** one shop bay: a two-storey timber front, open below (lamplit counter, goods, couplets), lattice windows above */
+let shopTexCache: { map: THREE.Texture; emissive: THREE.Texture } | null = null;
+function shopTextures() {
+  if (shopTexCache) return shopTexCache;
+  const W = 256;
+  const H = 384;
+  const draw = (g: CanvasRenderingContext2D, glow: boolean) => {
+    const rand = seeded(glow ? 11 : 11);
+    g.fillStyle = glow ? '#000' : '#3a1a10';
+    g.fillRect(0, 0, W, H);
+    // upper storey (top 45%): lattice windows between posts
+    const up = H * 0.45;
+    if (!glow) {
+      g.fillStyle = '#5a2414';
+      g.fillRect(0, 0, W, up);
+    }
+    for (let k = 0; k < 2; k++) {
+      const x0 = 20 + k * 118;
+      g.fillStyle = glow ? 'rgb(255,170,80)' : '#e8b878';
+      g.fillRect(x0, 34, 98, up - 64);
+      g.strokeStyle = glow ? '#000' : '#4a1c0e';
+      g.lineWidth = 5;
+      for (let i = 1; i < 6; i++) {
+        g.beginPath();
+        g.moveTo(x0 + (98 * i) / 6, 34);
+        g.lineTo(x0 + (98 * i) / 6, up - 30);
+        g.stroke();
+      }
+      for (let j = 1; j < 4; j++) {
+        g.beginPath();
+        g.moveTo(x0, 34 + ((up - 64) * j) / 4);
+        g.lineTo(x0 + 98, 34 + ((up - 64) * j) / 4);
+        g.stroke();
+      }
+    }
+    // ground storey: an open shop, lamplit inside, a counter across the front
+    const g0 = up + 14;
+    g.fillStyle = glow ? 'rgb(255,140,60)' : '#ffb060';
+    g.fillRect(16, g0, W - 32, H - g0 - 6);
+    if (!glow) {
+      // goods on shelves at the back: bolts of silk, jars, lanterns
+      for (let r = 0; r < 3; r++)
+        for (let k = 0; k < 7; k++) {
+          const hue = ['#b81d24', '#e0a030', '#2a6a5a', '#7a3a8a', '#d86a2a'][Math.floor(rand() * 5)];
+          g.fillStyle = hue;
+          g.fillRect(26 + k * 30, g0 + 16 + r * 34, 22, 22);
+        }
+      g.fillStyle = '#4a2010';
+      g.fillRect(16, H - 66, W - 32, 60); // counter
+      g.fillStyle = '#6a3018';
+      g.fillRect(16, H - 66, W - 32, 8);
+    } else {
+      g.fillStyle = '#000';
+      g.fillRect(16, H - 66, W - 32, 60);
+    }
+    // posts and the red couplets (春联) down each post
+    g.fillStyle = glow ? '#000' : '#7a1810';
+    g.fillRect(0, 0, 16, H);
+    g.fillRect(W - 16, 0, 16, H);
+    g.fillRect(0, up - 8, W, 22);
+    g.fillStyle = glow ? 'rgb(90,10,10)' : '#c81e1e';
+    g.fillRect(2, g0 + 6, 12, H - g0 - 80);
+    g.fillRect(W - 14, g0 + 6, 12, H - g0 - 80);
+  };
+  shopTexCache = { map: canvasTex(W, H, (g) => draw(g, false)), emissive: canvasTex(W, H, (g) => draw(g, true)) };
+  return shopTexCache;
+}
+
+/** the shops along the four sides of the square, facing in */
+function shopLayout() {
+  const rand = seeded(77);
+  const shops: { x: number; z: number; w: number; rot: number; h: number }[] = [];
+  for (let side = 0; side < 4; side++) {
+    const span = side % 2 ? 47.6 : 41.5; // north and south rows run on to fill the corners
+    for (let a = -span; a < span - 2; ) {
+      const w = 4.5 + rand() * 2.5;
+      const h = 5.6 + rand() * 1.4;
+      const c = a + w / 2;
+      const off = SHOP_FRONT + SHOP_DEPTH / 2;
+      // side 0 east (+x) facing -x, 1 north (+z), 2 west, 3 south
+      const [x, z] = side === 0 ? [off, c] : side === 1 ? [-c, off] : side === 2 ? [-off, -c] : [c, -off];
+      const rot = side === 0 ? -Math.PI / 2 : side === 1 ? Math.PI : side === 2 ? Math.PI / 2 : 0;
+      shops.push({ x, z, w, rot, h });
+      a += w + 0.15;
+    }
+  }
+  return shops;
+}
+
+function ShopStreet() {
+  const tex = shopTextures();
+  const built = useMemo(() => {
+    const shops = shopLayout();
+    const rand = seeded(91);
+    const front = new THREE.PlaneGeometry(1, 1);
+    front.translate(0, 0.5, 0);
+    const frontMat = new THREE.MeshStandardMaterial({ map: tex.map, emissiveMap: tex.emissive, emissive: '#ffffff', emissiveIntensity: 0.85, roughness: 0.8 });
+    const bodyGeo = new THREE.BoxGeometry(1, 1, 1);
+    bodyGeo.translate(0, 0.5, 0);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: '#3a1a12', roughness: 0.9 });
+    const roofGeo = hipRoofGeometry();
+    const roofMat = new THREE.MeshStandardMaterial({ color: '#23262e', roughness: 0.55, metalness: 0.15 });
+    const awnGeo = new THREE.BoxGeometry(1, 0.12, 1);
+    const fronts = new THREE.InstancedMesh(front, frontMat, shops.length);
+    const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, shops.length);
+    const roofs = new THREE.InstancedMesh(roofGeo, roofMat, shops.length);
+    const awnings = new THREE.InstancedMesh(awnGeo, roofMat, shops.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const base = ROOF.street;
+    // lanterns: under every shop's awning and upper eave, plus strings across the avenue
+    const lan: { p: THREE.Vector3; s: number; c: string }[] = [];
+    // people: in the shop fronts and crowding the doorways
+    const ppl: { x: number; z: number; y: number; rot: number; robe: string; s: number; ph: number }[] = [];
+    const robes = ['#b8202a', '#2b5a8a', '#2f7a5a', '#c08a2a', '#7a3a8a', '#d0603a', '#e8d8b8', '#3a3a5a'];
+    shops.forEach((sh, i) => {
+      q.setFromAxisAngle(up, sh.rot);
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(q); // toward the street
+      const side = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+      const fx = sh.x + fwd.x * (SHOP_DEPTH / 2);
+      const fz = sh.z + fwd.z * (SHOP_DEPTH / 2);
+      m.compose(new THREE.Vector3(sh.x, base, sh.z), q, new THREE.Vector3(sh.w, sh.h, SHOP_DEPTH));
+      bodies.setMatrixAt(i, m);
+      m.compose(new THREE.Vector3(fx + fwd.x * 0.02, base, fz + fwd.z * 0.02), q, new THREE.Vector3(sh.w - 0.1, sh.h - 0.3, 1));
+      fronts.setMatrixAt(i, m);
+      m.compose(new THREE.Vector3(sh.x, base + sh.h, sh.z), q, new THREE.Vector3(sh.w * 1.06, 1.9, SHOP_DEPTH * 1.12));
+      roofs.setMatrixAt(i, m);
+      // the awning over the shop front, between the storeys
+      const ay = base + (sh.h - 0.3) * 0.55;
+      m.compose(new THREE.Vector3(fx + fwd.x * 0.55, ay, fz + fwd.z * 0.55), q, new THREE.Vector3(sh.w, 1, 1.1));
+      awnings.setMatrixAt(i, m);
+      for (const t of [-0.35, 0.35]) {
+        lan.push({ p: new THREE.Vector3(fx + fwd.x * 0.95 + side.x * sh.w * t, ay - 0.45, fz + fwd.z * 0.95 + side.z * sh.w * t), s: 0.24, c: rand() < 0.8 ? '#ff3a1c' : '#ffb347' });
+        lan.push({ p: new THREE.Vector3(fx + fwd.x * 0.5 + side.x * sh.w * t, base + sh.h - 0.5, fz + fwd.z * 0.5 + side.z * sh.w * t), s: 0.2, c: '#ff3a1c' });
+      }
+      // two to four people in each shop, one or two at the door
+      const n = 2 + Math.floor(rand() * 3);
+      for (let k = 0; k < n; k++) {
+        const out = k < 2 && rand() < 0.7;
+        const t = (rand() - 0.5) * (sh.w - 1.2);
+        const back = out ? -0.25 - rand() * 0.4 : 0.7 + rand() * 1.6;
+        ppl.push({
+          x: fx + side.x * t - fwd.x * back,
+          z: fz + side.z * t - fwd.z * back,
+          y: base,
+          rot: sh.rot + (rand() - 0.5) * 0.8,
+          robe: robes[Math.floor(rand() * robes.length)],
+          s: rand() < 0.15 ? 0.62 : 0.92 + rand() * 0.14, // a few children
+          ph: rand() * 6.28,
+        });
+      }
+      // people on the upper storey looking out at the lanterns
+      if (rand() < 0.35) ppl.push({ x: fx - fwd.x * 0.6, z: fz - fwd.z * 0.6, y: ay + 0.1, rot: sh.rot, robe: robes[Math.floor(rand() * robes.length)], s: 0.95, ph: rand() * 6.28 });
+    });
+    // strings of lanterns across the avenue, from the shop eaves to poles on the palace side
+    const poleGeo = new THREE.CylinderGeometry(0.08, 0.1, 6.2, 8);
+    const poles: THREE.Vector3[] = [];
+    const lineP: number[] = [];
+    for (let side = 0; side < 4; side++)
+      for (let a = -36; a <= 36; a += 9) {
+        const inner = 30.8;
+        const [ix, iz, ox, oz] = side === 0 ? [inner, a, SHOP_FRONT, a] : side === 1 ? [-a, inner, -a, SHOP_FRONT] : side === 2 ? [-inner, -a, -SHOP_FRONT, -a] : [a, -inner, a, -SHOP_FRONT];
+        // keep clear of the halls' eaves
+        if (roofHeight(ix, iz) > ROOF.street + 0.5) continue;
+        poles.push(new THREE.Vector3(ix, base + 3.1, iz));
+        const N = 9;
+        let px = ix;
+        let py = base + 5.9;
+        let pz = iz;
+        for (let k = 0; k <= N; k++) {
+          const t = k / N;
+          const x = ix + (ox - ix) * t;
+          const z = iz + (oz - iz) * t;
+          const y = base + 5.9 - Math.sin(t * Math.PI) * 0.9;
+          if (k > 0) lineP.push(px, py, pz, x, y, z);
+          if (k > 0 && k < N) lan.push({ p: new THREE.Vector3(x, y - 0.35, z), s: 0.2, c: k % 3 === 0 ? '#ffb347' : '#ff3a1c' });
+          px = x;
+          py = y;
+          pz = z;
+        }
+      }
+    const poleMesh = new THREE.InstancedMesh(poleGeo, new THREE.MeshStandardMaterial({ color: '#5a1a12', roughness: 0.7 }), Math.max(1, poles.length));
+    poles.forEach((p, i) => poleMesh.setMatrixAt(i, m.makeTranslation(p.x, p.y, p.z)));
+    const lines = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(lineP, 3)), new THREE.LineBasicMaterial({ color: '#2a1a12' }));
+    // lantern bodies: glowing red ovals with gold caps
+    const lanGeo = new THREE.SphereGeometry(1, 12, 8);
+    lanGeo.scale(1, 1.15, 1);
+    const lanMat = new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }); // self-lit, tinted per lantern
+    const lanterns = new THREE.InstancedMesh(lanGeo, lanMat, lan.length);
+    const col = new THREE.Color();
+    lan.forEach((l, i) => {
+      lanterns.setMatrixAt(i, m.compose(l.p, q.identity(), new THREE.Vector3(l.s, l.s, l.s)));
+      lanterns.setColorAt(i, col.set(l.c).multiplyScalar(1.6));
+    });
+    // a soft glow round each lantern
+    const gp: number[] = [];
+    const gc: number[] = [];
+    lan.forEach((l) => {
+      gp.push(l.p.x, l.p.y, l.p.z);
+      col.set(l.c);
+      gc.push(col.r, col.g, col.b);
+    });
+    const glowGeo = new THREE.BufferGeometry();
+    glowGeo.setAttribute('position', new THREE.Float32BufferAttribute(gp, 3));
+    glowGeo.setAttribute('color', new THREE.Float32BufferAttribute(gc, 3));
+    const glow = new THREE.Points(
+      glowGeo,
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: /* glsl */ `attribute vec3 color; varying vec3 vC; void main(){ vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = clamp(260.0 / -mv.z, 2.0, 60.0); vC = color; gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: /* glsl */ `varying vec3 vC; void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float a = pow(max(0.0, 1.0 - d), 2.2) * 0.55; gl_FragColor = vec4(vC * a, a); }`,
+      })
+    );
+    glow.frustumCulled = false;
+    // people: a robe (a tapered column), a head, a topknot or a hat; instanced, swaying a little
+    const robeGeo = new THREE.CylinderGeometry(0.17, 0.32, 1.25, 10);
+    robeGeo.translate(0, 0.62, 0);
+    const headGeo = new THREE.SphereGeometry(0.13, 10, 8);
+    headGeo.translate(0, 1.42, 0);
+    const hatGeo = new THREE.CylinderGeometry(0.06, 0.12, 0.12, 8);
+    hatGeo.translate(0, 1.58, 0);
+    const sleeveGeo = new THREE.CylinderGeometry(0.07, 0.11, 0.6, 6);
+    sleeveGeo.rotateZ(0.5);
+    sleeveGeo.translate(0.26, 1.0, 0.06);
+    const sleeve2 = sleeveGeo.clone();
+    sleeve2.scale(-1, 1, 1);
+    const robeMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: '#e0b48a', roughness: 0.7 });
+    const hairMat = new THREE.MeshStandardMaterial({ color: '#151012', roughness: 0.6 });
+    const robesM = new THREE.InstancedMesh(robeGeo, robeMat, ppl.length);
+    const sleevesL = new THREE.InstancedMesh(sleeveGeo, robeMat, ppl.length);
+    const sleevesR = new THREE.InstancedMesh(sleeve2, robeMat, ppl.length);
+    const heads = new THREE.InstancedMesh(headGeo, skinMat, ppl.length);
+    const hats = new THREE.InstancedMesh(hatGeo, hairMat, ppl.length);
+    ppl.forEach((p, i) => {
+      col.set(p.robe);
+      robesM.setColorAt(i, col);
+      sleevesL.setColorAt(i, col);
+      sleevesR.setColorAt(i, col);
+    });
+    return { fronts, bodies, roofs, awnings, lanterns, glow, poleMesh, lines, ppl, people: [robesM, sleevesL, sleevesR, heads, hats] };
+  }, [tex]);
+  const tmpM = useMemo(() => new THREE.Matrix4(), []);
+  const tmpQ = useMemo(() => new THREE.Quaternion(), []);
+  const tmpS = useMemo(() => new THREE.Vector3(), []);
+  const tmpP = useMemo(() => new THREE.Vector3(), []);
+  const upV = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const frame = useRef(0);
+  useFrame((st) => {
+    // the crowd shifts about, nods and turns to look at the lanterns (every other frame is plenty)
+    if (frame.current++ % 2) return;
+    const t = st.clock.elapsedTime;
+    built.ppl.forEach((p, i) => {
+      const sway = Math.sin(t * 1.3 + p.ph) * 0.06;
+      tmpQ.setFromAxisAngle(upV, p.rot + Math.sin(t * 0.4 + p.ph * 2) * 0.35);
+      tmpP.set(p.x, p.y + Math.abs(Math.sin(t * 2 + p.ph)) * 0.02, p.z);
+      tmpS.set(p.s, p.s * (1 + sway * 0.1), p.s);
+      tmpM.compose(tmpP, tmpQ, tmpS);
+      for (const im of built.people) im.setMatrixAt(i, tmpM);
+    });
+    for (const im of built.people) im.instanceMatrix.needsUpdate = true;
+  });
+  return (
+    <group>
+      <primitive object={built.bodies} />
+      <primitive object={built.fronts} />
+      <primitive object={built.roofs} />
+      <primitive object={built.awnings} />
+      <primitive object={built.lanterns} />
+      <primitive object={built.glow} />
+      <primitive object={built.poleMesh} />
+      <primitive object={built.lines} />
+      {built.people.map((im, k) => (
+        <primitive key={k} object={im} />
+      ))}
+    </group>
+  );
+}
+
 /** 传国玉玺: a jade seal with a coiled-dragon knob. On the roof it stands in a pillar of green light; carried, it
  *  floats over the holder's head, turning */
 function ImperialSeal() {
@@ -1385,6 +1679,7 @@ export function ChanganMap() {
   return (
     <group>
       <ImperialSeal />
+      <ShopStreet />
       <NightSky />
       <City />
       <Landmarks />

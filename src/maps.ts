@@ -572,11 +572,11 @@ export const MAPS = {
     subtitle: '上元节，唐长安满城灯火，打在宫城殿宇的屋顶上',
     icon: '🏮',
     mechanics: [
-      '五座殿顶由廊道连成一片，屋檐平缓，越往屋脊越陡，往上爬要耗体力',
-      '正殿屋脊最高，站上去居高临下；但上元节的烟花会落在正殿屋脊上，看到天上有烟花弹落下、屋脊冒火星就快下来',
-      '殿宇之间是天井，被打进天井会摔伤，再被送回屋顶',
-      '走路不会自己掉下去，被击飞才会',
-      '皇上出征：皇上立在正殿屋脊上，中立，谁靠近打谁。金甲护体，打不飞打不倒；有人近身会放「龙威」震开，离得远会被「御林箭雨」点名（脚下红圈，快躲）；血少了会龙颜大怒',
+      '宫城四周一圈长街，张灯结彩，两边铺子里挤满看灯的百姓；殿宇之间的巷子和廊桥底下都能走',
+      '在这张图上谁都能二段跳：街上连跳两下就能上偏殿的房顶，正殿更高，要从廊桥上去；从房顶跳下来不会摔伤',
+      '五座殿顶由廊桥连成一片，越往屋脊越陡，往上爬要耗体力',
+      '正殿屋脊最高，站上去居高临下；但上元节的烟花会落在正殿屋脊上，看到屋脊冒火星就快下来',
+      '皇上出巡：皇上带着四个御林军在长街上绕宫城巡游，中立，谁靠近打谁，御林军会用长枪护驾（可以先杀护卫）。金甲护体，打不飞打不倒；有人近身会放「龙威」震开，离得远会被「御林箭雨」点名（脚下红圈，快躲）；血少了会龙颜大怒',
       '这张图只看传国玉玺分胜负：斩下皇上，玉玺掉在屋顶上，抢到手守住 15 秒就赢；拿着玉玺的人倒下，玉玺就掉了，谁都能抢',
       '可以把对面砍倒，但砍光了也不算赢，还得去拿玉玺；两边都倒下（比如被皇上收拾了）就是平局',
     ],
@@ -588,6 +588,7 @@ export const MAPS = {
     radius: g1(26),
     spawnPlayer: [0, g1(14)],
     spawnEnemy: [0, -g1(14)],
+    rect: { hx: 41, hz: 41 }, // CHANGAN_EDGE
     background: '#1a1426',
     fog: [40, 420],
     hemi: ['#56619a', '#6a3418', 0.7],
@@ -1115,7 +1116,7 @@ export interface Hall {
   eave: number;
 }
 export const ROOF_RAW = {
-  street: -9,
+  street: -1.6, // the street: two jumps up to a side hall's eaves
   corridor: 3.0,
   halls: [
     { x0: -10, x1: 10, z0: -6, z1: 6, axis: 'x', ridge: 7.4, eave: 4.0 }, // 正殿
@@ -1181,6 +1182,64 @@ export function roofHeight(x: number, z: number) {
   return h > -1e8 ? h : ROOF.street;
 }
 
+/** 长安上元夜: the square of streets around the palace ends here (shop fronts beyond) */
+export const CHANGAN_EDGE = 41;
+/** the emperor's procession goes round the palace along the middle of the avenue */
+export const PARADE_R = 35.5;
+/** under one of the covered bridges (廊桥) that link the halls */
+export function inCorridor(x: number, z: number) {
+  for (const [x0, x1, z0, z1] of ROOF.corridors) if (x >= x0 && x <= x1 && z >= z0 && z <= z1) return true;
+  return false;
+}
+/** what you stand on at (x, z) coming from height y: a bridge deck if you're up on it, the street if you're under it */
+export function roofFloorAt(x: number, z: number, y: number) {
+  let h = -1e9;
+  for (const hl of ROOF.halls) {
+    const v = hallHeight(hl, x, z);
+    // the eaves overhang the street by EAVE_OVER: down there you walk under them, up there you stand on them
+    if (v !== null && y < hl.eave - 1.2 && Math.min(x - hl.x0, hl.x1 - x, z - hl.z0, hl.z1 - z) < EAVE_OVER) continue;
+    if (v !== null && v > h) h = v;
+  }
+  if (h > -1e8) return h;
+  if (inCorridor(x, z) && y > ROOF.corridor - 1.2) return ROOF.corridor;
+  return ROOF.street;
+}
+/** the underside of a bridge or an eave overhead (999 when open sky) */
+export function roofCeilAt(x: number, z: number, y: number) {
+  if (inCorridor(x, z) && y < ROOF.corridor - 1.2) return ROOF.corridor - 0.5;
+  for (const hl of ROOF.halls) if (y < hl.eave - 1.2 && x > hl.x0 && x < hl.x1 && z > hl.z0 && z < hl.z1) return hl.eave - 0.9;
+  return 999;
+}
+/** how far a hall's eaves reach out past its walls */
+export const EAVE_OVER = 0.9;
+/** a point along the procession route, t in metres from the east side, going round anticlockwise (seen from above) */
+export function paradeAt(t: number): [number, number] {
+  const L = PARADE_R * 2;
+  const P = L * 4;
+  let u = ((t % P) + P) % P;
+  const side = Math.floor(u / L);
+  u -= side * L;
+  const a = -PARADE_R + u;
+  if (side === 0) return [PARADE_R, a];
+  if (side === 1) return [-a, PARADE_R];
+  if (side === 2) return [-PARADE_R, -a];
+  return [a, -PARADE_R];
+}
+/** the route distance of the point of the route nearest (x, z) */
+export function paradeNearest(x: number, z: number) {
+  let best = 0;
+  let bd = 1e9;
+  for (let t = 0; t < PARADE_R * 8; t += 1) {
+    const [px, pz] = paradeAt(t);
+    const d = Math.hypot(px - x, pz - z);
+    if (d < bd) {
+      bd = d;
+      best = t;
+    }
+  }
+  return best;
+}
+
 /** Floor height for maps with a height field (0 for flat maps) */
 export function terrainHeight(id: MapId, x: number, z: number) {
   if (id === 'sea') return shipFloorAt(x, z, 99);
@@ -1204,6 +1263,7 @@ export function terrainGradient(id: MapId, x: number, z: number): [number, numbe
   const s = (dx: number, dz: number) => {
     const v = hf(x + dx, z + dz);
     if (id === 'desert' && Math.abs(v - h0) > 0.5) return h0; // a wall face or ledge, not a slope
+    if (id === 'rooftop' && v > h0 + 1.2) return h0; // a hall's wall seen from the street
     return v < h0 - 1.2 ? h0 : v;
   };
   return [(s(e, 0) - s(-e, 0)) / (2 * e), (s(0, e) - s(0, -e)) / (2 * e)];
