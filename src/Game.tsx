@@ -338,7 +338,7 @@ function GameImpl({
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
-  const newShipAi = () => ({ goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
+  const newShipAi = () => ({ helmWait: 10 + Math.random() * 8, goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
   const shipNavRefs = useRef([0, 1, 2, 3].map(() => newNavState()));
   const shipAiRefs = useRef([0, 1, 2, 3].map(newShipAi));
   const desertNavRefs = useRef([0, 1, 2, 3].map(newDesertNav));
@@ -2203,6 +2203,9 @@ function GameImpl({
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
       let dmg = base * (att.classId === 'Berserker' ? 0.85 : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
+      if (inOwnZen(att)) dmg *= 1.1;
+      if (inOwnZen(def)) dmg *= 0.9;
       if ((att.counterTimer ?? 0) > 0) {
         dmg *= 1.5;
         att.counterTimer = 0;
@@ -2609,6 +2612,11 @@ function GameImpl({
     // ======================================================
     // 梵音 (monk)
     // ======================================================
+    /** a monk standing inside his own 禅定结界 */
+    function inOwnZen(c: CombatantState) {
+      const z = c.zenField;
+      return c.classId === 'BuddhistMage' && !!z && z.t > 0 && c.hp > 0 && Math.hypot(c.pos[0] - z.x, c.pos[2] - z.z) < ZEN_R && c.pos[1] - fy(z.x, z.z) < 2.5;
+    }
     /** standing inside the opponent's 禅定结界 */
     function inZen(c: CombatantState) {
       // only the other side's fields slow you
@@ -5771,7 +5779,7 @@ function GameImpl({
           }
           const dirX = hk === 0 ? 1 : -1;
           const push = intent.move.x * dirX;
-          helmHold.current[hk] = push > 0.3 ? 1 : push < -0.3 ? -1 : 0;
+          helmHold.current[hk] = Math.abs(push) > 0.3 ? Math.max(-1, Math.min(1, push)) : 0;
           const hx = X[hk] + SHIP_HELM.x;
           c.pos = [hx, 0, SHIP_HELM.z + 0.8];
           c.vel = [0, 0, 0];
@@ -5928,11 +5936,11 @@ function GameImpl({
         }
       }
     }
-    /** a crossbow bolt strikes: light damage, but it drives the target back and pins them to the deck with a spirit chain */
+    /** a crossbow bolt strikes: a heavy hit (150) that drives the target back and pins them to the deck with a spirit chain */
     function boltHit(bo: (typeof mapRuntime.bolts)[number], owner: CombatantState, def: CombatantState) {
       const before = def.hp;
       const guarding = def.isBlocking;
-      applyHit(bo.slot, owner, def, 38, { knock: 3.2, dur: 0.45, heavy: true, ranged: true, noMark: true });
+      applyHit(bo.slot, owner, def, 150, { knock: 3.6, dur: 0.55, heavy: true, ranged: true, noMark: true });
       const sp = Math.hypot(bo.vx, bo.vz) || 1;
       const dx = bo.vx / sp;
       const dz = bo.vz / sp;
@@ -5984,6 +5992,7 @@ function GameImpl({
       const S = shipAiRefs.current[Math.max(0, slotOf(me))];
       const B = mapRuntime.ballistae;
       S.cool -= dt;
+      S.helmWait -= dt;
       out.interact = false;
       const dist = Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]);
       if (me.ballista !== undefined) {
@@ -6027,13 +6036,14 @@ function GameImpl({
           out.interact = !me.intPrev;
         } else {
           out.interact = false;
-          out.move.set(hk === 0 ? 1 : -1, 0, 0);
+          out.move.set((hk === 0 ? 1 : -1) * 0.6, 0, 0); // an AI helmsman sails steadily, not flat out
         }
         return;
       }
       // mostly it fights; once in a while, when the player is well away and nobody holds a crossbow, it runs for one
       // ships apart and nobody at our wheel: sailing over comes before any crossbow
-      const helmFirst = mapRuntime.board.mode !== 2 && mapRuntime.helmUser[shipOf(me.pos[0])] < 0 && shipOf(foe.pos[0]) !== shipOf(me.pos[0]);
+      // (not straight away: the first stretch of a round it trades crossbow shots)
+      const helmFirst = S.helmWait <= 0 && mapRuntime.board.mode !== 2 && mapRuntime.helmUser[shipOf(me.pos[0])] < 0 && shipOf(foe.pos[0]) !== shipOf(me.pos[0]);
       if (helmFirst && S.goal >= 0 && S.goal !== 99) S.goal = -1;
       if (!helmFirst && S.goal < 0 && S.cool <= 0 && isFree(me) && me.isGrounded) {
         S.cool = 6 + Math.random() * 4;
@@ -6103,7 +6113,7 @@ function GameImpl({
       // the enemy is on the other ship: sail over (the helm) or, alongside, go over the rail at them
       const kMe = shipOf(me.pos[0]);
       const kFoe = shipOf(foe.pos[0]);
-      if (S.goal < 0 && kMe !== kFoe && overShip(foe.pos[0], foe.pos[2]) && !inPlank(me.pos[0], me.pos[2])) {
+      if (S.goal < 0 && kMe !== kFoe && overShip(foe.pos[0], foe.pos[2]) && !inPlank(me.pos[0], me.pos[2]) && (S.helmWait <= 0 || mapRuntime.board.mode === 2)) {
         const X = mapRuntime.shipX;
         const Bd = mapRuntime.board;
         const dirX = Math.sign(X[kFoe] - X[kMe]);
@@ -6203,10 +6213,10 @@ function GameImpl({
             const left = gap - SHIP_GAP.min;
             const dir = k === 0 ? 1 : -1; // toward the other ship
             let dx: number;
-            if (thr[k] > 0) dx = dir * Math.min(left, SHIP_GAP.speed * dt * Math.min(1, 0.25 + left / 6));
+            if (thr[k] > 0) dx = dir * Math.min(left, SHIP_GAP.speed * thr[k] * dt * Math.min(1, 0.25 + left / 6));
             else {
               const room = k === 0 ? X[0] + SHIP_GAP.max / 2 : SHIP_GAP.max / 2 - X[1];
-              dx = -dir * Math.max(0, Math.min(room, SHIP_GAP.speed * 0.8 * dt));
+              dx = -dir * Math.max(0, Math.min(room, SHIP_GAP.speed * 0.8 * -thr[k] * dt));
             }
             if (!dx) continue;
             // everyone and everything aboard goes with her

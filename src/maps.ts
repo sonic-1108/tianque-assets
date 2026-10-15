@@ -462,7 +462,7 @@ export const MAPS = {
       '船舵在主甲板船尾大舱门前（地上有金色光圈）：走过去按 F 掌舵，朝对面船的方向推（WASD）就把自己的船开过去，往回推就拉开；两船贴上自动放下两块跳板，掌舵的人自动松手去冲杀；再掌舵往回推会先收跳板再分开；F 松开船舵，挨打也会被打下来',
       '从跳板边上掉进海里：掉 120 血，被捞回自己船上',
       '货舱里有一桌饭菜，按 F 吃一口回复已损失气血的 10%',
-      '每艘船船头楼和船尾高塔各一台床弩，按 F 抢占射击，能转过来打对面的船，箭能把人钉住',
+      '每艘船船头楼和船尾高塔各一台床弩，按 F 抢占射击，能转过来打对面的船：一箭150伤害，还能把人钉住',
       '巨浪会拍上主甲板把人冲走；躲进船舱或站上高处就不怕',
     ],
     homeClass: 'LightHealer',
@@ -1382,7 +1382,7 @@ for (const p of MAPS.sea.pillars || []) if (p.h !== undefined) p.y0 = shipFloorA
 // (ship-local coordinates above); a ship sits at world x = mapRuntime.shipX[k]. The helms close or open the gap.
 // Every query below takes world coordinates and asks the ship whose side of the gap the point is on.
 // ----------------------------------------------------------------------
-export const SHIP_GAP = { start: 46, min: 26.4, max: 46, speed: 3.0 }; // min: the hulls (12.9 m half beam) just touching
+export const SHIP_GAP = { start: 46, min: 26.4, max: 46, speed: 2.0 }; // min: the hulls (12.9 m half beam) just touching
 /** boarding planks (跳板) dropped across when the ships lie alongside: centre z of each, half width */
 export const SHIP_PLANKS = { z: [-11, -2], half: 1.1 };
 /** standing on a boarding plank (planks down), or on the strip of deck edge where one lands */
