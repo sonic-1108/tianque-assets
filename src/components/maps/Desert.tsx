@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MAPS, DESERT, desertHeight, desertDunes, desertCeil, mapRuntime } from '../../maps';
+import { MAPS, DESERT, desertHeight, desertDunes, desertCeil, mapRuntime, GATE_DOOR, gateLeaf } from '../../maps';
 import { Sky, Banner, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 import { DRINK } from '../climbPose';
 
@@ -382,7 +382,7 @@ const nonIndexed = (g: THREE.BufferGeometry) => {
 };
 
 function FortWalls() {
-  const { walls, merlons, gateWood } = useMemo(() => {
+  const { walls, merlons } = useMemo(() => {
     const H0 = F.half - F.wall; // 16
     const H1 = F.half; // 20
     const parts: THREE.BufferGeometry[] = [];
@@ -479,20 +479,7 @@ function FortWalls() {
       addRow(H0, s * o, H1, s * o, F.corner);
       addRow(-H1, s * o, -H0, s * o, F.corner);
     }
-    // gate doors standing open against the inside of the gate towers
-    const doors: THREE.BufferGeometry[] = [];
-    for (const sz of [1, -1])
-      for (const sx of [1, -1]) {
-        const g = box(0, 0.22, 0, 5.0, 0, F.gate * 0.95);
-        g.translate(sx * F.gate - (sx > 0 ? 0.22 : 0), 0, sz > 0 ? H0 - F.gate * 0.95 - 0.1 : -H0 + 0.1);
-        doors.push(g);
-        for (let k = 0; k < 4; k++) {
-          const st = box(0, 0.06, 0, 0.18, 0, F.gate * 0.95);
-          st.translate(sx * F.gate - (sx > 0 ? 0.28 : -0.22), 0.6 + k * 1.2, sz > 0 ? H0 - F.gate * 0.95 - 0.1 : -H0 + 0.1);
-          doors.push(st);
-        }
-      }
-    return { walls, merlons: mer, gateWood: mergeGeometries(doors.map(nonIndexed), false)! };
+    return { walls, merlons: mer };
   }, []);
   const earth = useMemo(() => makeEarthMaterial('#b39c7c'), []);
   const merMesh = useRef<THREE.InstancedMesh>(null);
@@ -508,9 +495,67 @@ function FortWalls() {
     <group>
       <mesh geometry={walls} material={earth} castShadow receiveShadow />
       <instancedMesh ref={merMesh} args={[merGeo, earth, merlons.length]} castShadow receiveShadow />
-      <mesh geometry={gateWood} castShadow>
-        <meshStandardMaterial color="#5a3a22" roughness={0.85} />
-      </mesh>
+      <GateDoors />
+    </group>
+  );
+}
+
+/** the city gates: two studded leaves per gate, hinged on the towers, swinging as mapRuntime.desert.gate says */
+function GateDoors() {
+  const { leaf, iron } = useMemo(() => {
+    const len = F.gate - GATE_DOOR.hinge;
+    const T = GATE_DOOR.thick;
+    const H = GATE_DOOR.h;
+    const wood: THREE.BufferGeometry[] = [];
+    const metal: THREE.BufferGeometry[] = [];
+    // planks (the leaf runs along local +X from the hinge, faces are ±Z)
+    const planks = 5;
+    for (let k = 0; k < planks; k++) {
+      const a = (len * k) / planks + 0.01;
+      const b = (len * (k + 1)) / planks - 0.01;
+      wood.push(box(a, b, 0, H, -T / 2, T / 2));
+    }
+    // cross battens on both faces
+    for (const y of [0.7, 2.5, 4.3]) for (const sz of [-1, 1]) wood.push(box(0.05, len - 0.05, y, y + 0.22, sz > 0 ? T / 2 : -T / 2 - 0.05, sz > 0 ? T / 2 + 0.05 : -T / 2));
+    // gilt door studs (门钉) in rows, both faces, and an iron strap at each hinge
+    for (let r = 0; r < 7; r++)
+      for (let c = 0; c < 4; c++) {
+        const x = 0.35 + (c * (len - 0.7)) / 3;
+        const y = 0.45 + r * 0.66;
+        for (const sz of [-1, 1]) metal.push(box(x - 0.05, x + 0.05, y - 0.05, y + 0.05, sz > 0 ? T / 2 : -T / 2 - 0.06, sz > 0 ? T / 2 + 0.06 : -T / 2));
+      }
+    for (const y of [0.4, H - 0.6]) metal.push(box(0, 0.6, y, y + 0.14, -T / 2 - 0.04, T / 2 + 0.04));
+    // a ring knocker near the meeting edge
+    for (const sz of [-1, 1]) metal.push(box(len - 0.42, len - 0.28, 2.2, 2.36, sz > 0 ? T / 2 : -T / 2 - 0.08, sz > 0 ? T / 2 + 0.08 : -T / 2));
+    return { leaf: mergeGeometries(wood.map(nonIndexed), false)!, iron: mergeGeometries(metal.map(nonIndexed), false)! };
+  }, []);
+  const woodMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#5a3a22', roughness: 0.85 }), []);
+  const ironMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#c9a24a', metalness: 0.8, roughness: 0.35 }), []);
+  const refs = useRef<(THREE.Group | null)[]>([]);
+  const order = [
+    [0, -1],
+    [0, 1],
+    [1, -1],
+    [1, 1],
+  ] as const;
+  useFrame(() => {
+    const gs = mapRuntime.desert?.gate ?? [0, 0];
+    order.forEach(([g, sx], k) => {
+      const o = refs.current[k];
+      if (!o) return;
+      const L = gateLeaf(g, sx, gs[g] ?? 0);
+      o.position.set(L.hx, 0, L.hz);
+      o.rotation.y = Math.atan2(-L.dz, L.dx);
+    });
+  });
+  return (
+    <group>
+      {order.map((_, k) => (
+        <group key={k} ref={(o) => (refs.current[k] = o)}>
+          <mesh geometry={leaf} material={woodMat} castShadow receiveShadow />
+          <mesh geometry={iron} material={ironMat} />
+        </group>
+      ))}
     </group>
   );
 }

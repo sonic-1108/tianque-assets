@@ -129,7 +129,7 @@ export interface CombatantBuff {
 }
 
 export interface EmpMove {
-  kind: 'might' | 'sweep' | 'dragon' | 'edict' | 'charge' | 'cage' | 'seal';
+  kind: 'might' | 'sweep' | 'dragon' | 'edict' | 'charge' | 'cage' | 'seal' | 'summon';
   t: number;
   /** effects' yaw (+Z forward); the game's facing is this + PI */
   yaw: number;

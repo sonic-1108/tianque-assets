@@ -1,3 +1,4 @@
+import * as MapsAll from './maps';
 import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { startPresence, setPresence } from './presence';
 import { LoadingScreen } from './components/lobby/LoadingScreen';
@@ -144,6 +145,8 @@ const EMPEROR_HOTBAR: HotbarEntry[] = [
     tip: '先把人圈住再走进去打，他的队友进不来救他。' },
   { id: 'jade_seal', key: '4', name: ES[3].name, icon: ES[3].icon, short: '玉玺砸地', cdKey: 'skill4', meta: eMeta(3), desc: ES[3].description,
     tip: '3 画地为牢圈住后接 4 玉玺镇压，墙里的人躲不开。' },
+  { id: 'royal_guard', key: '5', name: ES[5].name, icon: ES[5].icon, short: '四人护驾', cdKey: 'skill5', meta: eMeta(5), desc: ES[5].description,
+    tip: '先放 5 再放 3 画地为牢：墙里只有你和他，你的御林军守在墙外。' },
   { id: 'true_dragon', key: 'R', name: ES[4].name, icon: ES[4].icon, short: '金龙俯冲', cdKey: 'ultimate', super: true, meta: eMeta(4), desc: ES[4].description,
     tip: '1 让人跪下后放 R，金龙落下时他还动不了。' },
 ];
@@ -548,6 +551,7 @@ export default function App() {
         skill2: 0,
         skill3: 0,
         skill4: 0,
+        skill5: 0,
         ultimate: 0,
       },
       buffs: [],
@@ -578,7 +582,7 @@ export default function App() {
   if (!fightersRef.current.includes(dummyRefState.current) || dummyRefState.current === p1RefState.current)
     dummyRefState.current = fightersRef.current.find((c) => (c.side ?? 0) !== (p1RefState.current.side ?? 0)) ?? fightersRef.current[lineup.me === 0 ? 1 : 0];
   // Debug handle (used by automated visual tests; harmless in production)
-  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef, fighters: fightersRef };
+  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef, fighters: fightersRef, maps: MapsAll };
   const targetingRefState = useRef<TargetingState>({
     lockedEnemyId: null,
     friendlyTargetId: null,
@@ -634,6 +638,7 @@ export default function App() {
     cdSkill2: 0,
     cdSkill3: 0,
     cdSkill4: 0,
+    cdSkill5: 0,
     cdUlt: 0,
     cdSpecial: 0,
     p1Stamina: 100,
@@ -725,6 +730,7 @@ export default function App() {
         cdSkill2: p1.cooldowns.skill2 || 0,
         cdSkill3: p1.cooldowns.skill3 || 0,
         cdSkill4: p1.cooldowns.skill4 || 0,
+        cdSkill5: p1.cooldowns.skill5 || 0,
         cdUlt: p1.cooldowns.ultimate || 0,
         cdSpecial: p1.cooldowns.special || 0,
         p1Stamina: p1.stamina ?? 100,
@@ -1370,6 +1376,7 @@ export default function App() {
               h.cdKey === 'skill2' ? hudMirror.cdSkill2 :
               h.cdKey === 'skill3' ? hudMirror.cdSkill3 :
               h.cdKey === 'skill4' ? hudMirror.cdSkill4 :
+              h.cdKey === 'skill5' ? hudMirror.cdSkill5 :
               h.cdKey === 'ultimate' ? hudMirror.cdUlt :
               h.cdKey === 'special' ? hudMirror.cdSpecial : 0;
             const onCd = cd > 0;

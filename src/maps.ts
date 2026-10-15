@@ -750,11 +750,61 @@ export function desertDunes(x: number, z: number) {
   return Math.max(0, d) * fortFade * campFade + edge;
 }
 
+// ----------------------------------------------------------------------
+// 大漠玉门关 city gates: two leaves at the courtyard mouth of each gate passage (south = 0, north = 1),
+// hinged on the gate towers. mapRuntime.desert.gate[g] is how far shut they are (0 open, flat against the
+// towers; 1 shut across the passage). They're solid: walls in the height field, so walking, the camera,
+// darts and the AI's grid all treat them like the rest of the fort.
+// ----------------------------------------------------------------------
+export const GATE_DOOR = { thick: 0.22, h: 5.0, hinge: 0.11, inset: 0.1 };
+/** hinge (x, z) and unit direction of leaf `sx` (-1 west, +1 east) of gate g at shut fraction f */
+export function gateLeaf(g: number, sx: number, f: number) {
+  const F = DESERT.fort;
+  const sz = g === 0 ? 1 : -1;
+  const a = (f * Math.PI) / 2;
+  return {
+    hx: sx * (F.gate - GATE_DOOR.hinge),
+    hz: sz * (F.half - F.wall - GATE_DOOR.inset),
+    dx: -sx * Math.sin(a),
+    dz: -sz * Math.cos(a),
+    len: F.gate - GATE_DOOR.hinge,
+  };
+}
+/** distance from (x, z) to the nearest gate leaf, and the nearest point on it */
+export function gateDoorDist(x: number, z: number) {
+  const F = DESERT.fort;
+  const gs = mapRuntime.desert?.gate;
+  let best = 1e9;
+  let px = 0;
+  let pz = 0;
+  if (!gs || Math.abs(x) > F.gate + 0.5) return { d: best, px, pz };
+  const az = Math.abs(z);
+  const H0 = F.half - F.wall;
+  if (az < H0 - F.gate - 0.6 || az > H0 + 0.6) return { d: best, px, pz };
+  for (let g = 0; g < 2; g++) {
+    if ((g === 0) !== z > 0) continue;
+    for (const sx of [-1, 1]) {
+      const L = gateLeaf(g, sx, gs[g] ?? 0);
+      const t = Math.max(0, Math.min(L.len, (x - L.hx) * L.dx + (z - L.hz) * L.dz));
+      const qx = L.hx + L.dx * t;
+      const qz = L.hz + L.dz * t;
+      const d = Math.hypot(x - qx, z - qz);
+      if (d < best) {
+        best = d;
+        px = qx;
+        pz = qz;
+      }
+    }
+  }
+  return { d: best, px, pz };
+}
+
 /** Walkable height of 大漠玉门关 at (x, z) */
 export function desertHeight(x: number, z: number) {
   const F = DESERT.fort;
   const ax = Math.abs(x);
   const az = Math.abs(z);
+  if (ax < F.gate + 0.4 && az < F.half - F.wall + 0.4 && az > F.half - F.wall - F.gate - 0.4 && gateDoorDist(x, z).d < GATE_DOOR.thick / 2 + 0.06) return GATE_DOOR.h;
   const m = Math.max(ax, az);
   let h = desertDunes(x, z);
   for (const M of DESERT.mesas) {
@@ -922,7 +972,7 @@ export const mapRuntime = {
   /** 大漠玉门关: sandstorm 0..1, warning glow on the horizon 0..1, wind along x (+1 / -1); the beacon: lit by side (-1 none), seconds left, cooldown */
   /** the local player's side (scenery colours the beacon flag ours / theirs) */
   viewSide: 0,
-  desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0, wells: [] as { t: number; x: number; y: number; z: number; yaw: number }[], tornado: null as null | { x: number; z: number; vx: number; vz: number; a: number; life: number } },
+  desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0, gate: [0, 0] as number[], gateTo: [0, 0] as number[], gateCd: [0, 0] as number[], wells: [] as { t: number; x: number; y: number; z: number; yaw: number }[], tornado: null as null | { x: number; z: number; vx: number; vz: number; a: number; life: number } },
 };
 
 // ----------------------------------------------------------------------

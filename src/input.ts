@@ -13,6 +13,7 @@ export type InputKeyAction =
   | 'skill2'
   | 'skill3'
   | 'skill4'
+  | 'skill5'
   | 'ultimate'
   | 'lockEnemy'
   | 'clearTarget'
@@ -57,6 +58,7 @@ export const createEmptyActions = (): Record<InputKeyAction, boolean> => ({
   skill2: false,
   skill3: false,
   skill4: false,
+  skill5: false,
   ultimate: false,
   lockEnemy: false,
   clearTarget: false,
@@ -233,6 +235,11 @@ export function useGameInput(options: {
         inputRef.current.justPressed.skill4 = true;
         inputRef.current.addBuffer('skill4');
       }
+      if (code === 'Digit5') {
+        inputRef.current.actions.skill5 = true;
+        inputRef.current.justPressed.skill5 = true;
+        inputRef.current.addBuffer('skill5');
+      }
       if (code === 'KeyR') {
         inputRef.current.actions.ultimate = true;
         inputRef.current.justPressed.ultimate = true;
@@ -287,6 +294,9 @@ export function useGameInput(options: {
       }
       if (code === 'Digit4') {
         inputRef.current.actions.skill4 = false;
+      }
+      if (code === 'Digit5') {
+        inputRef.current.actions.skill5 = false;
       }
       if (code === 'KeyR') {
         inputRef.current.actions.ultimate = false;

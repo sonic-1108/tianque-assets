@@ -126,8 +126,13 @@ interface Charge {
   pos: THREE.Vector3;
   yaw: number;
   active: boolean;
+  /** how far along each guardsman got before running into a wall (Infinity: still running) */
+  stop: number[];
+  /** each guardsman's feet: they follow the ground (slopes, steps) instead of the caster's height */
+  y: number[];
 }
 interface CageSide {
+  g: THREE.Group;
   mats: THREE.Material[];
   a: [number, number]; // wall ends, relative to the cage centre (x, z)
   b: [number, number];
@@ -136,6 +141,9 @@ interface CageSide {
 interface Cage {
   g: THREE.Group;
   sides: CageSide[];
+  /** the emperor's feet: a wall he walks through opens for him (turns to glass) instead of him ghosting through stone */
+  owner: THREE.Vector3;
+  hasOwner: boolean;
   t: number;
   dur: number;
   active: boolean;
@@ -195,7 +203,7 @@ export class ImperialFX {
     }
     // the spectral guardsmen are cloned from the guard model once it has loaded
     this.ghostMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffc94a').multiplyScalar(1.3), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
-    for (let k = 0; k < 2; k++) this.charges.push({ t: 0, dur: 0.9, pos: new THREE.Vector3(), yaw: 0, active: false });
+    for (let k = 0; k < 2; k++) this.charges.push({ t: 0, dur: 0.9, pos: new THREE.Vector3(), yaw: 0, active: false, stop: new Array(GUARDS).fill(Infinity), y: new Array(GUARDS).fill(0) });
     // palace walls
     const wallMat = new THREE.MeshStandardMaterial({ color: '#9a2418', roughness: 0.8, emissive: '#3a0804', emissiveIntensity: 0.6 });
     const tileMat = new THREE.MeshStandardMaterial({ color: '#f0b020', metalness: 0.5, roughness: 0.35, emissive: '#7a4a00', emissiveIntensity: 0.7 });
@@ -208,7 +216,10 @@ export class ImperialFX {
       for (let s = 0; s < 4; s++) {
         const side = new THREE.Group();
         // each wall has its own materials, so the one between the camera and the player can fade on its own
+        // always "transparent" (opacity 1 while solid): flipping .transparent on the fly changes the shader
+        // program, and every flip recompiled it: the hitch when a wall turned to glass
         const m = [baseMat.clone(), wallMat.clone(), tileMat.clone(), glowMat.clone()];
+        for (const mm of m) mm.transparent = true;
         const base = new THREE.Mesh(new THREE.BoxGeometry(L + 0.5, 0.35, 0.55), m[0]);
         base.position.y = 0.17;
         const wall = new THREE.Mesh(new THREE.BoxGeometry(L, 2.1, 0.36), m[1]);
@@ -232,11 +243,11 @@ export class ImperialFX {
           [[-h, -L / 2], [h, -L / 2]],
           [[-L / 2, -h], [-L / 2, h]],
         ];
-        sides.push({ mats: m, a: ends[s][0] as [number, number], b: ends[s][1] as [number, number], op: 1 });
+        sides.push({ g: side, mats: m, a: ends[s][0] as [number, number], b: ends[s][1] as [number, number], op: 1 });
       }
       g.visible = false;
       root.add(g);
-      this.cages.push({ g, sides, t: 0, dur: 3, active: false });
+      this.cages.push({ g, sides, t: 0, dur: 3, active: false, owner: new THREE.Vector3(), hasOwner: false });
     }
     // the jade seal: a block of green jade, a gold band, a coiled dragon on top; its imprint left on the ground
     const jade = new THREE.MeshStandardMaterial({ color: '#3fae7f', roughness: 0.15, metalness: 0.1, emissive: '#145a3a', emissiveIntensity: 0.9, transparent: true, opacity: 0.93 });
@@ -353,6 +364,8 @@ export class ImperialFX {
     C.dur = dur;
     C.pos.copy(pos);
     C.yaw = yaw;
+    C.stop.fill(Infinity);
+    C.y.fill(pos.y);
     if (!this.ghosts.length) this.preload();
     return k;
   }
@@ -361,23 +374,77 @@ export class ImperialFX {
     const C = this.charges[k];
     const tt = t ?? C.t;
     const [lat, back] = GUARD_SLOTS[i];
-    const along = -2.2 + back + Math.min(1, tt / C.dur) * 17;
+    const along = Math.min(C.stop[i], -2.2 + back + Math.min(1, tt / C.dur) * 17);
     const fx = Math.sin(C.yaw);
     const fz = Math.cos(C.yaw);
-    return out.set(C.pos.x + fx * along + fz * lat, C.pos.y, C.pos.z + fz * along - fx * lat);
+    return out.set(C.pos.x + fx * along + fz * lat, C.y[i], C.pos.z + fz * along - fx * lat);
+  }
+  /** where guardsman i would be next (his line, not yet stopped) and how far along that is */
+  guardAhead(k: number, i: number, out: THREE.Vector3) {
+    const C = this.charges[k];
+    const [lat, back] = GUARD_SLOTS[i];
+    const along = -2.2 + back + Math.min(1, C.t / C.dur) * 17;
+    const fx = Math.sin(C.yaw);
+    const fz = Math.cos(C.yaw);
+    out.set(C.pos.x + fx * along + fz * lat, C.y[i], C.pos.z + fz * along - fx * lat);
+    return along;
+  }
+  /** guardsman i of charge k ran into a wall at `along`: he breaks up there in a puff of gold */
+  stopGuard(k: number, i: number, along: number) {
+    const C = this.charges[k];
+    if (!C || C.stop[i] !== Infinity) return;
+    C.stop[i] = along;
+    const p = this.guardAt(k, i, this.v);
+    for (let n = 0; n < 6; n++) this.embers?.(this.v.set(p.x + (Math.random() - 0.5) * 0.6, p.y + 0.4 + Math.random() * 1.4, p.z + (Math.random() - 0.5) * 0.6), 1, '#ffcf5a');
+    this.dust?.(this.v.set(p.x, p.y + 0.2, p.z), 2, '#e8d39a');
+  }
+  guardStopped(k: number, i: number) {
+    return this.charges[k]?.stop[i] !== Infinity;
+  }
+  setGuardY(k: number, i: number, y: number) {
+    const C = this.charges[k];
+    if (C) C.y[i] = y;
   }
   chargeActive(k: number) {
     return !!this.charges[k]?.active;
   }
 
-  cage(pos: THREE.Vector3, dur: number) {
-    const C = this.cages.find((c) => !c.active) ?? this.cages[0];
+  /**
+   * Raise the walls round pos. `sides` (south, east, north, west) fits each wall to the ground under it: hidden
+   * where a real wall or building already stands on that line, otherwise reaching from the lowest ground along
+   * it (so it doesn't hang over a slope or a step) up to a wall's height over the highest. Returns the cage's slot.
+   */
+  cage(pos: THREE.Vector3, dur: number, sides?: { show: boolean; y0: number; y1: number }[]) {
+    const k = Math.max(0, this.cages.findIndex((c) => !c.active));
+    const C = this.cages[k];
     C.active = true;
     C.t = 0;
     C.dur = dur;
+    C.hasOwner = false;
     C.g.position.set(pos.x, pos.y - 2.9, pos.z);
     C.g.userData.y = pos.y;
     C.g.visible = true;
+    C.sides.forEach((S, i) => {
+      const f = sides?.[i];
+      S.g.visible = f ? f.show : true;
+      const y0 = f ? f.y0 : pos.y;
+      const y1 = f ? f.y1 : pos.y;
+      S.g.position.y = y0 - pos.y;
+      S.g.scale.y = Math.max(1, (y1 + 2.85 - y0) / 2.85);
+      S.op = 1;
+      for (const m of S.mats) {
+        m.opacity = 1;
+        m.depthWrite = true;
+      }
+    });
+    return k;
+  }
+  /** where the cage's owner is this frame (he alone walks through its walls) */
+  cageOwner(k: number, p: THREE.Vector3 | null) {
+    const C = this.cages[k];
+    if (!C) return;
+    C.hasOwner = !!p;
+    if (p) C.owner.copy(p);
   }
 
   seal(pos: THREE.Vector3, fall: number, onLand: () => void) {
@@ -436,6 +503,11 @@ export class ImperialFX {
       const fade = Math.min(1, C.t / 0.12) * (C.t > C.dur - 0.2 ? Math.max(0, (C.dur - C.t) / 0.2) : 1);
       this.ghostMat.opacity = 0.6 * fade;
       for (let i = 0; i < GUARDS; i++) {
+        const stopped = C.stop[i] !== Infinity;
+        if (stopped) {
+          if (row) row[i].obj.visible = false;
+          continue;
+        }
         const p = this.guardAt(k, i, this.v);
         if (row) {
           const g = row[i];
@@ -468,12 +540,22 @@ export class ImperialFX {
           const bz = C.g.position.z + S.b[1];
           block = segmentsCross(this.eye.x, this.eye.z, this.focus.x, this.focus.z, ax, az, bx, bz);
         }
+        if (!block && C.hasOwner) {
+          // the emperor at (or in) this wall: it opens for him
+          const ax = C.g.position.x + S.a[0];
+          const az = C.g.position.z + S.a[1];
+          const bx = C.g.position.x + S.b[0];
+          const bz = C.g.position.z + S.b[1];
+          const vx = bx - ax;
+          const vz = bz - az;
+          const t = Math.max(0, Math.min(1, ((C.owner.x - ax) * vx + (C.owner.z - az) * vz) / (vx * vx + vz * vz)));
+          block = Math.hypot(C.owner.x - ax - vx * t, C.owner.z - az - vz * t) < 0.9;
+        }
         const target = block ? 0.18 : 1;
         S.op += (target - S.op) * Math.min(1, dt * 12);
         const see = S.op < 0.98;
         for (const m of S.mats) {
-          m.transparent = see;
-          m.opacity = S.op;
+          m.opacity = see ? S.op : 1;
           m.depthWrite = !see;
         }
       }

@@ -1,4 +1,4 @@
-import { DESERT, MAPS, desertHeight } from './maps';
+import { DESERT, MAPS, desertHeight, mapRuntime } from './maps';
 
 // ----------------------------------------------------------------------
 // 大漠玉门关 AI navigation: a 1 m grid over the height field. A step between two cells is walkable
@@ -18,6 +18,7 @@ const DOWN = 1.4;
 interface Grid {
   h: Float32Array;
   block: Uint8Array;
+  hug: Uint8Array;
 }
 let grid: Grid | null = null;
 
@@ -27,6 +28,7 @@ const ix = (x: number) => Math.round((x + R) / CELL);
 function build(): Grid {
   const h = new Float32Array(N * N);
   const block = new Uint8Array(N * N);
+  const hug = new Uint8Array(N * N);
   const pillars = MAPS.desert.pillars || [];
   for (let j = 0; j < N; j++)
     for (let i = 0; i < N; i++) {
@@ -37,9 +39,30 @@ function build(): Grid {
       if (Math.hypot(x, z) > R - 1.2) block[k] = 1;
       for (const p of pillars) if (Math.hypot(x - p.x, z - p.z) < p.r + 0.55) block[k] = 1;
     }
-  return { h, block };
+  // cells beside a sheer face (a wall, a tower): paths keep a step away from them where there's room
+  for (let j = 1; j < N - 1; j++)
+    for (let i = 1; i < N - 1; i++) {
+      const k = j * N + i;
+      for (let dj = -1; dj <= 1 && !hug[k]; dj++)
+        for (let di = -1; di <= 1; di++) {
+          const nk = (j + dj) * N + i + di;
+          if (block[nk] || h[nk] - h[k] > UP_HOP) {
+            hug[k] = 1;
+            break;
+          }
+        }
+    }
+  return { h, block, hug };
 }
+let gateKey = '';
 function G() {
+  // the city gates are part of the ground: rebuild when one has swung shut or open
+  const gs = mapRuntime.desert?.gate ?? [0, 0];
+  const key = gs.map((f) => (f > 0.5 ? 1 : 0)).join('');
+  if (key !== gateKey) {
+    gateKey = key;
+    grid = null;
+  }
   return (grid ??= build());
 }
 
@@ -62,12 +85,24 @@ function edgeOK(g: Grid, a: number, b: number) {
   return stepOK(ha, hm) && stepOK(hm, hb);
 }
 
-/** walkable in a straight line from (x0, z0) to (x1, z1), sampling every 0.5 m */
+/** half the width of the corridor a walker needs: the body (0.3 m) and a little room, so a line that only
+ *  just scrapes past a gate tower's corner doesn't count as clear (the shoulder would catch on it) */
+const BODY = 0.5;
+
+/** walkable in a straight line from (x0, z0) to (x1, z1), sampling every 0.5 m, with a body's width */
 export function desertLineClear(x0: number, z0: number, x1: number, z1: number) {
+  const L = Math.hypot(x1 - x0, z1 - z0);
+  if (L < 1e-3) return true;
+  const px = (-(z1 - z0) / L) * BODY;
+  const pz = ((x1 - x0) / L) * BODY;
+  return lineClear(x0, z0, x1, z1) && lineClear(x0 + px, z0 + pz, x1 + px, z1 + pz, x0, z0) && lineClear(x0 - px, z0 - pz, x1 - px, z1 - pz, x0, z0);
+}
+function lineClear(x0: number, z0: number, x1: number, z1: number, rx = x0, rz = z0) {
   const g = G();
   const L = Math.hypot(x1 - x0, z1 - z0);
   const n = Math.max(1, Math.ceil(L / 0.5));
-  let prev = desertHeight(x0, z0);
+  // a side line starts level with the walker's feet (it may begin right next to a wall)
+  let prev = desertHeight(rx, rz);
   for (let s = 1; s <= n; s++) {
     const t = s / n;
     const x = x0 + (x1 - x0) * t;
@@ -192,7 +227,7 @@ function findPath(g: Grid, start: number, goal: number): number[] | null {
       if (!edgeOK(g, k, nk)) continue;
       if (di && dj && (g.block[j * N + ni] || g.block[nj * N + i])) continue; // no cutting corners
       const rise = g.h[nk] - g.h[k];
-      const cost = gScore[k] + w + (rise > UP_FREE ? 2 : 0);
+      const cost = gScore[k] + w + (rise > UP_FREE ? 2 : 0) + (g.hug[nk] ? 1.5 : 0);
       if (stamp[nk] === pass && cost >= gScore[nk]) continue;
       stamp[nk] = pass;
       gScore[nk] = cost;
@@ -209,8 +244,16 @@ export interface DesertNav {
   repath: number;
   clearT: number;
   clear: boolean;
+  /** seconds left of following the grid path even where a straight walk looks clear (set when a wall stopped us) */
+  force: number;
 }
-export const newDesertNav = (): DesertNav => ({ path: null, goal: -1, repath: 0, clearT: 0, clear: true });
+export const newDesertNav = (): DesertNav => ({ path: null, goal: -1, repath: 0, clearT: 0, clear: true, force: 0 });
+
+/** the walker ran into a wall while walking straight: follow the grid for a while instead */
+export function desertBumped(S: DesertNav) {
+  if (S.force <= 0) S.repath = 0;
+  S.force = 2.5;
+}
 
 /**
  * Where to walk to reach (tx, ty, tz): null when a straight walk gets there (or nothing better is known),
@@ -219,7 +262,11 @@ export const newDesertNav = (): DesertNav => ({ path: null, goal: -1, repath: 0,
 export function desertSteer(S: DesertNav, x: number, y: number, z: number, tx: number, ty: number, tz: number, dt: number): { x: number; z: number } | null {
   const g = G();
   S.clearT -= dt;
-  if (S.clearT <= 0) {
+  S.force -= dt;
+  if (S.force > 0) {
+    S.clear = false;
+    S.clearT = 0;
+  } else if (S.clearT <= 0) {
     S.clearT = 0.25;
     S.clear = Math.abs(desertHeight(tx, tz) - desertHeight(x, z)) < 0.8 && desertLineClear(x, z, tx, tz);
   }

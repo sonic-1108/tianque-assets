@@ -187,7 +187,7 @@ interface BuiltClip {
   spec: ClipSpec;
 }
 
-function removeRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
+export function removeRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
   const c = clip.clone();
   c.tracks.forEach((track) => {
     const n = track.name.toLowerCase();
@@ -278,7 +278,7 @@ function buildCrown() {
 }
 
 /** 御林军 spear: a 2.4 m shaft, gilt ferrules, a leaf blade and a red horsehair tassel; held at the middle */
-function buildSpear() {
+export function buildSpear() {
   const g = new THREE.Group();
   const wood = new THREE.MeshStandardMaterial({ color: '#4a1e12', roughness: 0.6 });
   const gold = new THREE.MeshStandardMaterial({ color: '#c9a24a', metalness: 0.9, roughness: 0.3 });
@@ -490,7 +490,7 @@ const assetPromises = new Map<string, Promise<LoadedAsset>>();
 /** progress listeners per model url, so one fighter's download never drives the other's loading screen */
 const progressListeners = new Set<{ url: string; fn: (p: ModelLoadProgress) => void }>();
 
-function loadGLB(url: string): Promise<LoadedAsset> {
+export function loadGLB(url: string): Promise<LoadedAsset> {
   const hit = assetPromises.get(url);
   if (hit) return hit;
   const p = new Promise<LoadedAsset>((resolve, reject) => {

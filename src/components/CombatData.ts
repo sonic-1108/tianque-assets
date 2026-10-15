@@ -546,6 +546,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
       { id: 'palace_cage', name: '画地为牢', key: '3', description: '天子剑往地上一划，对手周围升起四面红墙金瓦的宫墙（14米内，没人就落在前方）。墙里的人出不去，墙外的人进不来，只有你能自由进出，持续3秒。圈住时附带50伤害。', mpCost: 30, cooldown: 16, icon: '🏯' },
       { id: 'jade_seal', name: '玉玺镇压', key: '4', description: '一跺脚，一方巨大的传国玉玺从天而降，砸在对手脚下（18米内），地上亮起金圈，0.6秒后落地：150伤害并击倒1.1秒，地上留下"受命于天"的印文。', mpCost: 25, cooldown: 10, icon: '🟩' },
       { id: 'true_dragon', name: '真龙降世', key: 'R', description: '双臂一振，召出一条金龙，在身前盘旋升空后扑向对手（26米内，没人就扑向前方）。俯冲前对手脚下亮起金圈，约半秒后落下（240伤害并击飞）。0.8秒后就能继续行动。', mpCost: 60, cooldown: 24, icon: '🐲', isSuper: true },
+      { id: 'royal_guard', name: '御林护驾', key: '5', description: '天子剑高举，喝一声"护驾"，身边降下四道金光，四名御林军持枪现身，替你厮杀10秒（每人200血，被打死就提前倒下）。他们会去打离你最近的敌人，没有敌人时守在你身边；敌人的刀、暗器都能打到他们，他们也会挡住敌人的路。', mpCost: 35, cooldown: 22, icon: '💂' },
     ],
   },
   Guard: {

@@ -1,6 +1,6 @@
 import { shipSteer, newNavState, shipGraph } from './shipNav';
 import { newStreetNav, streetSteer, streetLineClear } from './streetNav';
-import { desertSteer, newDesertNav } from './desertNav';
+import { desertBumped, desertSteer, newDesertNav } from './desertNav';
 import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
@@ -18,7 +18,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, roofFloorAt, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, roofFloorAt, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -223,6 +223,26 @@ const EMP = {
   charge: { dur: 0.9, dmg: 100, reach: 1.4 },
   cage: { wind: 0.25, half: 2.7, dur: 3, dmg: 50, range: 14 },
   seal: { fall: 0.6, r: 2.4, dmg: 150, stun: 1.1, range: 18 },
+  // 御林护驾 (5): four guardsmen, 200 HP each, for 10 s (unless cut down first)
+  royal: { n: 4, hp: 200, life: 10, dmg: 28, cd: 1.1, speed: 5.2, reach: 1.7, aggro: 14, leash: 16 },
+};
+/** a 御林军 called up by 御林护驾 */
+type RoyalGuard = {
+  owner: number;
+  vk: number; // drawing slot
+  x: number;
+  y: number;
+  z: number;
+  yaw: number; // facing, as a direction (+Z forward)
+  hp: number;
+  life: number;
+  cd: number;
+  anim: 'rise' | 'idle' | 'run' | 'atk' | 'hit' | 'die' | 'gone';
+  st: number;
+  tgt: number;
+  struck: boolean; // this swing has landed
+  hitBy: boolean[]; // fighter j's current swing already hit him
+  home: number; // his place round the emperor (0..3)
 };
 /** 天子 the neutral boss of 长安 (side 2); a hero 天子 on a team is an ordinary fighter */
 const isBossFighter = (f: CombatantState | undefined) => !!f && f.classId === 'Emperor' && (f.side ?? 0) === 2;
@@ -357,7 +377,7 @@ function GameImpl({
   const eruptRef = useRef({ timer: 9 });
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
   /** 长安上元夜 emperor: 龙威 / 箭雨 cooldowns, the arrow circles about to be hit, wrath, out-of-fight timer */
-    const emperorRef = useRef({ might: 5, arrows: 7, sweep: 3, dragon: 8, charges: [] as { k: number; owner: number; hit: number[] }[], cages: [] as { x: number; y: number; z: number; t: number; owner: number; trapped: number[] }[], zones: [] as { x: number; z: number; r: number; t: number; owner: number; dmg: number }[], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 });
+    const emperorRef = useRef({ might: 5, arrows: 7, sweep: 3, dragon: 8, charges: [] as { k: number; owner: number; hit: number[] }[], royal: [] as RoyalGuard[], cages: [] as { x: number; y: number; z: number; t: number; owner: number; trapped: number[]; vk: number; prev: ([number, number, number] | null)[]; lims: number[] }[], zones: [] as { x: number; z: number; r: number; t: number; owner: number; dmg: number }[], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 });
   const forestRef = useRef({ timer: 14 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
   const bgSand = useMemo(() => new THREE.Color('#c08a4e'), []);
@@ -825,7 +845,7 @@ function GameImpl({
     if (actions.backward) lz -= 1;
     const pMove = new THREE.Vector3().copy(basis.forward).multiplyScalar(lz).addScaledVector(basis.right, lx);
     if (pMove.lengthSq() > 1) pMove.normalize();
-    for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
+    for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
     const playerIntent: Intent = {
       move: pMove,
       faceYaw: targeting.lockedEnemyId && !(p1.scope ?? 0) ? yawTo(p1.pos, en.pos) : camYaw,
@@ -864,6 +884,7 @@ function GameImpl({
           if (map.id === 'desert') routeDesert(i, c, foes[i], it);
           if (map.id === 'rooftop') routeRooftop(i, c, foes[i], it);
           if (N > 2) teamSpacing(i, c, foes[i], it);
+          aiHitRoyal(i, c, it);
         }
       } else if (!aiOn) {
         it.faceYaw = c.targetRotY;
@@ -1231,6 +1252,7 @@ function GameImpl({
     });
     // 画地为牢: whichever palace wall stands between the camera and the player fades out of the way
     vfx.emperor.imperial.setView(camera.position, vC.set(fighters[ME].pos[0], fighters[ME].pos[1] + 1.2, fighters[ME].pos[2]));
+    vfx.emperor.royal.setView(camera.position);
     vfx.update(dt);
 
     // ================= HUD =================
@@ -1306,7 +1328,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -1340,7 +1362,7 @@ function GameImpl({
       if (actions.backward) gz -= 1;
       const mv = vA.copy(bas.forward).multiplyScalar(gz).addScaledVector(bas.right, gx);
       if (mv.lengthSq() > 1) mv.normalize();
-      for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
+      for (const k of ['dodge', 'skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'ultimate', 'attack', 'jump'] as InputKeyAction[]) just[k] = false;
       const req = input.consumeBuffer();
       n.send({ t: 'in', mx: +mv.x.toFixed(3), mz: +mv.z.toFixed(3), pt: +(controller ? controller.pitch : 0).toFixed(3), yaw: targeting.lockedEnemyId && !(p1.scope ?? 0) ? yawTo(p1.pos, en.pos) : yaw, blk: !!actions.special, int: !!actions.interact, ult: !!actions.ultimate, req });
 
@@ -2753,6 +2775,12 @@ function GameImpl({
           startAt('seal', EMP.seal.range, 7);
           return true;
         }
+        case 'skill5': {
+          if (isBossFighter(c)) return false;
+          if (!h.paySkill(5, 'skill5', '5')) return false;
+          startEmpMove(slot, 'summon', -1);
+          return true;
+        }
         case 'ultimate': {
           if (!h.paySkill(4, 'ultimate', 'R')) return false;
           startEmpMove(slot, 'dragon', d < 26 ? fi : -1);
@@ -3734,6 +3762,17 @@ function GameImpl({
               def = f;
               break;
             }
+          if (!def && royalStruckAt(owner, p.pos.x, p.pos.y, p.pos.z, rad, p.dmg)) {
+            // a 御林军 took it
+            if (p.kind === 'boomerang') {
+              if (p.back) p.hitBack = true;
+              else p.hitOut = true;
+            } else {
+              p.spent = true;
+              dead = true;
+            }
+            break;
+          }
           if (def) {
             if (p.kind === 'boomerang') {
               if (p.back) p.hitBack = true;
@@ -4041,7 +4080,8 @@ function GameImpl({
       for (const h of hitMaskRef.current) h.mask = 0;
       mapTimeRef.current = 0;
       mapRuntime.seal = { state: 0, x: 0, y: 0, z: 0, holder: -1, t: 0 };
-      emperorRef.current = { might: 5, arrows: 7, sweep: 3, dragon: 8, charges: [], cages: [], zones: [], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 };
+      vfx.emperor.royal.releaseAll();
+      emperorRef.current = { might: 5, arrows: 7, sweep: 3, dragon: 8, charges: [], royal: [], cages: [], zones: [], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 };
       for (const f of fighters) f.empMove = undefined;
       eruptRef.current = { timer: 9 };
       bombZonesRef.current = [];
@@ -4074,7 +4114,7 @@ function GameImpl({
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
         const force = (globalThis as any).__TQ_SWARM;
         const swarmAt = map.id !== 'desert' ? -1 : force ? +force : Math.random() < DESERT.swarm.chance ? 30 + Math.random() * 45 : -1;
-        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0, wells: [], tornado: null };
+        mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0, gate: [0, 0], gateTo: [0, 0], gateCd: [0, 0], wells: [], tornado: null };
       }
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
@@ -4242,15 +4282,19 @@ function GameImpl({
       const fz = mdz / ml;
       const BR = 0.3;
       const hAt = (x: number, z: number) => (map.id === 'rooftop' ? roofFloorAt(x, z, c.pos[1] + 0.3) : terrainHeight(map.id, x, z));
-      const edgeMax = (x: number, z: number) => {
+      // the leading edge for a move along (dx, dz); a slide along one axis tests that axis's edge, not the
+      // diagonal one, or a convex corner (a gate tower) blocks both slides and the walker sticks to it
+      const edgeMax = (x: number, z: number, dx = fx, dz = fz) => {
         let h = hAt(x, z);
         for (const a of [0, 0.75, -0.75]) {
           const ca = Math.cos(a);
           const sa = Math.sin(a);
-          h = Math.max(h, hAt(x + (fx * ca - fz * sa) * BR, z + (fx * sa + fz * ca) * BR));
+          h = Math.max(h, hAt(x + (dx * ca - dz * sa) * BR, z + (dx * sa + dz * ca) * BR));
         }
         return h;
       };
+      const sx = Math.sign(mdx);
+      const sz = Math.sign(mdz);
       if (!c.isGrounded) {
         // 大漠玉门关, in the air: a wall face stops you; you can only come down on something your feet are above
         if (map.id !== 'desert' && map.id !== 'rooftop') return;
@@ -4270,7 +4314,7 @@ function GameImpl({
         }
         return;
       }
-      const tooHigh = (x: number, z: number) => edgeMax(x, z) - c.pos[1] > 0.55;
+      const tooHigh = (x: number, z: number, dx = fx, dz = fz) => edgeMax(x, z, dx, dz) - c.pos[1] > 0.55;
       if (!tooHigh(c.pos[0], c.pos[2])) return;
       const rise = edgeMax(c.pos[0], c.pos[2]) - c.pos[1];
       if (rise < 1.3 && (c.actionState === 'idle' || c.actionState === 'run')) {
@@ -4284,10 +4328,10 @@ function GameImpl({
       }
       splat();
       c.wallBlock = 0.35;
-      if (!tooHigh(c.pos[0], pz0)) {
+      if (sx && !tooHigh(c.pos[0], pz0, sx, 0)) {
         c.pos[2] = pz0;
         c.vel[2] = 0;
-      } else if (!tooHigh(px0, c.pos[2])) {
+      } else if (sz && !tooHigh(px0, c.pos[2], 0, sz)) {
         c.pos[0] = px0;
         c.vel[0] = 0;
       } else {
@@ -4365,6 +4409,37 @@ function GameImpl({
     /** 大漠玉门关: sandstorm cycle and the beacon's fire */
     function updateDesert(t: number) {
       const D = mapRuntime.desert;
+      // the city gates swing toward where they've been set; anyone the leaves sweep into is shoved clear
+      for (let g = 0; g < 2; g++) {
+        D.gateCd[g] = Math.max(0, (D.gateCd[g] ?? 0) - dt);
+        const to = D.gateTo[g] ?? 0;
+        const was = D.gate[g] ?? 0;
+        const now = was + Math.sign(to - was) * Math.min(Math.abs(to - was), dt / 1.1);
+        D.gate[g] = now;
+        if (was < 1 && now >= 1) {
+          // shut: a boom and dust along the seam
+          const z = (g === 0 ? 1 : -1) * (DESERT.fort.half - DESERT.fort.wall - 0.1);
+          vfx.dustPuff(vB.set(0, 0.3, z), 18, 2.2, 2.5, 0.8, '#cdb88f');
+          gameAudio.playSlam();
+          if (Math.abs(fighters[ME].pos[2] - z) < 14) controller?.addShake(0.12);
+        }
+      }
+      for (const f of fighters) {
+        if (f.hp <= 0 || f.pos[1] > GATE_DOOR.h - 0.5) continue;
+        const q = gateDoorDist(f.pos[0], f.pos[2]);
+        const R = GATE_DOOR.thick / 2 + 0.32;
+        if (q.d >= R) continue;
+        let nx = f.pos[0] - q.px;
+        let nz = f.pos[2] - q.pz;
+        let l = Math.hypot(nx, nz);
+        if (l < 1e-3) {
+          nx = 0;
+          nz = -Math.sign(f.pos[2]);
+          l = 1;
+        }
+        f.pos[0] = q.px + (nx / l) * R;
+        f.pos[2] = q.pz + (nz / l) * R;
+      }
       // who is drawing water where (the well scenery animates the rope, bucket and crank from this)
       D.wells = DESERT.wells.map((_, k) => {
         const f = fighters.find((o) => o.drinkWell === k + 1);
@@ -4640,6 +4715,26 @@ function GameImpl({
         gameAudio.playCrispClick();
         return;
       }
+      // the city gates: F in or beside a gate passage opens or shuts it
+      {
+        const Fo = DESERT.fort;
+        const H0 = Fo.half - Fo.wall;
+        const az = Math.abs(c.pos[2]);
+        if (Math.abs(c.pos[0]) < Fo.gate + 1.6 && az > H0 - 3.2 && az < Fo.half + 1.5 && c.pos[1] < 2.5) {
+          const DG = mapRuntime.desert;
+          const g = c.pos[2] > 0 ? 0 : 1;
+          const shut = (DG.gateTo[g] ?? 0) > 0.5;
+          c.interactHint = shut ? 'F 打开城门' : 'F 关上城门 · 关了谁都过不去';
+          if (pressed && free && (DG.gateCd[g] ?? 0) <= 0) {
+            DG.gateTo[g] = shut ? 0 : 1;
+            DG.gateCd[g] = 1.2;
+            gameAudio.playCrispClick();
+            vfx.damageNumber(vB.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), shut ? '开城门' : '关城门', true, '#ffd36a');
+            if (i === ME) onRoundEvent?.({ type: 'toast', text: shut ? `${g === 0 ? '南' : '北'}城门打开了` : `${g === 0 ? '南' : '北'}城门关上了：只能绕西边的塌墙进出` });
+          }
+          return;
+        }
+      }
       const B = DESERT.beacon;
       const D = mapRuntime.desert;
       const onTop = Math.abs(c.pos[0]) < B.half + 0.2 && Math.abs(c.pos[2]) < B.half + 0.2 && c.pos[1] > B.h - 0.3;
@@ -4698,8 +4793,18 @@ function GameImpl({
     function routeDesert(i: number, me: CombatantState, foe: CombatantState, out: Intent) {
       const A = desertAiRefs.current[i];
       const D = mapRuntime.desert;
+      // just walked into a wall face (a straight walk that looked clear but wasn't): follow the grid instead
+      if ((me.wallBlock ?? 0) > 0.2) desertBumped(desertNavRefs.current[i]);
       A.cool -= dt;
       out.interact = false;
+      {
+        // at a shut gate with the foe on the other side of it: open it
+        const Fo = DESERT.fort;
+        const H0 = Fo.half - Fo.wall;
+        const g = me.pos[2] > 0 ? 0 : 1;
+        const inside = (p: number[]) => Math.abs(p[2]) < H0 - 0.05;
+        if ((D.gate[g] ?? 0) > 0.9 && Math.abs(me.pos[0]) < Fo.gate + 1.4 && Math.abs(Math.abs(me.pos[2]) - H0) < 3 && inside(me.pos) !== inside(foe.pos)) out.interact = !me.intPrev;
+      }
       const Tn = D.tornado;
       if (Tn && Tn.a > 0.3 && Math.hypot(me.pos[0] - Tn.x, me.pos[2] - Tn.z) < 9) {
         // a 龙卷风 close by: get out of its way (away from it and across its path)
@@ -5241,6 +5346,304 @@ function GameImpl({
     }
     /** 天子 the neutral boss of 长安 (a hero 天子 is on a team and plays like anyone else) */
     /** whom an emperor's moves hurt: the boss hits everyone but his own court; a hero, everyone not on his side */
+    /** 御林护驾: four guardsmen rise on columns of light round the emperor */
+    function summonRoyal(ei: number) {
+      const E = emperorRef.current;
+      const e = fighters[ei];
+      // his old ones (if any) are dismissed: four at a time
+      for (const g of E.royal) if (g.owner === ei && g.anim !== 'die' && g.anim !== 'gone') {
+        g.anim = 'gone';
+        g.st = 0;
+      }
+      const fwd = Math.atan2(-Math.sin(e.rotY), -Math.cos(e.rotY));
+      for (let n = 0; n < EMP.royal.n; n++) {
+        const vk = vfx.emperor.royal.take();
+        if (vk < 0) break;
+        // front-left, front-right, back-left, back-right: the first spot with room to stand
+        const a0 = fwd + [0.6, -0.6, 2.4, -2.4][n];
+        let x = e.pos[0];
+        let z = e.pos[2];
+        let y = e.pos[1];
+        for (const r of [1.8, 1.2, 0.7]) {
+          const tx = e.pos[0] + Math.sin(a0) * r;
+          const tz = e.pos[2] + Math.cos(a0) * r;
+          const gy = fy(tx, tz, e.pos[1]);
+          if (Math.abs(gy - e.pos[1]) < 0.6 && !solidAt(tx, gy + 1, tz)) {
+            x = tx;
+            z = tz;
+            y = gy;
+            break;
+          }
+        }
+        E.royal.push({ owner: ei, vk, x, y, z, yaw: fwd, hp: EMP.royal.hp, life: EMP.royal.life, cd: 0.6, anim: 'rise', st: 0, tgt: -1, struck: false, hitBy: [], home: n });
+        vfx.ring(vA.set(x, y + 0.06, z), 0.9, '#ffd36a', 0.5, 0.1, 0.4);
+        vfx.flash(vB.set(x, y + 1.2, z), '#ffd36a', 40, 0.3, 5);
+      }
+      if (ei === ME) controller?.addShake(0.12);
+      (globalThis as any).__TQ_ROYAL = E.royal; // for tests
+    }
+    /** a guardsman takes `dmg` (from a blade, a dart, a blast) */
+    function royalHurt(g: RoyalGuard, dmg: number, fromX: number, fromZ: number) {
+      if (g.anim === 'die' || g.anim === 'gone' || g.anim === 'rise') return;
+      g.hp -= dmg;
+      vfx.damageNumber(vA.set(g.x, g.y + 2.1, g.z), String(Math.round(dmg)), false, '#fde68a');
+      vfx.sparkBurst(vB.set(g.x, g.y + 1.2, g.z), 8, '#ffd36a', 3, 0.05);
+      gameAudio.playDartHit();
+      if (g.hp <= 0) {
+        g.anim = 'die';
+        g.st = 0;
+        vfx.damageNumber(vA.set(g.x, g.y + 2.5, g.z), '御林军阵亡', false, '#fca5a5');
+      } else if (g.anim !== 'atk') {
+        g.anim = 'hit';
+        g.st = 0;
+        g.yaw = Math.atan2(fromX - g.x, fromZ - g.z);
+      }
+    }
+    /** something flying at (x, y, z) from `att`'s side: does it hit one of the other side's guardsmen? */
+    function royalStruckAt(att: CombatantState, x: number, y: number, z: number, r: number, dmg: number) {
+      for (const g of emperorRef.current.royal) {
+        const own = fighters[g.owner];
+        if (!own || (own.side ?? 0) === (att.side ?? 0) || g.anim === 'die' || g.anim === 'gone' || g.anim === 'rise') continue;
+        if (Math.hypot(x - g.x, z - g.z) < r && y > g.y - 0.1 && y < g.y + 1.95) {
+          royalHurt(g, dmg, x, z);
+          return true;
+        }
+      }
+      return false;
+    }
+    /** walk a guardsman from where he is toward (tx, tz) for this tick: over the ground, never into a wall */
+    function royalStep(g: RoyalGuard, tx: number, tz: number, sp: number) {
+      const dx = tx - g.x;
+      const dz = tz - g.z;
+      const L = Math.hypot(dx, dz);
+      if (L < 1e-3) return false;
+      const s = Math.min(L, sp * dt);
+      const can = (x: number, z: number) => {
+        const gy = fy(x, z, g.y);
+        return gy < g.y + 0.6 && !solidAt(x, gy + 1, z) && !solidAt(x, gy + 1.6, z) && (map.id !== 'lavacliff' || !danger(x, z, 0.5));
+      };
+      const nx = g.x + (dx / L) * s;
+      const nz = g.z + (dz / L) * s;
+      let moved = true;
+      if (can(nx, nz)) {
+        g.x = nx;
+        g.z = nz;
+      } else if (can(nx, g.z)) g.x = nx;
+      else if (can(g.x, nz)) g.z = nz;
+      else moved = false;
+      const gy = fy(g.x, g.z, g.y);
+      g.y = gy < g.y ? Math.max(gy, g.y - 9 * dt) : gy;
+      return moved;
+    }
+    /** 御林护驾: the guardsmen fight for the emperor, take hits, and go when their time is up */
+    function stepRoyal() {
+      const E = emperorRef.current;
+      const R = EMP.royal;
+      for (let k = E.royal.length - 1; k >= 0; k--) {
+        const g = E.royal[k];
+        const own = fighters[g.owner];
+        g.st += dt;
+        g.cd -= dt;
+        if (g.anim !== 'die' && g.anim !== 'gone') {
+          g.life -= dt;
+          if (g.life <= 0 || !own || own.hp <= 0 || round.over) {
+            g.anim = 'gone';
+            g.st = 0;
+          }
+        }
+        if ((g.anim === 'die' && g.st > 1.6) || (g.anim === 'gone' && g.st > 0.75)) {
+          vfx.emperor.royal.release(g.vk);
+          E.royal.splice(k, 1);
+          continue;
+        }
+        const busy = g.anim === 'die' || g.anim === 'gone' || g.anim === 'rise' || g.anim === 'hit';
+        if (g.anim === 'rise' && g.st > 0.55) g.anim = 'idle';
+        if (g.anim === 'hit' && g.st > 0.35) g.anim = 'idle';
+        if (!busy && own) {
+          // whom to fight: the emperor's foe nearest to him (or to the emperor), within reach of their post
+          let best = -1;
+          let bd = 1e9;
+          for (let j = 0; j < N; j++) {
+            const f = fighters[j];
+            if (j === g.owner || f.hp <= 0 || (f.side ?? 0) === (own.side ?? 0) || (f.side ?? 0) === 2 || Math.abs(f.pos[1] - g.y) > 2.5) continue;
+            if ((f.burrowT ?? 0) > 0 || (f.stealthT ?? 0) > 0) continue; // can't see what they can't see
+            const d = Math.hypot(f.pos[0] - g.x, f.pos[2] - g.z);
+            const fromKing = Math.hypot(f.pos[0] - own.pos[0], f.pos[2] - own.pos[2]);
+            if (d > R.aggro || fromKing > R.leash) continue;
+            const score = d + (j === g.tgt ? -1.5 : 0);
+            if (score < bd) {
+              bd = score;
+              best = j;
+            }
+          }
+          g.tgt = best;
+          if (g.anim === 'atk') {
+            // the thrust lands a third of the way in
+            const f = fighters[g.tgt];
+            if (!g.struck && g.st > 0.32) {
+              g.struck = true;
+              if (f && f.hp > 0 && Math.hypot(f.pos[0] - g.x, f.pos[2] - g.z) < R.reach + 0.6 && Math.abs(f.pos[1] - g.y) < 1.8) {
+                applyHit(g.owner, own, f, R.dmg, { dur: 0.28, flinch: true, noMark: true });
+                vfx.sparkBurst(vB.set(f.pos[0], f.pos[1] + 1.1, f.pos[2]), 6, '#ffd36a', 3, 0.05);
+              }
+            }
+            if (g.st > 0.75) g.anim = 'idle';
+          } else if (g.tgt >= 0) {
+            const f = fighters[g.tgt];
+            const d = Math.hypot(f.pos[0] - g.x, f.pos[2] - g.z);
+            g.yaw = Math.atan2(f.pos[0] - g.x, f.pos[2] - g.z);
+            if (d > R.reach) {
+              // spread round the target instead of queueing behind each other
+              const a = g.yaw + Math.PI + (g.home - 1.5) * 0.9;
+              const tx = f.pos[0] + Math.sin(a) * (R.reach - 0.3);
+              const tz = f.pos[2] + Math.cos(a) * (R.reach - 0.3);
+              g.anim = royalStep(g, tx, tz, R.speed) ? 'run' : 'idle';
+            } else if (g.cd <= 0) {
+              g.anim = 'atk';
+              g.st = 0;
+              g.cd = R.cd + Math.random() * 0.3;
+              g.struck = false;
+              gameAudio.playSwingLight?.();
+            } else g.anim = 'idle';
+          } else {
+            // nobody to fight: back to his post round the emperor
+            const fwd = Math.atan2(-Math.sin(own.rotY), -Math.cos(own.rotY));
+            const a = fwd + [0.7, -0.7, 2.4, -2.4][g.home];
+            const tx = own.pos[0] + Math.sin(a) * 1.9;
+            const tz = own.pos[2] + Math.cos(a) * 1.9;
+            const d = Math.hypot(tx - g.x, tz - g.z);
+            if (d > 0.4) {
+              royalStep(g, tx, tz, R.speed * (d > 4 ? 1.2 : 0.8));
+              g.yaw = Math.atan2(tx - g.x, tz - g.z);
+              g.anim = 'run';
+            } else {
+              g.anim = 'idle';
+              g.yaw = fwd;
+            }
+          }
+        }
+        // the other side's blades: each swing that reaches him in its active part hits him once
+        if (own && g.anim !== 'die' && g.anim !== 'gone' && g.anim !== 'rise') {
+          for (let j = 0; j < N; j++) {
+            const f = fighters[j];
+            if (f.hp <= 0 || (f.side ?? 0) === (own.side ?? 0)) {
+              g.hitBy[j] = false;
+              continue;
+            }
+            const st = f.actionState;
+            const swing = (SWING_STATES.has(st) || st === 'skill_4') && !(f.classId === 'Ranger' && st.startsWith('attack_')) && phaseOf(f).phase === 'active';
+            if (!swing) {
+              g.hitBy[j] = false;
+              continue;
+            }
+            if (g.hitBy[j]) continue;
+            const dx = g.x - f.pos[0];
+            const dz = g.z - f.pos[2];
+            const d = Math.hypot(dx, dz);
+            const reach = st.startsWith('attack_') ? 2.6 : 3.4;
+            if (d > reach || Math.abs(g.y - f.pos[1]) > 2) continue;
+            const fx = -Math.sin(f.rotY);
+            const fz = -Math.cos(f.rotY);
+            if (d > 0.8 && (dx * fx + dz * fz) / d < 0.2) continue; // behind them
+            g.hitBy[j] = true;
+            royalHurt(g, st.startsWith('attack_') ? 45 : st === 'ultimate' ? 120 : 75, f.pos[0], f.pos[2]);
+          }
+          // shoulder to shoulder: they hold the other side off (a fighter is moved only onto free ground)
+          for (let j = 0; j < N; j++) {
+            const f = fighters[j];
+            if (j === g.owner || f.hp <= 0 || !f.isGrounded || Math.abs(f.pos[1] - g.y) > 1.2) continue;
+            const dx = f.pos[0] - g.x;
+            const dz = f.pos[2] - g.z;
+            const d = Math.hypot(dx, dz);
+            const RR = 0.62;
+            if (d >= RR || d < 1e-4) continue;
+            const push = RR - d;
+            const foe = (f.side ?? 0) !== (own.side ?? 0);
+            const nx = f.pos[0] + (dx / d) * push;
+            const nz = f.pos[2] + (dz / d) * push;
+            const gy = fy(nx, nz, f.pos[1]);
+            if (foe && gy < f.pos[1] + 0.5 && !solidAt(nx, f.pos[1] + 1, nz)) {
+              f.pos[0] = nx;
+              f.pos[2] = nz;
+              if (f.pos[1] < gy) f.pos[1] = gy;
+            } else {
+              g.x -= (dx / d) * push;
+              g.z -= (dz / d) * push;
+            }
+          }
+        }
+        // guardsmen keep out of each other
+        for (const o of E.royal) {
+          if (o === g) continue;
+          const dx = g.x - o.x;
+          const dz = g.z - o.z;
+          const d = Math.hypot(dx, dz);
+          if (d < 0.7 && d > 1e-4) {
+            const can = fy(g.x + (dx / d) * 0.05, g.z + (dz / d) * 0.05, g.y) < g.y + 0.6;
+            if (can) {
+              g.x += (dx / d) * (0.7 - d) * 0.5;
+              g.z += (dz / d) * (0.7 - d) * 0.5;
+            }
+          }
+        }
+        const alpha = g.anim === 'rise' ? Math.min(1, g.st / 0.3) : g.anim === 'gone' ? Math.max(0, 1 - g.st / 0.7) : g.anim === 'die' ? Math.max(0, 1 - Math.max(0, g.st - 1) / 0.6) : 1;
+        vfx.emperor.royal.set(g.vk, g.x, g.y, g.z, g.yaw, g.anim, g.st, g.hp / R.hp, alpha, dt);
+      }
+    }
+    /** an AI with one of the other side's guardsmen in its face (and its real foe not right there) cuts him down */
+    function aiHitRoyal(i: number, c: CombatantState, it: Intent) {
+      const E = emperorRef.current;
+      if (!E.royal.length) return;
+      const foe = foes[i];
+      const fd = foe ? Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) : 99;
+      let near: RoyalGuard | null = null;
+      let nd = 2.4;
+      for (const g of E.royal) {
+        const own = fighters[g.owner];
+        if (!own || (own.side ?? 0) === (c.side ?? 0) || g.anim === 'die' || g.anim === 'gone' || g.anim === 'rise') continue;
+        const d = Math.hypot(g.x - c.pos[0], g.z - c.pos[2]);
+        if (d < nd) {
+          nd = d;
+          near = g;
+        }
+      }
+      if (!near || fd < 2.2) return;
+      it.faceYaw = yawTo(c.pos, [near.x, near.y, near.z]);
+      if (nd > 1.6) it.move.set(near.x - c.pos[0], 0, near.z - c.pos[2]).normalize();
+      else it.move.set(0, 0, 0);
+      if (!it.request && Math.random() < dt * 4) it.request = 'attack';
+    }
+    /**
+     * 画地为牢: fit each of the four walls (south, east, north, west) to the ground along its line. Where a real
+     * wall, house or pillar already stands on the line the palace wall isn't drawn (the real one keeps people in);
+     * otherwise it reaches down to the lowest ground along it and stands a wall's height over the highest.
+     */
+    function cageSides(cx: number, cy: number, cz: number, h: number) {
+      const lines: [number, number, number, number][] = [
+        [-h, h, h, h],
+        [h, -h, h, h],
+        [-h, -h, h, -h],
+        [-h, -h, -h, h],
+      ];
+      return lines.map(([x0, z0, x1, z1]) => {
+        let lo = cy;
+        let hi = cy;
+        let solid = 0;
+        const n = 11;
+        for (let s = 0; s < n; s++) {
+          const t = s / (n - 1);
+          const x = cx + x0 + (x1 - x0) * t;
+          const z = cz + z0 + (z1 - z0) * t;
+          const g = fy(x, z, cy);
+          if (g > cy + 1.2 || solidAt(x, cy + 1.2, z)) solid++;
+          else {
+            lo = Math.min(lo, Math.max(cy - 3, g));
+            hi = Math.max(hi, g);
+          }
+        }
+        return { show: solid < n * 0.6, y0: lo, y1: hi };
+      });
+    }
     function empFoe(e: CombatantState, f: CombatantState) {
       if (f === e || f.hp <= 0) return false;
       return isBossFighter(e) ? (f.side ?? 0) !== 2 : (f.side ?? 0) !== (e.side ?? 0);
@@ -5270,6 +5673,14 @@ function GameImpl({
         e.stateDuration = 0.75;
         vfx.emperor.imperial.edict(vA.set(e.pos[0], e.pos[1], e.pos[2]), yaw);
         vfx.flash(vB.set(e.pos[0], e.pos[1] + 2.6, e.pos[2]), '#ffd36a', 50, 0.5, 8);
+        gameAudio.playGong();
+      } else if (kind === 'summon') {
+        // 御林护驾: sword raised high, "护驾!", and four columns of gold light come down round him
+        e.actionState = 'skill_3';
+        e.stateTimer = 0;
+        e.stateDuration = 0.7;
+        vfx.damageNumber(vB.set(e.pos[0], e.pos[1] + 2.8, e.pos[2]), '护驾！', true, '#ffd36a');
+        vfx.ring(vA.set(e.pos[0], e.pos[1] + 0.08, e.pos[2]), 2.4, '#ffd36a', 0.6, 0.12, 0.3);
         gameAudio.playGong();
       } else if (kind === 'charge') {
         // 御林冲阵: an arm raised, and the spectral guard charges past
@@ -5384,6 +5795,7 @@ function GameImpl({
     /** every tick, on every map: emperors' moves under way, arrows in flight, auras */
     function stepEmperors() {
       const E = emperorRef.current;
+      stepRoyal();
       for (let k = E.zones.length - 1; k >= 0; k--) {
         const z = E.zones[k];
         z.t -= dt;
@@ -5414,6 +5826,16 @@ function GameImpl({
           continue;
         }
         for (let g = 0; g < 5; g++) {
+          if (vfx.emperor.imperial.guardStopped(C.k, g)) continue;
+          // he runs over the ground (steps, slopes, the ship's deck); a wall, a house or a cliff face stops him
+          const along = vfx.emperor.imperial.guardAhead(C.k, g, vC);
+          const prevY = vC.y;
+          const gy = fy(vC.x, vC.z, prevY);
+          if (gy > prevY + 1.0 || solidAt(vC.x, gy + 1.0, vC.z) || solidAt(vC.x, gy + 1.7, vC.z)) {
+            vfx.emperor.imperial.stopGuard(C.k, g, along);
+            continue;
+          }
+          vfx.emperor.imperial.setGuardY(C.k, g, Math.max(gy, prevY - 0.5));
           const gp = vfx.emperor.imperial.guardAt(C.k, g, vC);
           for (let j = 0; j < N; j++) {
             const f = fighters[j];
@@ -5424,48 +5846,86 @@ function GameImpl({
           }
         }
       }
-      // 画地为牢: whoever was caught inside can't get out; nobody else (but him) can get in
+      // 画地为牢: whoever was caught inside can't get out; nobody else (but him) can get in. A crossing is undone
+      // by putting the walker back where they were a moment ago (one axis at a time, so they slide along the
+      // wall): that spot was free, so nobody is ever shoved into a house, a pillar or off a ledge.
       for (let k = E.cages.length - 1; k >= 0; k--) {
         const C = E.cages[k];
         C.t += dt;
+        const own = fighters[C.owner];
+        vfx.emperor.imperial.cageOwner(C.vk, own && own.hp > 0 ? vA.set(own.pos[0], own.pos[1], own.pos[2]) : null);
         if (C.t > EMP.cage.dur) {
+          vfx.emperor.imperial.cageOwner(C.vk, null);
           E.cages.splice(k, 1);
           continue;
         }
-        if (C.t < 0.15) continue; // still rising
         const h = EMP.cage.half;
+        const inBox = (x: number, z: number, m: number) => Math.abs(x - C.x) < m && Math.abs(z - C.z) < m;
         for (let j = 0; j < N; j++) {
           const f = fighters[j];
+          const p = C.prev[j];
+          C.prev[j] = null;
           if (j === C.owner || f.hp <= 0 || Math.abs(f.pos[1] - C.y) > 3) continue;
-          const dx = f.pos[0] - C.x;
-          const dz = f.pos[2] - C.z;
-          if (C.trapped.includes(j)) {
-            const lim = h - 0.45;
-            if (Math.abs(dx) > lim) {
-              f.pos[0] = C.x + Math.sign(dx) * lim;
-              f.vel[0] = 0;
-            }
-            if (Math.abs(dz) > lim) {
-              f.pos[2] = C.z + Math.sign(dz) * lim;
-              f.vel[2] = 0;
-            }
-          } else if (Math.abs(dx) < h + 0.45 && Math.abs(dz) < h + 0.45) {
-            // pushed back out through the nearest wall
-            if (h + 0.45 - Math.abs(dx) < h + 0.45 - Math.abs(dz)) {
-              f.pos[0] = C.x + Math.sign(dx || 1) * (h + 0.45);
-              f.vel[0] = 0;
-            } else {
-              f.pos[2] = C.z + Math.sign(dz || 1) * (h + 0.45);
-              f.vel[2] = 0;
+          {
+            const trapped = C.trapped.includes(j);
+            const m = trapped ? (C.lims[j] ?? h - 0.45) : h + 0.45;
+            const ok = (x: number, z: number) => inBox(x, z, m) === trapped;
+            if (!ok(f.pos[0], f.pos[2])) {
+              if (p && ok(p[0], p[1])) {
+                if (ok(f.pos[0], p[1])) f.pos[2] = p[1];
+                else if (ok(p[0], f.pos[2])) f.pos[0] = p[0];
+                else {
+                  f.pos[0] = p[0];
+                  f.pos[2] = p[1];
+                }
+                f.vel[0] = f.vel[2] = 0;
+                // and back up onto the ground there (a dune, a step): never left standing inside the slope
+                const gy = fy(f.pos[0], f.pos[2], p[2]);
+                if (f.pos[1] < gy && gy - f.pos[1] < 1.5) f.pos[1] = gy;
+              } else if (trapped) {
+                // knocked out past the line with no free spot on record: back inside, at the edge
+                f.pos[0] = C.x + Math.max(-m, Math.min(m, f.pos[0] - C.x));
+                f.pos[2] = C.z + Math.max(-m, Math.min(m, f.pos[2] - C.z));
+                f.vel[0] = f.vel[2] = 0;
+                const gy = fy(f.pos[0], f.pos[2], f.pos[1]);
+                if (f.pos[1] < gy && gy - f.pos[1] < 1.5) f.pos[1] = gy;
+              } else {
+                // walked in while the walls were still rising, or dropped in from above: out through the
+                // nearest wall with somewhere to stand behind it, or else they're shut in with the rest
+                const dx = f.pos[0] - C.x;
+                const dz = f.pos[2] - C.z;
+                const out = h + 0.5;
+                const tries: [number, number, number][] = [
+                  [C.x + Math.sign(dx || 1) * out, f.pos[2], out - Math.abs(dx)],
+                  [f.pos[0], C.z + Math.sign(dz || 1) * out, out - Math.abs(dz)],
+                  [C.x - Math.sign(dx || 1) * out, f.pos[2], out + Math.abs(dx)],
+                  [f.pos[0], C.z - Math.sign(dz || 1) * out, out + Math.abs(dz)],
+                ];
+                tries.sort((a, b) => a[2] - b[2]);
+                const free = tries.find(([x, z]) => {
+                  const g = fy(x, z, f.pos[1]);
+                  return g < f.pos[1] + 0.6 && g > f.pos[1] - 2 && !solidAt(x, f.pos[1] + 1, z) && !solidAt(x, f.pos[1] + 0.3, z);
+                });
+                if (free) {
+                  f.pos[0] = free[0];
+                  f.pos[2] = free[1];
+                  f.pos[1] = Math.max(f.pos[1], fy(free[0], free[1], f.pos[1]));
+                  f.vel[0] = f.vel[2] = 0;
+                } else C.trapped.push(j);
+              }
             }
           }
+          C.prev[j] = [f.pos[0], f.pos[2], f.pos[1]];
         }
       }
       for (let ei = 0; ei < N; ei++) {
         const e = fighters[ei];
         if (e.classId !== 'Emperor') continue;
         const boss = isBossFighter(e);
-        if (!boss) vfx.emperor.imperial.preload(); // the spectral guards' model, once
+        if (!boss) {
+          vfx.emperor.imperial.preload(); // the spectral guards' model, once
+          vfx.emperor.royal.preload();
+        }
         const wrath = boss ? e.hp < e.maxHp * 0.35 : e.buffs.some((b) => b.type === 'blood_rage');
         vfx.emperor.setAura(ei, wrath && e.hp > 0 ? vA.set(e.pos[0], e.pos[1], e.pos[2]) : null);
         if (wrath && e.hp > 0 && Math.random() < dt * (boss ? 8 : 40)) vfx.embers(vB.set(e.pos[0], e.pos[1] + 0.4 + Math.random() * 1.4, e.pos[2]), 1, Math.random() < 0.5 ? '#ffcf5a' : '#ff7a1a', 0.45, 3, 0.08);
@@ -5502,6 +5962,7 @@ function GameImpl({
               const d = flat(f);
               const ang = Math.atan2(f.pos[0] - ex, f.pos[2] - ez) - M.yaw;
               if (d > EMP.edict.r || !level(f) || Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) >= EMP.edict.half) continue;
+              if (!losClear(ex, e.pos[1] + 1.3, ez, f.pos[0], f.pos[1] + 1.2, f.pos[2])) continue; // not through a wall
               f.rootTimer = Math.max(f.rootTimer ?? 0, EMP.edict.kneel);
               f.silenceTimer = Math.max(f.silenceTimer ?? 0, EMP.edict.kneel);
               f.vel[0] = f.vel[2] = 0;
@@ -5510,14 +5971,20 @@ function GameImpl({
             }
           }
           if (M.t > 0.6) e.empMove = undefined;
+        } else if (M.kind === 'summon') {
+          if (!M.fired && M.t >= 0.3) {
+            M.fired = true;
+            summonRoyal(ei);
+          }
+          if (M.t > 0.6) e.empMove = undefined;
         } else if (M.kind === 'charge') {
           if (M.t > 0.45) e.empMove = undefined; // the guards run on without him
         } else if (M.kind === 'cage') {
           if (!M.fired && M.t >= EMP.cage.wind) {
             M.fired = true;
-            vfx.emperor.imperial.cage(vB.set(M.x, M.y, M.z), EMP.cage.dur);
-            const trapped: number[] = [];
             const h = EMP.cage.half;
+            const vk = vfx.emperor.imperial.cage(vB.set(M.x, M.y, M.z), EMP.cage.dur, cageSides(M.x, M.y, M.z, h));
+            const trapped: number[] = [];
             for (let j = 0; j < N; j++) {
               const f = fighters[j];
               if (j === ei || f.hp <= 0 || Math.abs(f.pos[0] - M.x) > h || Math.abs(f.pos[2] - M.z) > h || Math.abs(f.pos[1] - M.y) > 3) continue;
@@ -5527,7 +5994,12 @@ function GameImpl({
                 vfx.damageNumber(vB.set(f.pos[0], f.pos[1] + 2.4, f.pos[2]), '禁', true, '#ff6a4a');
               }
             }
-            E.cages.push({ x: M.x, y: M.y, z: M.z, t: 0, owner: ei, trapped });
+            // each walker's last free spot, and how far out each one caught inside may stand (where they stood, if
+            // that was already near the line: nobody is dragged in over a pillar or a step at the wall's foot)
+            const prev = fighters.map((f) => [f.pos[0], f.pos[2], f.pos[1]] as [number, number, number]);
+            const lims = fighters.map((f) => Math.min(h + 0.2, Math.max(h - 0.45, Math.abs(f.pos[0] - M.x) + 0.02, Math.abs(f.pos[2] - M.z) + 0.02)));
+            E.cages.push({ x: M.x, y: M.y, z: M.z, t: 0, owner: ei, trapped, vk, prev, lims });
+            (globalThis as any).__TQ_LASTCAGE = { x: M.x, z: M.z, trapped: [...trapped] }; // for tests
             vfx.dustPuff(vB.set(M.x, M.y + 0.1, M.z), 40, h * 1.2, 4, 1, '#cdb88f');
             vfx.rocks(vB.set(M.x, M.y + 0.1, M.z), 20, 6, 0.1);
             vfx.damageNumber(vB.set(M.x, M.y + 3.2, M.z), '画地为牢', true, '#ffd36a');
@@ -7359,6 +7831,8 @@ function GameImpl({
         ai.comboLeft -= 1;
       }
 
+      // 皇上 (hero): call his guard when it comes to a fight
+      if (ai.think <= 0 && free && !ai.request && me.classId === 'Emperor' && !isBossFighter(me) && ready('skill5') && me.mp >= 35 && dist < 9 && Math.random() < 0.35) ask('skill5');
       if (ai.think <= 0 && free && !ai.request && shadowAI) {
         // 影刃: hook or blink in, cut, go to ground when it gets hot
         ai.think = 0.2 + Math.random() * 0.22;
