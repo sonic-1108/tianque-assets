@@ -241,11 +241,12 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          <button className="tq-go" disabled={p.hostPicks || !map.available || !p.ready || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
+          <button className={'tq-go' + (p.loadPct !== undefined ? ' loading' : '')} disabled={p.hostPicks || !map.available || !p.ready || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
             {p.loadPct !== undefined && !p.hostPicks ? (
-              <small>载入
+              // the scene is still being built before the download even starts: say so, rather than a frozen 0%
+              <small>{p.loadPct <= 5 ? '准备' : p.loadPct >= 99 ? '即将' : '载入'}
                 <br />
-                {Math.round(p.loadPct)}%</small>
+                {p.loadPct <= 5 ? '中' : p.loadPct >= 99 ? '就绪' : `${Math.round(p.loadPct)}%`}</small>
             ) : p.hostPicks ? (
               <small>等房主
                 <br />
@@ -363,6 +364,8 @@ const LOBBY_CSS = `
   font-family:"Ma Shan Zheng",serif; font-size:clamp(30px,2.8vw,40px); line-height:1.05; box-shadow:inset 0 0 0 3px rgba(255,240,220,.28), 0 18px 34px -16px rgba(120,30,20,.7); transition:transform .2s, filter .2s; }
 .tq-go:hover:not(:disabled) { transform:translateY(-3px) rotate(-2deg); filter:brightness(1.08); }
 .tq-go:disabled { background:#8a8377; cursor:default; }
+.tq-go.loading { background:linear-gradient(110deg, #8a8377 30%, #a89c86 45%, #8a8377 60%); background-size:250% 100%; animation:tq-shimmer 1.6s linear infinite; }
+@keyframes tq-shimmer { from { background-position:120% 0; } to { background-position:-120% 0; } }
 .tq-go small { font-family:"Noto Serif SC",serif; font-size:13px; letter-spacing:.2em; line-height:1.6; }
 
 .tq-btn { border:1px solid var(--ink); background:var(--ink); color:var(--paper); border-radius:8px; padding:9px 16px; font:600 13px "Noto Serif SC",serif; letter-spacing:.2em; cursor:pointer; }
@@ -390,12 +393,16 @@ const LOBBY_CSS = `
 .tq-gate small { font-size:11.5px; color:var(--ink2); opacity:.8; }
 
 @media (max-width: 900px) {
-  .tq-heroes { grid-template-columns:repeat(2, minmax(0,1fr)); }
-  .tq-l-heroes { grid-template-columns:1fr; }
+  /* narrow: the heroes keep their full height and the page scrolls, instead of the map strip sliding over them */
+  .tq-heroes { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .tq-l-heroes { grid-template-columns:1fr; flex:none; }
   .tq-l-label { display:none; }
   .tq-l-maps { grid-template-columns:1fr; }
   .tq-maps { grid-template-columns:repeat(4, minmax(0,1fr)); }
   .tq-go { justify-self:end; }
+}
+@media (max-width: 560px) {
+  .tq-heroes { grid-template-columns:repeat(2, minmax(0,1fr)); }
 }
 `;
 

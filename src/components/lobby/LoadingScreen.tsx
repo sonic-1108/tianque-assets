@@ -71,7 +71,7 @@ export function LoadingScreen({ progress, error, onRetry, hero }: { progress: nu
             <div className="tq-load-bar">
               <div className="tq-load-fill" style={{ width: `${pct}%` }} />
             </div>
-            <div className="tq-load-pct">{progress >= 99 ? '即将入场' : `${Math.round(progress)}%`}</div>
+            <div className="tq-load-pct">{progress >= 99 ? '即将入场' : progress <= 5 ? '准备场景中' : `${Math.round(progress)}%`}</div>
             {t && (
               <div className="tq-load-tip" style={{ opacity: shown ? 1 : 0 }}>
                 <span>{t.map}</span>
