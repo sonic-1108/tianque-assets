@@ -541,11 +541,11 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     passiveName: '金甲护体',
     passiveDesc: '作为长安首领时：普通攻击打不出硬直，击不飞、打不倒。作为英雄时没有这个被动。',
     skills: [
-      { id: 'sweep_army', name: '横扫千军', key: '1', description: '天子剑来回两刀，两道金色弧光横扫面前5.4米：第一刀95伤害打出硬直，第二刀反扫95伤害并击倒。几乎没有前摇。', mpCost: 20, cooldown: 6, icon: '⚔️' },
-      { id: 'dragon_might', name: '龙威', key: '2', description: '一声断喝，金色气浪连同八道金光向四周炸开：5米内的人全部击飞（130伤害）。被围住时用。', mpCost: 25, cooldown: 10, icon: '🐉' },
-      { id: 'imperial_arrows', name: '御林箭雨', key: '3', description: '一挥手，对手脚下亮起红圈（24米内，没人就落在前方），0.6秒后御林军连放三轮箭雨，每轮60伤害，站满三轮共180。出手后可以立刻走动。', mpCost: 20, cooldown: 9, icon: '🏹' },
-      { id: 'dragon_wrath', name: '龙颜大怒', key: '4', description: '7秒内金焰缠身：伤害提升35%，移动更快，打中人回血。开启时身边窜起一圈火柱。', mpCost: 30, cooldown: 18, icon: '👑' },
-      { id: 'true_dragon', name: '真龙降世', key: 'R', description: '举剑召出一条金龙，在身前盘旋升空后扑向对手（26米内，没人就扑向前方）。俯冲前对手脚下亮起金圈，约半秒后落下（240伤害并击飞）。0.8秒后就能继续行动。', mpCost: 60, cooldown: 24, icon: '🐲', isSuper: true },
+      { id: 'edict', name: '金口玉言', key: '1', description: '一卷圣旨在头顶展开，金色的"跪"字朝前方飞出去（7.5米扇形）。被打中的人受70伤害，跪下1.3秒：不能移动，也放不了技能。', mpCost: 25, cooldown: 9, icon: '📜' },
+      { id: 'phantom_guard', name: '御林冲阵', key: '2', description: '举手一招，五名金色的御林军虚影持枪从身后冲出，向前冲锋17米，路上的人被撞飞（每人100伤害，每个人只被撞一次）。冲锋时你已经可以行动。', mpCost: 30, cooldown: 12, icon: '🛡️' },
+      { id: 'palace_cage', name: '画地为牢', key: '3', description: '天子剑往地上一划，对手周围升起四面红墙金瓦的宫墙（14米内，没人就落在前方）。墙里的人出不去，墙外的人进不来，只有你能自由进出，持续3秒。圈住时附带50伤害。', mpCost: 30, cooldown: 16, icon: '🏯' },
+      { id: 'jade_seal', name: '玉玺镇压', key: '4', description: '一跺脚，一方巨大的传国玉玺从天而降，砸在对手脚下（18米内），地上亮起金圈，0.6秒后落地：150伤害并击倒1.1秒，地上留下"受命于天"的印文。', mpCost: 25, cooldown: 10, icon: '🟩' },
+      { id: 'true_dragon', name: '真龙降世', key: 'R', description: '双臂一振，召出一条金龙，在身前盘旋升空后扑向对手（26米内，没人就扑向前方）。俯冲前对手脚下亮起金圈，约半秒后落下（240伤害并击飞）。0.8秒后就能继续行动。', mpCost: 60, cooldown: 24, icon: '🐲', isSuper: true },
     ],
   },
   Guard: {

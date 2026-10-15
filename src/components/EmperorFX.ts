@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DragonFX } from './DragonFX';
+import { ImperialFX } from './ImperialFX';
 
 // ==================================================================
 // 天子 effects: the red warning fan before 横扫千军 and the golden crescent that sweeps it, the golden dragon of
@@ -110,6 +111,8 @@ export class EmperorFX {
   private arrowSlots = 0;
   private volleys: Volley[] = [];
   private dragons: DragonFX[] = [];
+  /** the hero's imperial moves: edict, spectral guards, palace walls, jade seal */
+  imperial: ImperialFX;
   private auras: { mesh: THREE.Mesh; owner: number; on: number; seen: boolean }[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
@@ -123,6 +126,9 @@ export class EmperorFX {
 
   constructor(root: THREE.Object3D) {
     this.root = root;
+    this.imperial = new ImperialFX(root);
+    this.imperial.dust = (p) => this.clouds?.(p);
+    this.imperial.embers = (p, n, c) => this.embers?.(p, n, c);
     // warning fans
     for (let i = 0; i < 4; i++) {
       const mat = fanMat();
@@ -313,6 +319,7 @@ export class EmperorFX {
       this.arrowSlots = 0;
     }
     for (const d of this.dragons) d.update(dt, time);
+    this.imperial.update(dt, time);
     for (const A of this.auras) {
       if (!A.mesh.userData.lit) A.on = Math.max(0, A.on - 0.05);
       A.mesh.userData.lit = false;

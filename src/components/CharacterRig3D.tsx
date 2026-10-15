@@ -168,7 +168,17 @@ const SHADOW_CLIP_PLAN: Record<string, ClipSpec> = {
   dodge: { match: ['dive', 'roll', 'flip'], start: 0.36, end: 0.92, fit: true },
   cheer: { match: ['swagger', 'agree', 'cheer'], start: 0.0, end: 0.8, loop: true },
 };
-const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : c === 'Shadowblade' ? SHADOW_CLIP_PLAN : CLIP_PLAN);
+/** 天子 overrides: each move its own gesture. skill_1 the sword cut, skill_2 a lunge and a pointed finger (the edict),
+ *  skill_3 an arm raised to command, skill_4 a crouching stamp, ultimate both arms flung up to call the dragon */
+const EMPEROR_CLIP_PLAN: Record<string, ClipSpec> = {
+  ...CLIP_PLAN,
+  skill_1: { match: ['slash', 'chop'], start: 0.22, end: 0.56, fit: true },
+  skill_2: { match: ['angry_02'], start: 0.42, end: 0.88, fit: true },
+  skill_3: { match: ['cheer'], start: 0.0, end: 0.6, fit: true },
+  skill_4: { match: ['angry_03'], start: 0.3, end: 0.8, fit: true },
+  ultimate: { match: ['angry_01'], start: 0.3, end: 0.78, fit: true },
+};
+const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : c === 'Shadowblade' ? SHADOW_CLIP_PLAN : c === 'Emperor' ? EMPEROR_CLIP_PLAN : CLIP_PLAN);
 
 interface BuiltClip {
   key: string;
@@ -986,7 +996,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     strafeYawRef.current = THREE.MathUtils.damp(strafeYawRef.current, targetYaw, 12, delta);
 
-    if (st === 'skill_2' && (classId === 'Berserker' || classId === 'Emperor')) spinRef.current -= delta * 15;
+    if (st === 'skill_2' && classId === 'Berserker') spinRef.current -= delta * 15;
     else spinRef.current = THREE.MathUtils.damp(spinRef.current, Math.round(spinRef.current / (Math.PI * 2)) * Math.PI * 2, 14, delta);
 
     // Ultimate: forward somersault on the way up
@@ -997,7 +1007,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     let leanX = 0;
     let leanZ = 0;
-    if (st === 'skill_3' && (classId === 'Berserker' || classId === 'Emperor')) leanX = 0.32;
+    if (st === 'skill_3' && classId === 'Berserker') leanX = 0.32;
     else if (st === 'skill_3' && classId === 'BuddhistMage') leanX = 0.1;
     else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
     else if (st === 'launched') leanX = -0.45;
