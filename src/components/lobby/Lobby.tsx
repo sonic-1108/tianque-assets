@@ -288,7 +288,7 @@ const LOBBY_CSS = `
 
 .tq-l-heroes { flex:1; min-height:0; display:grid; grid-template-columns:auto 1fr; grid-template-rows:1fr auto; column-gap:2.4vw; row-gap:1.6vh; align-items:end; }
 .tq-l-label { grid-row:1 / span 2; align-self:center; font-family:"Ma Shan Zheng",serif; font-size:30px; line-height:1.15; color:var(--ink2); }
-.tq-heroes { display:grid; grid-template-columns:repeat(4, minmax(0, 210px)); gap:1.6vw; align-items:end; }
+.tq-heroes { display:grid; grid-template-columns:repeat(5, minmax(0, 190px)); gap:1.3vw; align-items:end; }
 .tq-hero { --acc:#a3402b; position:relative; text-align:left; cursor:pointer; padding:0 0 14px; border-radius:14px;
   background:linear-gradient(180deg, rgba(246,241,231,0) 0%, rgba(246,241,231,.55) 46%, rgba(246,241,231,.8) 100%);
   border:1px solid rgba(31,28,24,.12); transition:transform .25s ease, box-shadow .25s ease, border-color .25s; overflow:visible; }

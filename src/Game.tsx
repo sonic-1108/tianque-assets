@@ -221,6 +221,13 @@ interface AIMemory {
   airFollow: number; // >0: jumped, will press 1 mid-air for 钉地斩
 }
 
+/** 天子's moves, boss or hero: tuned per user (the boss's numbers are scaled up again by his damage factor) */
+const EMP = {
+  sweep: { boss: { wind: 0.75, r: 5.8, dmg: 160 }, hero: { wind: 0.42, r: 5.2, dmg: 150 } },
+  might: { boss: { wind: 0.45, r: 5.2, dmg: 140 }, hero: { wind: 0.3, r: 4.5, dmg: 115 } },
+  dragon: { boss: { dmg: 210, r: 3.2 }, hero: { dmg: 240, r: 3.4 } },
+  arrows: { boss: { dmg: 170, r: 2.2, t: 1.4 }, hero: { dmg: 150, r: 2.8, t: 1.15 } },
+};
 /** 天子 the neutral boss of 长安 (side 2); a hero 天子 on a team is an ordinary fighter */
 const isBossFighter = (f: CombatantState | undefined) => !!f && f.classId === 'Emperor' && (f.side ?? 0) === 2;
 const yawTo = (from: number[], to: number[]) => Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
@@ -5210,22 +5217,14 @@ function GameImpl({
       }
     }
     /** 天子 the neutral boss of 长安 (a hero 天子 is on a team and plays like anyone else) */
-    const isBoss = isBossFighter;
     /** whom an emperor's moves hurt: the boss hits everyone but his own court; a hero, everyone not on his side */
     function empFoe(e: CombatantState, f: CombatantState) {
       if (f === e || f.hp <= 0) return false;
-      return isBoss(e) ? (f.side ?? 0) !== 2 : (f.side ?? 0) !== (e.side ?? 0);
+      return isBossFighter(e) ? (f.side ?? 0) !== 2 : (f.side ?? 0) !== (e.side ?? 0);
     }
-    /** 天子's moves, boss or hero: tuned per user (the boss's numbers are scaled up again by his damage factor) */
-    const EMP = {
-      sweep: { boss: { wind: 0.75, r: 5.8, dmg: 160 }, hero: { wind: 0.42, r: 5.2, dmg: 150 } },
-      might: { boss: { wind: 0.45, r: 5.2, dmg: 140 }, hero: { wind: 0.3, r: 4.5, dmg: 115 } },
-      dragon: { boss: { dmg: 210, r: 3.2 }, hero: { dmg: 240, r: 3.4 } },
-      arrows: { boss: { dmg: 170, r: 2.2, t: 1.4 }, hero: { dmg: 150, r: 2.8, t: 1.15 } },
-    };
     function startEmpMove(i: number, kind: EmpMove['kind'], target: number) {
       const e = fighters[i];
-      const boss = isBoss(e);
+      const boss = isBossFighter(e);
       const wrath = boss && e.hp < e.maxHp * 0.35;
       const tg = fighters[target];
       const yaw = tg && target !== i ? Math.atan2(tg.pos[0] - e.pos[0], tg.pos[2] - e.pos[2]) : e.rotY - Math.PI;
@@ -5287,7 +5286,7 @@ function GameImpl({
     /** 御林箭雨: a red circle now, arrows out of the sky `t` seconds later */
     function empArrows(i: number, x: number, z: number) {
       const e = fighters[i];
-      const A = isBoss(e) ? EMP.arrows.boss : EMP.arrows.hero;
+      const A = isBossFighter(e) ? EMP.arrows.boss : EMP.arrows.hero;
       const zn = { x, z, r: A.r, t: A.t, owner: i, dmg: A.dmg };
       emperorRef.current.zones.push(zn);
       bombZonesRef.current.push({ x, z, r: A.r });
@@ -5320,7 +5319,7 @@ function GameImpl({
       for (let ei = 0; ei < N; ei++) {
         const e = fighters[ei];
         if (e.classId !== 'Emperor') continue;
-        const boss = isBoss(e);
+        const boss = isBossFighter(e);
         const wrath = boss ? e.hp < e.maxHp * 0.35 : e.buffs.some((b) => b.type === 'blood_rage');
         vfx.emperor.setAura(ei, wrath && e.hp > 0 ? vA.set(e.pos[0], e.pos[1], e.pos[2]) : null);
         if (wrath && e.hp > 0 && Math.random() < dt * 8) vfx.embers(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 1, '#ffb347', 0.5, 2, 0.06);
@@ -5423,7 +5422,7 @@ function GameImpl({
     /** 皇上 the boss (长安): 龙威 when crowded, 横扫千军 on whoever is in front, 真龙降世 and 御林箭雨 on those who keep away */
     function updateEmperor() {
       const E = emperorRef.current;
-      const ei = fighters.findIndex(isBoss);
+      const ei = fighters.findIndex(isBossFighter);
       if (ei < 0) return;
       const e = fighters[ei];
       if (e.hp <= 0) return;
