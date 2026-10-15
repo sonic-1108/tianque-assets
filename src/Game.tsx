@@ -5,10 +5,9 @@ import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
-import { EffectComposer, Bloom, Vignette, ToneMapping, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
-import { Effect } from 'postprocessing';
 import { getConfig } from './constants';
 import { gameAudio } from './utils/helper';
 import { EmpMove, CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
@@ -75,14 +74,6 @@ interface GameSceneProps {
   onLoadProgress?: (progress: ModelLoadProgress) => void;
 }
 
-// Saturation and contrast act on HDR colour before tone mapping, and push the weak channels of bright saturated
-// colours (red lanterns, fire) below zero; ACES and the sRGB curve turn that into NaN, i.e. black. Clamp it.
-class ClampNegativeEffect extends Effect {
-  constructor() {
-    super('ClampNegative', 'void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){ outputColor = vec4(max(inputColor.rgb, vec3(0.0)), inputColor.a); }');
-  }
-}
-const clampNegative = new ClampNegativeEffect();
 const ACES_FILMIC = 6; // postprocessing ToneMappingMode.ACES_FILMIC
 
 const vA = new THREE.Vector3();
@@ -7551,9 +7542,8 @@ function GameImpl({
       <EffectComposer multisampling={perfTier >= 2 ? 0 : quality === 'high' ? 4 : quality === 'medium' ? 2 : 0}>
         {/* ambient occlusion is off: on high quality it blacked out lanterns and robe folds, threw dark halos round
             anyone near the lens, and darkened the whole screen when a skill burst dust and debris in front of the camera */}
-        <HueSaturation saturation={0.08} />
-        <BrightnessContrast brightness={0} contrast={0.06} />
-        <primitive object={clampNegative} />
+        {/* no saturation / contrast grading: on Apple GPUs it pushed saturated reds and oranges (lanterns, robes, the
+            dragon's fins) below zero, which came out black, and the bloom then smeared that across the whole screen */}
         <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
