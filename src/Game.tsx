@@ -5289,13 +5289,14 @@ function GameImpl({
     }
 
     /** 长安: knocked off the roofs into a courtyard. Hurts, then you are helped back up onto the nearest roof. */
-    /** the 传国玉玺 falls to the roof here (never into a courtyard) */
+    /** the 传国玉玺 falls right where he fell (roof, ridge or street; never down a courtyard pit) */
     function dropSeal(x: number, z: number, y?: number) {
       let sx = x;
       let sz = z;
       // right where he fell: on the roof (or ridge) under his feet, not the top of whatever roof is highest there
       let sy = y !== undefined ? fy(sx, sz, y) : terrainHeight(map.id, sx, sz);
-      if (sy < 0 || (y !== undefined && sy < y - 6)) {
+      // the streets (where his procession goes) are fine; only a courtyard pit (you get hauled out of those) isn't
+      if (sy < -3.3 || (y !== undefined && sy < y - 6)) {
         // knocked off into a courtyard: it lands on the nearest roof instead
         [sx, sz] = safeSpot(sx, sz);
         sy = terrainHeight(map.id, sx, sz);
