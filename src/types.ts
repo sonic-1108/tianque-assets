@@ -192,7 +192,8 @@ export interface CombatantState {
   ultTarget?: boolean; // 千影杀: a target was in reach when it began
   burrowT?: number; // 遁地: seconds left under the ground
   ballista?: number; // 怒海战船: manning this mounted crossbow
-  atHelm?: number; // 怒海战船: steering this ship (0 / 1) at her helm
+  atHelm?: number;
+  swarmSafe?: number; // 大漠玉门关: this swarm (its start time) already had you; it won't again // 怒海战船: steering this ship (0 / 1) at her helm
   wading?: boolean; // 青冥古林: in or at the edge of the river (no body shadow: it would ghost on the river bed)
   pull?: { x: number; z: number; t: number }; // 锁链钩: being dragged toward (x, z)
   mantraShots?: number; // 六字真言 syllables released so far

@@ -4143,7 +4143,7 @@ function GameImpl({
     }
 
     function ledgeGuard(c: CombatantState, px0: number, pz0: number) {
-      if (!map.terrain || !c.isGrounded || map.id === 'sea') return; // on the ship you may step off a raised deck
+      if (!map.terrain || !c.isGrounded || map.id === 'sea' || map.id === 'desert') return; // on the ship (and off the beacon, ramps and walls in the desert) you may step off
       const s = c.actionState;
       if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || s === 'dodge' || c.hp <= 0) return;
       const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;
@@ -4279,7 +4279,7 @@ function GameImpl({
         const c = fighters[i];
         const dv = c.devoured ?? 0;
         if (dv <= 0) {
-          if (!live || c.hp <= 0) {
+          if (!live || c.hp <= 0 || c.swarmSafe === D.swarmAt) {
             c.swarmExpo = 0;
             continue;
           }
@@ -4304,9 +4304,14 @@ function GameImpl({
         if (Math.random() < 0.4) vfx.grains(vB.set(c.pos[0], cutY, c.pos[2]), 2, '#e8c08a', wind, 0.25, 0.035);
         if ((c.devoured ?? 0) < 1) continue;
         if (!aiOn) {
-          // practice: you come back
+          // practice: you come back, and this swarm leaves you alone (otherwise it ate you again and again)
           c.devoured = 0;
           c.hp = c.maxHp;
+          c.swarmExpo = 0;
+          c.swarmSafe = D.swarmAt;
+          c.actionState = 'idle';
+          c.stateTimer = 0;
+          if (i === ME) onRoundEvent?.({ type: 'toast', text: '练习模式：你回来了，这一波虫群不会再吃你' });
           continue;
         }
         c.hp = 0;
@@ -4319,6 +4324,24 @@ function GameImpl({
      * Get within 3 m of it and it takes you: round and up to a dozen metres over two seconds, then flings you out
      * to fall hard (150 and knocked down).
      */
+    /** flung out of the 龙卷风: away from the fort walls if that's where the fling points, falling from where it held you */
+    function releaseTwister(c: CombatantState, ang: number) {
+      c.twister = 0;
+      c.twisterCd = 3;
+      c.twisterFall = c.hp > 0;
+      // never fling anyone over (or into) the fort: aim away from it
+      let ax = Math.cos(ang);
+      let az = Math.sin(ang);
+      if (ax * c.pos[0] + az * c.pos[2] < 0) {
+        ax = -ax;
+        az = -az;
+      }
+      c.vel = [ax * 9, 4, az * 9];
+      c.isGrounded = false;
+      c.actionState = 'launched';
+      c.stateTimer = 0;
+      c.stateDuration = 3;
+    }
     function updateTornado() {
       const D = mapRuntime.desert;
       let T = D.tornado;
@@ -4327,7 +4350,10 @@ function GameImpl({
         T = D.tornado = { x: -D.wind * (DESERT.radius - 10), z, vx: D.wind * 3.4, vz: (Math.random() - 0.5) * 1.5, a: 0, life: 26 };
         onRoundEvent?.({ type: 'toast', text: '沙暴里卷起了龙卷风！别靠近，会被卷上天' });
       }
-      if (!T) return;
+      if (!T) {
+        for (const c of fighters) if ((c.twister ?? 0) > 0) releaseTwister(c, c.twisterA ?? 0);
+        return;
+      }
       T.life -= dt;
       const ending = T.life <= 0 || D.sand < 0.3 || Math.hypot(T.x, T.z) > DESERT.radius + 2;
       T.a = ending ? Math.max(0, T.a - dt / 1.5) : Math.min(1, T.a + dt / 1.5);
@@ -4358,14 +4384,7 @@ function GameImpl({
           c.rotY = c.targetRotY = ang * 2;
           if (Math.random() < dt * 10) vfx.dustPuff(vB.set(c.pos[0], c.pos[1], c.pos[2]), 2, 0.4, 2, 0.6, '#c9a27a');
           c.twister = nt;
-          if (nt >= 2.4 || T.a < 0.2 || c.hp <= 0) {
-            // flung out
-            c.twister = 0;
-            c.twisterCd = 3;
-            c.twisterFall = c.hp > 0;
-            c.vel = [Math.cos(ang) * 9, 4, Math.sin(ang) * 9];
-            c.stateDuration = 3;
-          }
+          if (nt >= 2.4 || T.a < 0.2 || c.hp <= 0 || round.over) releaseTwister(c, ang);
           continue;
         }
         if (T.a < 0.6 || c.hp <= 0 || (c.devoured ?? 0) > 0 || (c.twisterCd ?? 0) > 0 || c.ballista !== undefined) continue;
