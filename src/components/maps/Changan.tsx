@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { ROOF, Hall, hallHeight, roofHeight, mapRuntime, GROW } from '../../maps';
 import { GLSL_NOISE, seeded } from '../Scenery';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ==================================================================
 // 长安上元夜: the roofs of a Tang palace compound on the night of the
@@ -1388,14 +1389,30 @@ function shopTextures() {
     const g0 = up + 14;
     g.fillStyle = glow ? 'rgb(255,140,60)' : '#ffb060';
     g.fillRect(16, g0, W - 32, H - g0 - 6);
-    if (!glow) {
-      // goods on shelves at the back: bolts of silk, jars, lanterns
-      for (let r = 0; r < 3; r++)
-        for (let k = 0; k < 7; k++) {
-          const hue = ['#b81d24', '#e0a030', '#2a6a5a', '#7a3a8a', '#d86a2a'][Math.floor(rand() * 5)];
-          g.fillStyle = hue;
-          g.fillRect(26 + k * 30, g0 + 16 + r * 34, 22, 22);
+    // goods on shelves at the back: bolts of silk, jars, lanterns. They stand out dark against the lamplit wall in the
+    // glow map, so the back of the shop reads as shelves rather than a blank lit panel
+    const hues = ['#b81d24', '#e0a030', '#2a6a5a', '#7a3a8a', '#d86a2a', '#e8dcc0'];
+    for (let r = 0; r < 3; r++) {
+      const sy = g0 + 44 + r * 40;
+      g.fillStyle = glow ? '#000' : '#5a2a14';
+      g.fillRect(16, sy, W - 32, 6); // shelf board
+      for (let k = 0; k < 9; ) {
+        const kind = Math.floor(rand() * 3);
+        const x = 24 + k * 24 + rand() * 4;
+        g.fillStyle = glow ? 'rgb(60,30,12)' : hues[Math.floor(rand() * hues.length)];
+        if (kind === 0) g.fillRect(x, sy - 22, 18, 22); // bolt of silk
+        else if (kind === 1) {
+          g.beginPath(); // jar
+          g.ellipse(x + 9, sy - 10, 9, 11, 0, 0, Math.PI * 2);
+          g.fill();
+        } else {
+          g.fillRect(x + 2, sy - 30, 6, 30); // scrolls
+          g.fillRect(x + 10, sy - 26, 6, 26);
         }
+        k += 1 + (rand() < 0.3 ? 1 : 0);
+      }
+    }
+    if (!glow) {
       g.fillStyle = '#4a2010';
       g.fillRect(16, H - 66, W - 32, 60); // counter
       g.fillStyle = '#6a3018';
@@ -1438,6 +1455,197 @@ function shopLayout() {
   return shops;
 }
 
+type CrowdPerson = { x: number; z: number; y: number; rot: number; robe: string; sash: string; kind: number; s: number; ph: number; lantern: boolean };
+
+/**
+ * 上元夜的百姓 in Tang dress, built from a few lathed and simple shapes, one draw call per kind:
+ * 0 man (round-collared robe, 幞头 cap with its two soft tails), 1 woman (high-waisted 襦裙 tied under the chest,
+ * a bun with a gold hairpin), 2 child (double buns). Robe and sash colours come per person; a part mask in the
+ * geometry picks robe / sash / fixed colour (skin, hair, collar, gold).
+ */
+function buildCrowd(ppl: CrowdPerson[]) {
+  const SKIN = new THREE.Color('#e3b48c');
+  const HAIR = new THREE.Color('#141012');
+  const WHITE = new THREE.Color('#efe6d6');
+  const GOLD = new THREE.Color('#d8a83a');
+  const parts: { g: THREE.BufferGeometry; mask: number; col?: THREE.Color }[] = [];
+  const add = (g: THREE.BufferGeometry, mask: number, col?: THREE.Color) => parts.push({ g: g.index ? g.toNonIndexed() : g, mask, col });
+  const lathe = (pts: [number, number][], seg = 14) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
+  const kindGeo = (kind: number) => {
+    parts.length = 0;
+    const woman = kind === 1 || kind === 2;
+    // the skirt / lower robe, flaring to the hem
+    add(lathe(woman ? [[0.0, 0.0], [0.3, 0.0], [0.28, 0.12], [0.22, 0.6], [0.17, 1.0], [0.15, 1.18], [0.0, 1.18]] : [[0.0, 0.0], [0.24, 0.0], [0.23, 0.08], [0.2, 0.55], [0.16, 0.98], [0.0, 0.98]]), 1);
+    // the upper body
+    add(lathe([[0.0, woman ? 1.12 : 0.92], [0.15, woman ? 1.12 : 0.92], [0.17, 1.15], [0.19, 1.3], [0.17, 1.37], [0.08, 1.42], [0.0, 1.43]]), 1);
+    // the sash: under the chest for a woman's 襦裙, at the waist for a man, with its ends hanging in front
+    const sy = woman ? 1.17 : 0.97;
+    const sash = new THREE.CylinderGeometry(woman ? 0.168 : 0.172, woman ? 0.17 : 0.175, 0.07, 14);
+    sash.translate(0, sy, 0);
+    add(sash, 2);
+    const tails = new THREE.BoxGeometry(0.05, woman ? 0.5 : 0.38, 0.015);
+    tails.translate(0.03, sy - (woman ? 0.27 : 0.2), woman ? 0.18 : 0.19);
+    add(tails, 2);
+    // the crossed collar (交领) in white
+    for (const sgn of [-1, 1]) {
+      const c = new THREE.BoxGeometry(0.035, 0.2, 0.012);
+      c.rotateZ(sgn * 0.5);
+      c.translate(sgn * 0.035, 1.32, woman ? 0.168 : 0.172);
+      add(c, 0, WHITE);
+    }
+    // wide hanging sleeves, a hand peeping out of each
+    for (const sgn of [-1, 1]) {
+      const sl = lathe([[0.0, 0.0], [0.055, 0.0], [0.08, -0.22], [0.13, -0.48], [0.13, -0.55], [0.0, -0.55]], 10);
+      sl.rotateZ(sgn * 0.14);
+      sl.translate(sgn * 0.2, 1.36, 0.0);
+      add(sl, 1);
+      const hand = new THREE.SphereGeometry(0.04, 8, 6);
+      hand.translate(sgn * 0.27, 0.8, 0.03);
+      add(hand, 0, SKIN);
+    }
+    // neck and head
+    const neck = new THREE.CylinderGeometry(0.04, 0.045, 0.1, 8);
+    neck.translate(0, 1.46, 0);
+    add(neck, 0, SKIN);
+    const head = new THREE.SphereGeometry(0.1, 14, 10);
+    head.scale(0.88, 1.05, 0.95);
+    head.translate(0, 1.58, 0.005);
+    add(head, 0, SKIN);
+    // hair
+    const cap = new THREE.SphereGeometry(0.103, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55);
+    cap.scale(0.9, 1.0, 0.97);
+    cap.translate(0, 1.6, -0.012);
+    add(cap, 0, HAIR);
+    if (kind === 0) {
+      // 幞头: a raised black crown and two soft tails hanging behind
+      const top = new THREE.SphereGeometry(0.068, 12, 8);
+      top.scale(1, 1.15, 1);
+      top.translate(0, 1.71, -0.02);
+      add(top, 0, HAIR);
+      for (const sgn of [-1, 1]) {
+        const t = new THREE.BoxGeometry(0.035, 0.2, 0.012);
+        t.rotateX(0.45);
+        t.translate(sgn * 0.04, 1.58, -0.13);
+        add(t, 0, HAIR);
+      }
+    } else if (kind === 1) {
+      // a high bun with a gold hairpin through it
+      const bun = new THREE.SphereGeometry(0.07, 12, 8);
+      bun.scale(1, 1.2, 0.9);
+      bun.translate(0, 1.74, -0.03);
+      add(bun, 0, HAIR);
+      const pin = new THREE.CylinderGeometry(0.008, 0.008, 0.22, 6);
+      pin.rotateZ(Math.PI / 2 - 0.3);
+      pin.translate(0, 1.75, -0.03);
+      add(pin, 0, GOLD);
+      const flower = new THREE.SphereGeometry(0.025, 8, 6);
+      flower.translate(0.08, 1.72, 0.0);
+      add(flower, 2);
+    } else {
+      // a child's double buns
+      for (const sgn of [-1, 1]) {
+        const bun = new THREE.SphereGeometry(0.045, 10, 6);
+        bun.translate(sgn * 0.075, 1.68, -0.01);
+        add(bun, 0, HAIR);
+      }
+    }
+    // merge with a colour and a mask per vertex
+    let n = 0;
+    for (const p of parts) n += p.g.attributes.position.count;
+    const pos = new Float32Array(n * 3);
+    const nor = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const msk = new Float32Array(n);
+    let o = 0;
+    for (const p of parts) {
+      const a = p.g.attributes.position;
+      p.g.computeVertexNormals();
+      const nn = p.g.attributes.normal;
+      for (let k = 0; k < a.count; k++, o++) {
+        pos.set([a.getX(k), a.getY(k), a.getZ(k)], o * 3);
+        nor.set([nn.getX(k), nn.getY(k), nn.getZ(k)], o * 3);
+        const c = p.col ?? WHITE;
+        col.set([c.r, c.g, c.b], o * 3);
+        msk[o] = p.mask;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('aMask', new THREE.BufferAttribute(msk, 1));
+    return g;
+  };
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, emissive: '#2a1206' });
+  mat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aMask;\nattribute vec3 aSash;')
+      .replace('#include <color_vertex>', `#include <color_vertex>
+        #ifdef USE_INSTANCING_COLOR
+          vColor.xyz = aMask > 1.5 ? aSash : (aMask > 0.5 ? instanceColor.xyz : color.xyz);
+        #endif`);
+  };
+  mat.customProgramCacheKey = () => 'tq-crowd';
+  const meshes: THREE.InstancedMesh[] = [];
+  const byKind: number[][] = [[], [], []];
+  ppl.forEach((p, i) => byKind[p.kind].push(i));
+  const col = new THREE.Color();
+  for (let kind = 0; kind < 3; kind++) {
+    const ids = byKind[kind];
+    const geo = kindGeo(kind);
+    const sash = new Float32Array(Math.max(1, ids.length) * 3);
+    ids.forEach((pi, k) => {
+      col.set(ppl[pi].sash);
+      sash.set([col.r, col.g, col.b], k * 3);
+    });
+    geo.setAttribute('aSash', new THREE.InstancedBufferAttribute(sash, 3));
+    const im = new THREE.InstancedMesh(geo, mat, Math.max(1, ids.length));
+    im.count = ids.length;
+    ids.forEach((pi, k) => im.setColorAt(k, col.set(ppl[pi].robe)));
+    im.frustumCulled = false;
+    im.castShadow = false;
+    meshes.push(im);
+  }
+  // a little lantern on a stick for some (the children mostly)
+  const carriers = ppl.map((p, i) => (p.lantern ? i : -1)).filter((i) => i >= 0);
+  const lgeo = new THREE.SphereGeometry(0.075, 10, 8);
+  lgeo.scale(1, 1.2, 1);
+  const lmesh = new THREE.InstancedMesh(lgeo, new THREE.MeshBasicMaterial({ color: '#ff5a2a', toneMapped: false }), Math.max(1, carriers.length));
+  lmesh.count = carriers.length;
+  lmesh.frustumCulled = false;
+  meshes.push(lmesh);
+  const M = new THREE.Matrix4();
+  const Q = new THREE.Quaternion();
+  const S = new THREE.Vector3();
+  const P = new THREE.Vector3();
+  const UP = new THREE.Vector3(0, 1, 0);
+  const update = (t: number) => {
+    for (let kind = 0; kind < 3; kind++) {
+      const im = meshes[kind];
+      byKind[kind].forEach((pi, k) => {
+        const p = ppl[pi];
+        Q.setFromAxisAngle(UP, p.rot + Math.sin(t * 0.35 + p.ph * 2) * 0.4);
+        P.set(p.x, p.y + Math.abs(Math.sin(t * 1.8 + p.ph)) * 0.015, p.z);
+        S.set(p.s, p.s * (1 + Math.sin(t * 1.2 + p.ph) * 0.006), p.s);
+        im.setMatrixAt(k, M.compose(P, Q, S));
+      });
+      im.instanceMatrix.needsUpdate = true;
+    }
+    carriers.forEach((pi, k) => {
+      const p = ppl[pi];
+      const a = p.rot + Math.sin(t * 0.35 + p.ph * 2) * 0.4;
+      // held out in the right hand, swinging a little
+      const hx = 0.3 * p.s;
+      const hz = 0.22 * p.s;
+      P.set(p.x + Math.cos(a) * hx + Math.sin(a) * hz + Math.sin(t * 2.2 + p.ph) * 0.03, p.y + 0.62 * p.s, p.z - Math.sin(a) * hx + Math.cos(a) * hz);
+      lmesh.setMatrixAt(k, M.compose(P, Q.identity(), S.set(p.s, p.s, p.s)));
+    });
+    lmesh.instanceMatrix.needsUpdate = true;
+  };
+  update(0);
+  return { meshes, update };
+}
+
 function ShopStreet() {
   const tex = shopTextures();
   const built = useMemo(() => {
@@ -1452,8 +1660,25 @@ function ShopStreet() {
     const roofGeo = hipRoofGeometry();
     const roofMat = new THREE.MeshStandardMaterial({ color: '#23262e', roughness: 0.55, metalness: 0.15 });
     const awnGeo = new THREE.BoxGeometry(1, 0.12, 1);
-    const fronts = new THREE.InstancedMesh(front, frontMat, shops.length);
-    const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, shops.length);
+    // the ground floor is open to the street: a lamplit back wall of goods, a counter, side partitions, a ceiling
+    const OPEN = 2.4;
+    const frontUp = front.clone();
+    const frontLow = front.clone();
+    {
+      const u1 = frontUp.attributes.uv as THREE.BufferAttribute;
+      for (let k = 0; k < u1.count; k++) u1.setY(k, 0.55 + u1.getY(k) * 0.45);
+      const u2 = frontLow.attributes.uv as THREE.BufferAttribute;
+      for (let k = 0; k < u2.count; k++) u2.setY(k, u2.getY(k) * 0.55);
+    }
+    const fronts = new THREE.InstancedMesh(frontUp, frontMat, shops.length);
+    const backs = new THREE.InstancedMesh(frontLow, frontMat, shops.length);
+    const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, shops.length * 2);
+    const woodMat = new THREE.MeshStandardMaterial({ color: '#5a2a16', roughness: 0.75 });
+    const inner = new THREE.InstancedMesh(bodyGeo, woodMat, shops.length * 3); // counter + two partitions
+    const ceil = new THREE.InstancedMesh(awnGeo, woodMat, shops.length);
+    const postGeo = new THREE.CylinderGeometry(0.09, 0.1, 1, 10);
+    postGeo.translate(0, 0.5, 0);
+    const posts = new THREE.InstancedMesh(postGeo, new THREE.MeshStandardMaterial({ color: '#8a1f16', roughness: 0.55 }), shops.length * 2);
     const roofs = new THREE.InstancedMesh(roofGeo, roofMat, shops.length);
     const awnings = new THREE.InstancedMesh(awnGeo, roofMat, shops.length);
     const m = new THREE.Matrix4();
@@ -1463,18 +1688,29 @@ function ShopStreet() {
     // lanterns: under every shop's awning and upper eave, plus strings across the avenue
     const lan: { p: THREE.Vector3; s: number; c: string }[] = [];
     // people: in the shop fronts and crowding the doorways
-    const ppl: { x: number; z: number; y: number; rot: number; robe: string; s: number; ph: number }[] = [];
-    const robes = ['#b8202a', '#2b5a8a', '#2f7a5a', '#c08a2a', '#7a3a8a', '#d0603a', '#e8d8b8', '#3a3a5a'];
+    const ppl: CrowdPerson[] = [];
+    const robes = ['#b8202a', '#2b5a8a', '#2f7a5a', '#c08a2a', '#7a3a8a', '#d0603a', '#e8d8b8', '#3a5a8a', '#c86a8a', '#5a8a3a'];
+    const sashes = ['#f0d080', '#e8e0d0', '#2a2a3a', '#c02020', '#3a8a7a', '#d8a040'];
     shops.forEach((sh, i) => {
       q.setFromAxisAngle(up, sh.rot);
       const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(q); // toward the street
       const side = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
       const fx = sh.x + fwd.x * (SHOP_DEPTH / 2);
       const fz = sh.z + fwd.z * (SHOP_DEPTH / 2);
-      m.compose(new THREE.Vector3(sh.x, base, sh.z), q, new THREE.Vector3(sh.w, sh.h, SHOP_DEPTH));
-      bodies.setMatrixAt(i, m);
-      m.compose(new THREE.Vector3(fx + fwd.x * 0.02, base, fz + fwd.z * 0.02), q, new THREE.Vector3(sh.w - 0.1, sh.h - 0.3, 1));
-      fronts.setMatrixAt(i, m);
+      const ay0 = (sh.h - 0.3) * 0.55; // ground storey height
+      const at = (lx: number, ly: number, lz: number) => new THREE.Vector3(sh.x + side.x * lx + fwd.x * lz, base + ly, sh.z + side.z * lx + fwd.z * lz);
+      const D2 = SHOP_DEPTH / 2;
+      // the closed part behind, and the upper storey over the open front
+      bodies.setMatrixAt(i * 2, m.compose(at(0, 0, -OPEN / 2), q, new THREE.Vector3(sh.w, sh.h, SHOP_DEPTH - OPEN)));
+      bodies.setMatrixAt(i * 2 + 1, m.compose(at(0, ay0, D2 - OPEN / 2), q, new THREE.Vector3(sh.w, sh.h - ay0, OPEN)));
+      fronts.setMatrixAt(i, m.compose(at(0, ay0, D2 + 0.02), q, new THREE.Vector3(sh.w - 0.1, sh.h - 0.3 - ay0, 1)));
+      backs.setMatrixAt(i, m.compose(at(0, 0, D2 - OPEN + 0.01), q, new THREE.Vector3(sh.w - 0.3, ay0, 1)));
+      inner.setMatrixAt(i * 3, m.compose(at(0, 0, D2 - 0.8), q, new THREE.Vector3(Math.max(0.6, sh.w - 1.6), 0.85, 0.45)));
+      inner.setMatrixAt(i * 3 + 1, m.compose(at(-sh.w / 2 + 0.07, 0, D2 - OPEN / 2), q, new THREE.Vector3(0.14, ay0, OPEN)));
+      inner.setMatrixAt(i * 3 + 2, m.compose(at(sh.w / 2 - 0.07, 0, D2 - OPEN / 2), q, new THREE.Vector3(0.14, ay0, OPEN)));
+      ceil.setMatrixAt(i, m.compose(at(0, ay0 - 0.06, D2 - OPEN / 2), q, new THREE.Vector3(sh.w, 1, OPEN)));
+      posts.setMatrixAt(i * 2, m.compose(at(-sh.w / 2 + 0.12, 0, D2 - 0.05), q, new THREE.Vector3(1, ay0, 1)));
+      posts.setMatrixAt(i * 2 + 1, m.compose(at(sh.w / 2 - 0.12, 0, D2 - 0.05), q, new THREE.Vector3(1, ay0, 1)));
       m.compose(new THREE.Vector3(sh.x, base + sh.h, sh.z), q, new THREE.Vector3(sh.w * 1.06, 1.9, SHOP_DEPTH * 1.12));
       roofs.setMatrixAt(i, m);
       // the awning over the shop front, between the storeys
@@ -1485,24 +1721,28 @@ function ShopStreet() {
         lan.push({ p: new THREE.Vector3(fx + fwd.x * 0.95 + side.x * sh.w * t, ay - 0.45, fz + fwd.z * 0.95 + side.z * sh.w * t), s: 0.24, c: rand() < 0.8 ? '#ff3a1c' : '#ffb347' });
         lan.push({ p: new THREE.Vector3(fx + fwd.x * 0.5 + side.x * sh.w * t, base + sh.h - 0.5, fz + fwd.z * 0.5 + side.z * sh.w * t), s: 0.2, c: '#ff3a1c' });
       }
-      // two to four people in each shop, one or two at the door
-      const n = 2 + Math.floor(rand() * 3);
-      for (let k = 0; k < n; k++) {
-        const out = k < 2 && rand() < 0.7;
-        const t = (rand() - 0.5) * (sh.w - 1.2);
-        const back = out ? -0.25 - rand() * 0.4 : 0.7 + rand() * 1.6;
+      // a shopkeeper behind the counter, customers in front of it, people at the door looking out at the lanterns
+      const place = (lz: number, spread: number, facing: number) => {
+        const t = (rand() - 0.5) * spread;
+        const kid = rand() < 0.14;
         ppl.push({
-          x: fx + side.x * t - fwd.x * back,
-          z: fz + side.z * t - fwd.z * back,
+          x: fx + side.x * t + fwd.x * lz,
+          z: fz + side.z * t + fwd.z * lz,
           y: base,
-          rot: sh.rot + (rand() - 0.5) * 0.8,
+          rot: sh.rot + facing + (rand() - 0.5) * 0.7,
           robe: robes[Math.floor(rand() * robes.length)],
-          s: rand() < 0.15 ? 0.62 : 0.92 + rand() * 0.14, // a few children
+          sash: sashes[Math.floor(rand() * sashes.length)],
+          kind: kid ? 2 : rand() < 0.5 ? 0 : 1,
+          s: kid ? 0.62 : 0.93 + rand() * 0.12,
           ph: rand() * 6.28,
+          lantern: kid ? rand() < 0.7 : rand() < 0.18,
         });
-      }
-      // people on the upper storey looking out at the lanterns
-      if (rand() < 0.35) ppl.push({ x: fx - fwd.x * 0.6, z: fz - fwd.z * 0.6, y: ay + 0.1, rot: sh.rot, robe: robes[Math.floor(rand() * robes.length)], s: 0.95, ph: rand() * 6.28 });
+      };
+      if (rand() < 0.85) place(-1.45, sh.w - 1.8, 0);
+      const inside = Math.floor(rand() * 3);
+      for (let k = 0; k < inside; k++) place(-0.35 - rand() * 0.3, sh.w - 1.0, Math.PI);
+      const door = Math.floor(rand() * 2.4);
+      for (let k = 0; k < door; k++) place(0.2 + rand() * 0.22, sh.w - 0.8, 0);
     });
     // strings of lanterns across the avenue, from the shop eaves to poles on the palace side
     const poleGeo = new THREE.CylinderGeometry(0.08, 0.1, 6.2, 8);
@@ -1534,15 +1774,45 @@ function ShopStreet() {
     const poleMesh = new THREE.InstancedMesh(poleGeo, new THREE.MeshStandardMaterial({ color: '#5a1a12', roughness: 0.7 }), Math.max(1, poles.length));
     poles.forEach((p, i) => poleMesh.setMatrixAt(i, m.makeTranslation(p.x, p.y, p.z)));
     const lines = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(lineP, 3)), new THREE.LineBasicMaterial({ color: '#2a1a12' }));
-    // lantern bodies: glowing red ovals with gold caps
-    const lanGeo = new THREE.SphereGeometry(1, 12, 8);
-    lanGeo.scale(1, 1.15, 1);
-    const lanMat = new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }); // self-lit, tinted per lantern
+    // lantern bodies: ribbed paper lanterns, bright at the waist and darker toward the caps, with gold caps and a tassel
+    const prof: THREE.Vector2[] = [];
+    for (let k = 0; k <= 12; k++) {
+      const a = (k / 12) * Math.PI;
+      prof.push(new THREE.Vector2(0.18 + Math.sin(a) * 0.86, -Math.cos(a) * 1.0));
+    }
+    const lanGeo = new THREE.LatheGeometry(prof, 16);
+    {
+      const P = lanGeo.attributes.position;
+      const cl: number[] = [];
+      for (let k = 0; k < P.count; k++) {
+        const y = P.getY(k);
+        const ang = Math.atan2(P.getZ(k), P.getX(k));
+        const rib = 0.82 + 0.18 * Math.pow(Math.abs(Math.cos(ang * 4)), 0.6); // 8 bamboo ribs
+        const b = (0.45 + 0.55 * (1 - y * y)) * rib;
+        cl.push(b, b, b);
+      }
+      lanGeo.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
+    }
+    const lanMat = new THREE.MeshBasicMaterial({ color: '#ffffff', vertexColors: true, toneMapped: false }); // self-lit, tinted per lantern
     const lanterns = new THREE.InstancedMesh(lanGeo, lanMat, lan.length);
+    const capTop = new THREE.CylinderGeometry(0.28, 0.34, 0.16, 12);
+    capTop.translate(0, 1.02, 0);
+    const capBot = new THREE.CylinderGeometry(0.34, 0.26, 0.14, 12);
+    capBot.translate(0, -1.0, 0);
+    const knob = new THREE.SphereGeometry(0.1, 8, 6);
+    knob.translate(0, -1.14, 0);
+    const tassel = new THREE.CylinderGeometry(0.05, 0.14, 0.75, 8);
+    tassel.translate(0, -1.55, 0);
+    const hook = new THREE.CylinderGeometry(0.025, 0.025, 0.5, 5);
+    hook.translate(0, 1.33, 0);
+    const capGeo = mergeGeometries([capTop, capBot, knob, tassel, hook].map((g) => g.toNonIndexed()));
+    const caps = new THREE.InstancedMesh(capGeo, new THREE.MeshStandardMaterial({ color: '#d4a33a', metalness: 0.5, roughness: 0.4, emissive: '#5a3008' }), lan.length);
     const col = new THREE.Color();
     lan.forEach((l, i) => {
-      lanterns.setMatrixAt(i, m.compose(l.p, q.identity(), new THREE.Vector3(l.s, l.s, l.s)));
-      lanterns.setColorAt(i, col.set(l.c).multiplyScalar(1.6));
+      m.compose(l.p, q.identity(), new THREE.Vector3(l.s, l.s, l.s));
+      lanterns.setMatrixAt(i, m);
+      caps.setMatrixAt(i, m);
+      lanterns.setColorAt(i, col.set(l.c).multiplyScalar(1.7));
     });
     // a soft glow round each lantern
     const gp: number[] = [];
@@ -1566,67 +1836,33 @@ function ShopStreet() {
       })
     );
     glow.frustumCulled = false;
-    // people: a robe (a tapered column), a head, a topknot or a hat; instanced, swaying a little
-    const robeGeo = new THREE.CylinderGeometry(0.17, 0.32, 1.25, 10);
-    robeGeo.translate(0, 0.62, 0);
-    const headGeo = new THREE.SphereGeometry(0.13, 10, 8);
-    headGeo.translate(0, 1.42, 0);
-    const hatGeo = new THREE.CylinderGeometry(0.06, 0.12, 0.12, 8);
-    hatGeo.translate(0, 1.58, 0);
-    const sleeveGeo = new THREE.CylinderGeometry(0.07, 0.11, 0.6, 6);
-    sleeveGeo.rotateZ(0.5);
-    sleeveGeo.translate(0.26, 1.0, 0.06);
-    const sleeve2 = sleeveGeo.clone();
-    sleeve2.scale(-1, 1, 1);
-    const robeMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: '#e0b48a', roughness: 0.7 });
-    const hairMat = new THREE.MeshStandardMaterial({ color: '#151012', roughness: 0.6 });
-    const robesM = new THREE.InstancedMesh(robeGeo, robeMat, ppl.length);
-    const sleevesL = new THREE.InstancedMesh(sleeveGeo, robeMat, ppl.length);
-    const sleevesR = new THREE.InstancedMesh(sleeve2, robeMat, ppl.length);
-    const heads = new THREE.InstancedMesh(headGeo, skinMat, ppl.length);
-    const hats = new THREE.InstancedMesh(hatGeo, hairMat, ppl.length);
-    ppl.forEach((p, i) => {
-      col.set(p.robe);
-      robesM.setColorAt(i, col);
-      sleevesL.setColorAt(i, col);
-      sleevesR.setColorAt(i, col);
-    });
-    return { fronts, bodies, roofs, awnings, lanterns, glow, poleMesh, lines, ppl, people: [robesM, sleevesL, sleevesR, heads, hats] };
+    const crowd = buildCrowd(ppl);
+    return { fronts, backs, bodies, inner, ceil, posts, roofs, awnings, lanterns, caps, glow, poleMesh, lines, ppl, crowd };
   }, [tex]);
-  const tmpM = useMemo(() => new THREE.Matrix4(), []);
-  const tmpQ = useMemo(() => new THREE.Quaternion(), []);
-  const tmpS = useMemo(() => new THREE.Vector3(), []);
-  const tmpP = useMemo(() => new THREE.Vector3(), []);
-  const upV = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const frame = useRef(0);
   useFrame((st) => {
     // the crowd shifts about, nods and turns to look at the lanterns (every other frame is plenty)
     if (frame.current++ % 2) return;
-    const t = st.clock.elapsedTime;
-    built.ppl.forEach((p, i) => {
-      const sway = Math.sin(t * 1.3 + p.ph) * 0.06;
-      tmpQ.setFromAxisAngle(upV, p.rot + Math.sin(t * 0.4 + p.ph * 2) * 0.35);
-      tmpP.set(p.x, p.y + Math.abs(Math.sin(t * 2 + p.ph)) * 0.02, p.z);
-      tmpS.set(p.s, p.s * (1 + sway * 0.1), p.s);
-      tmpM.compose(tmpP, tmpQ, tmpS);
-      for (const im of built.people) im.setMatrixAt(i, tmpM);
-    });
-    for (const im of built.people) im.instanceMatrix.needsUpdate = true;
+    built.crowd.update(st.clock.elapsedTime);
   });
   return (
     <group>
       <primitive object={built.bodies} />
       <primitive object={built.fronts} />
+      <primitive object={built.backs} />
+      <primitive object={built.inner} />
+      <primitive object={built.ceil} />
+      <primitive object={built.posts} />
+      {built.crowd.meshes.map((im, k) => (
+        <primitive key={'c' + k} object={im} />
+      ))}
       <primitive object={built.roofs} />
       <primitive object={built.awnings} />
       <primitive object={built.lanterns} />
+      <primitive object={built.caps} />
       <primitive object={built.glow} />
       <primitive object={built.poleMesh} />
       <primitive object={built.lines} />
-      {built.people.map((im, k) => (
-        <primitive key={k} object={im} />
-      ))}
     </group>
   );
 }
