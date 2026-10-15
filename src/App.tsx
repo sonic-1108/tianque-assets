@@ -254,7 +254,7 @@ export default function App() {
   const localSeat = net && net.role === 'guest' ? room.findIndex((s) => s.kind === 'guest' && s.id === net.myId) : 0;
   const lineupKey = JSON.stringify(room.map((s) => [s.kind, s.id, s.cls, s.name])) + '|' + localSeat;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const lineup = useMemo(() => lineupOf(room, Math.max(0, localSeat)), [lineupKey]);
+  const lineup = useMemo(() => lineupOf(room, Math.max(0, localSeat), mapId), [lineupKey, mapId]);
   const teamFight = lineup.seats.length > 2;
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
@@ -262,7 +262,8 @@ export default function App() {
   const aiEnabledRef = useRef(true);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [score, setScore] = useState({ player: 0, enemy: 0 });
-  const [roundBanner, setRoundBanner] = useState<null | 'player' | 'enemy'>(null);
+  const [roundBanner, setRoundBanner] = useState<null | 'player' | 'enemy' | 'draw'>(null);
+  const [bannerReason, setBannerReason] = useState('');
   const [hurtFlash, setHurtFlash] = useState(0);
   const [screenFlash, setScreenFlash] = useState<{ n: number; color: string }>({ n: 0, color: '' });
   const toggleAI = useCallback(() => {
@@ -288,7 +289,11 @@ export default function App() {
     if (n && n.role === 'host' && e.type !== 'playerHit' && e.type !== 'toast') n.send({ t: 're', e });
     if (e.type === 'ko') {
       setRoundBanner(e.winner);
+      setBannerReason(e.reason ?? '');
       setScore((s) => ({ ...s, [e.winner]: s[e.winner] + 1 }));
+    } else if (e.type === 'draw') {
+      setRoundBanner('draw');
+      setBannerReason(e.reason ?? '');
     } else if (e.type === 'reset') {
       setRoundBanner(null);
     } else if (e.type === 'playerHit') {
@@ -338,7 +343,7 @@ export default function App() {
           if (e.type === 'ko') {
             const mine = roomRef.current.findIndex((s) => s.kind === 'guest' && s.id === n.myId);
             const side = e.side ?? (e.winner === 'player' ? 0 : 1);
-            handleRoundEvent({ type: 'ko', winner: side === SEAT_SIDE[Math.max(0, mine)] ? 'player' : 'enemy', side });
+            handleRoundEvent({ type: 'ko', winner: side === SEAT_SIDE[Math.max(0, mine)] ? 'player' : 'enemy', side, reason: e.reason });
           } else handleRoundEvent(e);
         } else if (m.t === 'bye') {
           n.close();
@@ -651,6 +656,10 @@ export default function App() {
     swarmLeft: 0,
     swarm: 0,
     p1Indoor: false,
+    seal: 0,
+    sealT: 0,
+    sealWho: '',
+    sealMine: false,
     fps: 0,
     ping: 0,
     p1Candle: 0,
@@ -742,6 +751,10 @@ export default function App() {
         scope: p1.scope ?? 0,
         swarmLeft: mapIdRef.current === 'desert' ? mapRuntime.desert.swarmLeft : 0,
         swarm: mapIdRef.current === 'desert' ? mapRuntime.desert.swarm : 0,
+        seal: mapIdRef.current === 'rooftop' ? mapRuntime.seal?.state ?? 0 : 0,
+        sealT: mapRuntime.seal?.t ?? 0,
+        sealWho: mapRuntime.seal?.state === 2 ? (fightersRef.current[mapRuntime.seal.holder] === p1 ? '你' : fightersRef.current[mapRuntime.seal.holder]?.tag || '有人') : '',
+        sealMine: mapRuntime.seal?.state === 2 && (fightersRef.current[mapRuntime.seal.holder]?.side ?? -1) === (p1.side ?? 0),
         p1Indoor: mapIdRef.current === 'desert' && desertIndoor(p1.pos[0], p1.pos[2], p1.pos[1]),
         foeHidden: !!dummyScreenPosRef.current.hidden,
         p1Slip: mapIdRef.current === 'forest' ? p1.slip ?? 0 : 0,
@@ -942,11 +955,11 @@ export default function App() {
       {/* Round result banner */}
       {roundBanner && (
         <div className="absolute inset-0 pointer-events-none z-40 flex flex-col items-center justify-center gap-2" style={{ animation: 'tqBanner 3.1s ease-out forwards' }}>
-          <span className={`text-6xl font-black italic tracking-widest drop-shadow-[0_4px_20px_rgba(0,0,0,0.9)] ${roundBanner === 'player' ? 'text-amber-300' : 'text-sky-300'}`}>
-            {roundBanner === 'player' ? '胜' : '败'}
+          <span className={`text-6xl font-black italic tracking-widest drop-shadow-[0_4px_20px_rgba(0,0,0,0.9)] ${roundBanner === 'player' ? 'text-amber-300' : roundBanner === 'draw' ? 'text-zinc-200' : 'text-sky-300'}`}>
+            {roundBanner === 'player' ? '胜' : roundBanner === 'draw' ? '平' : '败'}
           </span>
           <span className="text-sm font-bold text-zinc-200 bg-black/60 px-3 py-1 rounded-full">
-            {teamFight ? (roundBanner === 'player' ? '对方全部倒下' : '我方全部倒下') : roundBanner === 'player' ? `${dummyRefState.current.tag || '对手'} 被击倒` : `你被${dummyRefState.current.tag || '对手'}击倒`} · {score.player} : {score.enemy} · 下一回合即将开始
+            {bannerReason ? bannerReason : teamFight ? (roundBanner === 'player' ? '对方全部倒下' : '我方全部倒下') : roundBanner === 'player' ? `${dummyRefState.current.tag || '对手'} 被击倒` : `你被${dummyRefState.current.tag || '对手'}击倒`} · {score.player} : {score.enemy} · 下一回合即将开始
           </span>
         </div>
       )}
@@ -1080,7 +1093,7 @@ export default function App() {
                     r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'border-emerald-400/60 text-emerald-200' : 'border-red-500/60 text-red-300'
                   }`}
                 >
-                  <span>{r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'} · {r.name}</span>
+                  <span>{r.side === 2 ? '皇' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'} · {r.name}</span>
                   {r.target && r.side !== (lineup.seats[lineup.me]?.side ?? 0) && <span className="text-yellow-300 text-[10px]">◎</span>}
                 </div>
                 {r.hp <= 0 ? (
@@ -1097,7 +1110,7 @@ export default function App() {
                 ) : (
                   <div className="w-28 h-2 bg-zinc-950 rounded-full border border-zinc-500/70 overflow-hidden">
                     <div
-                      className={`h-full ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`}
+                      className={`h-full ${r.side === 2 ? 'bg-amber-400' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`}
                       style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }}
                     />
                   </div>
@@ -1181,6 +1194,8 @@ export default function App() {
           if (hudMirror.sand > 0.55 && !(hudMirror.swarm > 0.5)) meChips.push({ text: '沙暴 · 远处看不清 · 进城躲风', tone: 'amber', pulse: true });
           else if (hudMirror.sandWarn > 0 && hudMirror.sandWarn < 1) meChips.push({ text: '沙暴将至', tone: 'amber' });
           if (hudMirror.beacon) meChips.push({ text: `${hudMirror.beacon > 0 ? '我方' : '敌方'}烽火 ${Math.ceil(hudMirror.beaconT)}s${hudMirror.beacon > 0 ? ' · 伤害 +12%' : ''}`, tone: hudMirror.beacon > 0 ? 'gold' : 'red', pulse: hudMirror.beacon < 0 });
+          if (hudMirror.seal === 1) meChips.push({ text: '传国玉玺掉在屋顶上！快去抢', tone: 'gold', pulse: true });
+          else if (hudMirror.seal === 2) meChips.push({ text: `${hudMirror.sealWho}手握玉玺 ${Math.min(15, hudMirror.sealT).toFixed(0)}/15 秒${hudMirror.sealMine ? ' · 守住' : ' · 快抢回来'}`, tone: hudMirror.sealMine ? 'gold' : 'red', pulse: !hudMirror.sealMine });
           if (hudMirror.cdBreak > 0) meChips.push({ text: `受身 ${hudMirror.cdBreak.toFixed(0)}s`, tone: 'slate' });
           const me: UnitStats = {
             name: nickname || '无名侠客',
@@ -1228,12 +1243,12 @@ export default function App() {
                     k === lineup.me || r.target ? null : (
                       <div key={k} className="flex items-center gap-2 bg-black/60 rounded-md px-2 py-1 border border-zinc-700/60">
                         <span className={`text-[10px] font-black ${r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'text-emerald-300' : 'text-red-300'}`}>
-                          {r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'}
+                          {r.side === 2 ? '皇' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? '友' : '敌'}
                         </span>
                         <span className="text-[11px] text-zinc-200 font-bold truncate w-16">{r.name}</span>
                         <span className="text-[10px] text-zinc-400">{CLASS_CONFIGS[r.cls]?.name}</span>
                         <div className="flex-1 h-1.5 bg-zinc-900 rounded-full overflow-hidden">
-                          <div className={`h-full ${r.hp <= 0 ? '' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`} style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }} />
+                          <div className={`h-full ${r.hp <= 0 ? '' : r.side === 2 ? 'bg-amber-400' : r.side === (lineup.seats[lineup.me]?.side ?? 0) ? 'bg-emerald-400' : 'bg-red-500'}`} style={{ width: `${(r.hp / Math.max(1, r.maxHp)) * 100}%` }} />
                         </div>
                         {r.hp <= 0 && <span className="text-[10px] text-zinc-500">倒下</span>}
                       </div>

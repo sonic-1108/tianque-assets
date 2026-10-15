@@ -24,7 +24,8 @@ import { CameraController } from './CameraController';
 import type { NetSession } from './net';
 
 export type RoundEvent =
-  | { type: 'ko'; winner: 'player' | 'enemy'; side?: number }
+  | { type: 'ko'; winner: 'player' | 'enemy'; side?: number; reason?: string }
+  | { type: 'draw'; reason?: string }
   | { type: 'reset' }
   | { type: 'playerHit'; heavy: boolean }
   | { type: 'screenFlash'; color: string }
@@ -98,7 +99,11 @@ const SHADOW_ENEMY_COLOR = '#c084fc';
 const phasesFor = (c: CombatantState) =>
   c.classId === 'Ranger' ? RANGER_PHASE_CONFIGS : c.classId === 'BuddhistMage' ? MONK_PHASE_CONFIGS : c.classId === 'Shadowblade' ? SHADOW_PHASE_CONFIGS : ACTION_PHASE_CONFIGS;
 /** which side each fighter slot is on (set every frame); side 0 wears the warm colours, side 1 the cold ones */
-const SLOT_SIDE = [0, 1, 0, 1];
+const SLOT_SIDE = [0, 1, 0, 1, 2];
+/** 长安上元夜: where the emperor stands (the middle of the main ridge), how far he'll chase from it, and how long the seal must be held */
+const EMPEROR_HOME: [number, number] = [0, 0];
+const EMPEROR_LEASH = 13;
+const SEAL_HOLD = 15;
 const sideA = (slot: number) => (SLOT_SIDE[slot] ?? 1) === 0;
 const colorFor = (slot: number, c: CombatantState) =>
   c.classId === 'Shadowblade'
@@ -315,12 +320,12 @@ function GameImpl({
   });
 
   /** one group / rig sockets / combatant ref per fighter slot */
-  const groupRefs = useMemo(() => [0, 1, 2, 3].map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
-  const slotRefs = useMemo(() => [0, 1, 2, 3].map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
+  const groupRefs = useMemo(() => [0, 1, 2, 3, 4].map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
+  const slotRefs = useMemo(() => [0, 1, 2, 3, 4].map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const cameraControllerRef = useRef<CameraController | null>(null);
-  const sockets = useMemo(() => [0, 1, 2, 3].map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
+  const sockets = useMemo(() => [0, 1, 2, 3, 4].map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
 
   const slowMoTimerRef = useRef(0);
   const gameTimeRef = useRef(0);
@@ -329,6 +334,8 @@ function GameImpl({
   const mapTimeRef = useRef(0);
   const eruptRef = useRef({ timer: 9 });
   const bombZonesRef = useRef<{ x: number; z: number; r: number }[]>([]);
+  /** 长安上元夜 emperor: 龙威 / 箭雨 cooldowns, the arrow circles about to be hit, wrath, out-of-fight timer */
+  const emperorRef = useRef({ might: 5, arrows: 7, zones: [] as { x: number; z: number; r: number; t: number }[], wrath: false, calm: 0 });
   const forestRef = useRef({ timer: 14 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
   const bgSand = useMemo(() => new THREE.Color('#c08a4e'), []);
@@ -339,26 +346,26 @@ function GameImpl({
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
   const newShipAi = () => ({ helmWait: 10 + Math.random() * 8, goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
-  const shipNavRefs = useRef([0, 1, 2, 3].map(() => newNavState()));
-  const shipAiRefs = useRef([0, 1, 2, 3].map(newShipAi));
-  const desertNavRefs = useRef([0, 1, 2, 3].map(newDesertNav));
+  const shipNavRefs = useRef([0, 1, 2, 3, 4].map(() => newNavState()));
+  const shipAiRefs = useRef([0, 1, 2, 3, 4].map(newShipAi));
+  const desertNavRefs = useRef([0, 1, 2, 3, 4].map(newDesertNav));
   /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
-  const desertAiRefs = useRef([0, 1, 2, 3].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
+  const desertAiRefs = useRef([0, 1, 2, 3, 4].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
   const lightningRef = useRef({ timer: 5 });
   const ridgeRef = useRef({ timer: 9, warn: 0 });
-  const footLiftRef = useRef([0, 0, 0, 0]);
-  const visYRef = useRef([0, 0, 0, 0]);
-  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false] });
+  const footLiftRef = useRef([0, 0, 0, 0, 0]);
+  const visYRef = useRef([0, 0, 0, 0, 0]);
+  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false, false] });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
-  const wallCdRef = useRef([0, 0, 0, 0]);
+  const wallCdRef = useRef([0, 0, 0, 0, 0]);
   const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
   useEffect(() => {
     pendingResetRef.current = true;
   }, [mapId, playerClass, enemyClass, seats]);
   const projRef = useRef<Projectile[]>([]);
   /** 雪岭: ground height each fighter last stood on (for the no-climbing rule) */
-  const takeoffY = useRef([0, 0, 0, 0]);
+  const takeoffY = useRef([0, 0, 0, 0, 0]);
   /** 六字真言 syllables in flight (host / offline only; the guest sees them through the vfx replay) */
   const glyphRef = useRef<{ idx: number; slot: number; tgt: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
@@ -370,20 +377,20 @@ function GameImpl({
   const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
 
-  const auraTimers = useRef([0, 0, 0, 0]);
-  const footTimers = useRef([0, 0, 0, 0]);
-  const wasGrounded = useRef([true, true, true, true]);
+  const auraTimers = useRef([0, 0, 0, 0, 0]);
+  const footTimers = useRef([0, 0, 0, 0, 0]);
+  const wasGrounded = useRef([true, true, true, true, true]);
   /** team fights: who each AI is after, and which fighters each attack has already hit this move */
-  const aiTargetRef = useRef([-1, -1, -1, -1]);
+  const aiTargetRef = useRef([-1, -1, -1, -1, -1]);
   /** 怒海战船: this frame's helm orders per ship (+1 toward the other ship, -1 away, 0 none) */
   const helmHold = useRef([0, 0]);
   const lockStepRef = useRef({ n: 0 });
   const spectRef = useRef<{ v: CombatantState | null }>({ v: null });
-  const hitMaskRef = useRef([0, 1, 2, 3].map(() => ({ mask: 0, state: '', t: 0 })));
+  const hitMaskRef = useRef([0, 1, 2, 3, 4].map(() => ({ mask: 0, state: '', t: 0 })));
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
   const newAiMem = (): AIMemory => ({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
-  const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3].map(newAiMem));
+  const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3, 4].map(newAiMem));
 
   // ---------- VFX ----------
   const vfx = useMemo(() => {
@@ -394,7 +401,7 @@ function GameImpl({
     return v;
   }, []);
   const trails = useMemo<{ right: RibbonTrail; left: RibbonTrail }[]>(
-    () => [0, 1, 2, 3].map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
+    () => [0, 1, 2, 3, 4].map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
     [vfx]
   );
   useEffect(() => () => vfx.dispose(), [vfx]);
@@ -540,7 +547,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * (c.classId === 'Emperor' && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const fighters = fightersRef.current;
@@ -569,6 +576,13 @@ function GameImpl({
         }
       }
       const aiPick = i !== ME && seatsNow[i]?.ctl !== 'remote';
+      if (aiPick && map.id === 'rooftop' && mapRuntime.seal?.state === 2) {
+        const h = fighters[mapRuntime.seal.holder];
+        if (h && h !== c && h.hp > 0 && (h.side ?? 0) !== (c.side ?? 0)) {
+          aiTargetRef.current[i] = mapRuntime.seal.holder;
+          return h;
+        }
+      }
       let best = -1;
       let bd = 1e9;
       for (let pass = 0; pass < 2 && best < 0; pass++)
@@ -800,6 +814,7 @@ function GameImpl({
           if (map.id === 'forest') leaveLookout(c, foes[i], it);
           if (map.id === 'sea') routeOnShip(c, foes[i], it);
           if (map.id === 'desert') routeDesert(i, c, foes[i], it);
+          if (map.id === 'rooftop') routeRooftop(i, c, foes[i], it);
           if (N > 2) teamSpacing(i, c, foes[i], it);
         }
       } else if (!aiOn) {
@@ -842,7 +857,7 @@ function GameImpl({
     for (let i = 0; i < N; i++) {
       const c = fighters[i];
       if (c.actionState !== 'ultimate' || c.hp <= 0 || intents[i].ultHeld !== false || c.stateTimer < 0.2) continue;
-      if (c.classId === 'Berserker' && c.ultSlamStarted) continue; // already crashing down: that lands regardless
+      if ((c.classId === 'Berserker' || c.classId === 'Emperor') && c.ultSlamStarted) continue; // already crashing down: that lands regardless
       c.actionState = c.isGrounded ? 'idle' : 'jump';
       c.stateTimer = 0;
       c.stateDuration = 0;
@@ -1240,7 +1255,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -1871,7 +1886,7 @@ function GameImpl({
     function applyMovement(c: CombatantState, intent: Intent) {
       const st = c.actionState;
       const ranger = c.classId === 'Ranger';
-      const bers = c.classId === 'Berserker';
+      const bers = c.classId === 'Berserker' || c.classId === 'Emperor';
       const monk = c.classId === 'BuddhistMage';
       const whirl = bers && st === 'skill_2';
       const charge = bers && st === 'skill_3';
@@ -2202,7 +2217,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * (att.classId === 'Berserker' ? 0.85 : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Emperor' ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -2319,7 +2334,17 @@ function GameImpl({
 
       const protectedNow = (def.protectTimer ?? 0) > 0;
       // light darts only make you flinch: they chip HP but never interrupt, so a ranged fighter can't stun-lock
-      const flinchOnly = !!o.flinch;
+      let flinchOnly = !!o.flinch;
+      // 金甲护体: the emperor is never launched, knocked down or flung far; only a heavy blow makes him stagger
+      if (def.classId === 'Emperor') {
+        if (o.launch || o.state === 'knockdown' || o.state === 'buried' || o.state === 'launched') {
+          o.launch = 0;
+          o.state = 'hitstun';
+          o.dur = 0.3;
+        }
+        o.knock = Math.min(o.knock ?? 4, 1.5);
+        if (!o.heavy) flinchOnly = true;
+      }
       const armored = !o.breakArmor && (protectedNow || flinchOnly || (def.bellTimer ?? 0) > 0 || (def.hasSuperArmor && !o.launch && o.state !== 'knockdown' && o.state !== 'buried'));
       if (flinchOnly) {
         def.vel[0] += hitDir.x * 1.2;
@@ -2962,7 +2987,7 @@ function GameImpl({
           }
           vfx.chain(hand, end, caught ? 0.6 : 0.5);
           if (caught) {
-            foe.pull = { x: c.pos[0] + f.x * 1.4, z: c.pos[2] + f.z * 1.4, t: 0.5 };
+            if (foe.classId !== 'Emperor') foe.pull = { x: c.pos[0] + f.x * 1.4, z: c.pos[2] + f.z * 1.4, t: 0.5 };
             applyHit(slot, c, foe, 40, { knock: 0, state: 'hitstun', dur: 0.8, noStop: true });
             vfx.ring(vB.set(foe.pos[0], foe.pos[1] + 1.0, foe.pos[2]), 0.9, '#d1d5db', 0.3, 0.08, 0.2);
             vfx.damageNumber(vA.set(foe.pos[0], foe.pos[1] + 2.3, foe.pos[2]), '钩!', true, '#e5e7eb');
@@ -3873,6 +3898,10 @@ function GameImpl({
         const count = [0, 0];
         const total = [0, 1].map((sd) => fighters.filter((f) => (f.side ?? 0) === sd).length);
         fighters.forEach((c) => {
+          if ((c.side ?? 0) === 2) {
+            c.pos = [EMPEROR_HOME[0], fy(EMPEROR_HOME[0], EMPEROR_HOME[1], 99), EMPEROR_HOME[1]];
+            return;
+          }
           const sd = (c.side ?? 0) === 0 ? 0 : 1;
           const k = count[sd]++;
           const off = total[sd] > 1 ? (k - (total[sd] - 1) / 2) * 2.4 : 0;
@@ -3888,9 +3917,11 @@ function GameImpl({
       }
       if (controller) controller.yaw = p1.rotY;
       for (const a of aiRefs.current) a.think = 1.2;
-      aiTargetRef.current = [-1, -1, -1, -1];
+      aiTargetRef.current = [-1, -1, -1, -1, -1];
       for (const h of hitMaskRef.current) h.mask = 0;
       mapTimeRef.current = 0;
+      mapRuntime.seal = { state: 0, x: 0, y: 0, z: 0, holder: -1, t: 0 };
+      emperorRef.current = { might: 5, arrows: 7, zones: [], wrath: false, calm: 0 };
       eruptRef.current = { timer: 9 };
       bombZonesRef.current = [];
       mapRuntime.branches.length = 0;
@@ -3913,11 +3944,11 @@ function GameImpl({
       if (map.id === 'sea') setTimeout(() => onRoundEvent?.({ type: 'toast', text: '船舵在主甲板船尾（金色光圈）：走过去按 F 掌舵，朝敌船推就开过去' }), 1500);
       mapRuntime.ballistae = SEA_BALLISTAE.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipNavRefs.current = [0, 1, 2, 3].map(() => newNavState());
+      shipNavRefs.current = [0, 1, 2, 3, 4].map(() => newNavState());
       if (map.id === 'sea') shipGraph();
-      shipAiRefs.current = [0, 1, 2, 3].map(newShipAi);
-      desertNavRefs.current = [0, 1, 2, 3].map(newDesertNav);
-      desertAiRefs.current = [0, 1, 2, 3].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
+      shipAiRefs.current = [0, 1, 2, 3, 4].map(newShipAi);
+      desertNavRefs.current = [0, 1, 2, 3, 4].map(newDesertNav);
+      desertAiRefs.current = [0, 1, 2, 3, 4].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
       {
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
         const force = (globalThis as any).__TQ_SWARM;
@@ -4797,6 +4828,27 @@ function GameImpl({
       vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       if (def.ballista !== undefined) leaveBallista(defSlot, def);
+      if (map.id === 'rooftop' && fighters.some((f) => f.classId === 'Emperor')) {
+        // 皇上出征: only the seal decides it. Cutting the other side down doesn't win; everyone down is a draw.
+        if (def.classId === 'Emperor') {
+          def.revived = 9;
+          dropSeal(def.pos[0], def.pos[2]);
+          gameAudio.playBoom();
+          onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,215,120,0.4)' });
+          onRoundEvent?.({ type: 'toast', text: '皇上驾崩！传国玉玺掉了，抢到手守住 15 秒就赢' });
+          return;
+        }
+        const up = [0, 1].map((sd) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0));
+        if (!up[0] && !up[1]) {
+          round.over = true;
+          round.timer = 3.2;
+          slowMoTimerRef.current = 0.7;
+          onRoundEvent?.({ type: 'draw', reason: '两边都倒下了' });
+          return;
+        }
+        onRoundEvent?.({ type: 'toast', text: defSlot === ME ? (N > 3 && (def.revived ?? 0) < 1 ? '你倒下了 · 队友站到你身边按住 F 能把你扶起来' : '你倒下了') : `${def.tag || '有人'}倒下了${!up[0] || !up[1] ? ' · 但不抢到玉玺还不算赢' : ''}` });
+        return;
+      }
       // the round ends when one side has nobody left standing
       const standing = [0, 1].map((sd) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0));
       if (standing[0] && standing[1]) {
@@ -4983,8 +5035,204 @@ function GameImpl({
     }
 
     /** 长安: knocked off the roofs into a courtyard. Hurts, then you are helped back up onto the nearest roof. */
+    /** the 传国玉玺 falls to the roof here (never into a courtyard) */
+    function dropSeal(x: number, z: number) {
+      let sx = x;
+      let sz = z;
+      if (terrainHeight(map.id, sx, sz) < 0) [sx, sz] = safeSpot(sx, sz);
+      mapRuntime.seal = { state: 1, x: sx, y: terrainHeight(map.id, sx, sz), z: sz, holder: -1, t: 0 };
+      vfx.flash(vA.set(sx, mapRuntime.seal.y + 1, sz), '#9ff5c9', 50, 0.4, 10);
+      vfx.ring(vA.set(sx, mapRuntime.seal.y + 0.05, sz), 3, '#9ff5c9', 0.6, 0.14, 0.4);
+    }
+    /** 长安上元夜: pick the seal up by walking over it; hold it 15 s to win; whoever holds it and falls drops it */
+    function updateSeal() {
+      const S = mapRuntime.seal;
+      if (!S || S.state === 0) return;
+      if (S.state === 2) {
+        const h = fighters[S.holder];
+        if (!h || h.hp <= 0 || (h.devoured ?? 0) > 0) {
+          const k = S.holder;
+          dropSeal(h ? h.pos[0] : S.x, h ? h.pos[2] : S.z);
+          onRoundEvent?.({ type: 'toast', text: k === ME ? '你倒下了，玉玺掉了！' : `${h?.tag || '有人'}倒下，玉玺掉了！快抢` });
+          return;
+        }
+        S.x = h.pos[0];
+        S.y = h.pos[1];
+        S.z = h.pos[2];
+        const t0 = S.t;
+        S.t += dt;
+        if (Math.random() < dt * 8) vfx.sparkBurst(vA.set(h.pos[0], h.pos[1] + 2.5, h.pos[2]), 1, '#9ff5c9', 1.2, 0.05, UP, 0.6);
+        if (Math.floor(t0) !== Math.floor(S.t) && S.t < SEAL_HOLD && SEAL_HOLD - S.t < 5.5) vfx.damageNumber(vA.set(h.pos[0], h.pos[1] + 2.9, h.pos[2]), `${Math.ceil(SEAL_HOLD - S.t)}`, true, '#9ff5c9');
+        if (S.t >= SEAL_HOLD) {
+          const winSide = h.side ?? 0;
+          round.over = true;
+          round.timer = 3.6;
+          for (const f of fighters) if ((f.side ?? 0) === winSide && f.hp > 0) f.celebrate = true;
+          slowMoTimerRef.current = 0.7;
+          gameAudio.playGong();
+          onRoundEvent?.({ type: 'ko', winner: winSide === (p1.side ?? 0) ? 'player' : 'enemy', side: winSide, reason: `${S.holder === ME ? '你' : h.tag || '有人'}手握传国玉玺守住了 ${SEAL_HOLD} 秒` });
+        }
+        return;
+      }
+      // on the roof: whoever reaches it first
+      if (Math.random() < dt * 6) vfx.sparkBurst(vA.set(S.x + (Math.random() - 0.5) * 0.6, S.y + 0.3, S.z + (Math.random() - 0.5) * 0.6), 1, '#9ff5c9', 1.5, 0.05, UP, 0.8);
+      for (let i = 0; i < N; i++) {
+        const c = fighters[i];
+        if (c.hp <= 0 || (c.side ?? 0) === 2 || (c.devoured ?? 0) > 0) continue;
+        if (Math.hypot(c.pos[0] - S.x, c.pos[2] - S.z) > 1.3 || Math.abs(c.pos[1] - S.y) > 1.6) continue;
+        S.state = 2;
+        S.holder = i;
+        S.t = 0;
+        gameAudio.playGong();
+        vfx.ring(vA.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 2.6, '#9ff5c9', 0.6, 0.14, 0.4);
+        const mine = (c.side ?? 0) === (p1.side ?? 0);
+        onRoundEvent?.({ type: 'toast', text: i === ME ? `你抢到了传国玉玺！守住 ${SEAL_HOLD} 秒` : `${c.tag || '有人'}抢到了玉玺 · ${mine ? '护住他' : '快去抢回来'}` });
+        break;
+      }
+    }
+    /** 皇上: 龙威 when crowded, 御林箭雨 on whoever hangs back, wrath when low, and he heals when left alone */
+    function updateEmperor() {
+      const E = emperorRef.current;
+      const ei = fighters.findIndex((f) => f.classId === 'Emperor');
+      // arrows already loosed still land
+      for (let k = E.zones.length - 1; k >= 0; k--) {
+        const z = E.zones[k];
+        z.t -= dt;
+        if (Math.random() < dt * 10) vfx.ring(vB.set(z.x, terrainHeight(map.id, z.x, z.z) + 0.08, z.z), z.r, '#ff4040', 0.18, 0.05, 0.12);
+        if (z.t > 0) continue;
+        E.zones.splice(k, 1);
+        const bz = bombZonesRef.current.findIndex((b) => b.x === z.x && b.z === z.z);
+        if (bz >= 0) bombZonesRef.current.splice(bz, 1);
+        const gy = terrainHeight(map.id, z.x, z.z);
+        for (let a = 0; a < 24; a++) vfx.sparkBurst(vB.set(z.x + (Math.random() - 0.5) * z.r * 1.6, gy + 0.2, z.z + (Math.random() - 0.5) * z.r * 1.6), 1, '#e7d3a8', 4, 0.04, vC.set(0, 1, 0), 0.3);
+        vfx.dustPuff(vB.set(z.x, gy + 0.1, z.z), 10, z.r * 0.6, 2, 0.6, '#8b7a66');
+        gameAudio.playDartHit();
+        const emp = fighters[ei];
+        if (!emp) continue;
+        for (let j = 0; j < N; j++) {
+          const f = fighters[j];
+          if (j === ei || f.hp <= 0 || Math.hypot(f.pos[0] - z.x, f.pos[2] - z.z) > z.r || Math.abs(f.pos[1] - gy) > 2.5) continue;
+          applyHit(ei, emp, f, 170, { heavy: true, ranged: true, knock: 2, dur: 0.4, noMark: true });
+        }
+      }
+      if (ei < 0) return;
+      const e = fighters[ei];
+      if (e.hp <= 0) return;
+      const others = fighters.filter((f, j) => j !== ei && f.hp > 0);
+      const near = others.length ? Math.min(...others.map((f) => Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]))) : 99;
+      const wrath = e.hp < e.maxHp * 0.35;
+      if (wrath && !E.wrath) {
+        E.wrath = true;
+        vfx.flash(vA.set(e.pos[0], e.pos[1] + 1.4, e.pos[2]), '#ffd36a', 70, 0.5, 14);
+        vfx.damageNumber(vA.set(e.pos[0], e.pos[1] + 2.8, e.pos[2]), '龙颜大怒', true, '#ffd36a');
+        onRoundEvent?.({ type: 'toast', text: '龙颜大怒！皇上出手更快更狠了' });
+        gameAudio.playGong();
+      }
+      if (wrath && Math.random() < dt * 8) vfx.embers(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), 1, '#ffb347', 0.5, 2, 0.06);
+      // left alone, he recovers
+      E.calm = near > 12 ? E.calm + dt : 0;
+      if (E.calm > 4 && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.015 * dt);
+      const free = e.isGrounded && (e.actionState === 'idle' || e.actionState === 'run' || e.actionState === 'block');
+      E.might -= dt;
+      E.arrows -= dt;
+      // 龙威: someone right at him
+      if (E.might <= 0 && near < 3.2 && free) {
+        E.might = wrath ? 6 : 9;
+        const p = vA.set(e.pos[0], e.pos[1] + 0.1, e.pos[2]).clone();
+        vfx.ring(p, 5, '#ffd36a', 0.6, 0.2, 0.25);
+        vfx.ring(p, 3.2, '#fff1b8', 0.4, 0.12, 0.2);
+        vfx.flash(vB.set(e.pos[0], e.pos[1] + 1.2, e.pos[2]), '#ffd36a', 60, 0.4, 12);
+        vfx.dustPuff(p, 18, 2, 4, 0.7, '#e8d7a8');
+        vfx.damageNumber(vB.set(e.pos[0], e.pos[1] + 2.8, e.pos[2]), '龙威', true, '#ffd36a');
+        gameAudio.playBoom();
+        controller?.addShake(0.3);
+        e.actionState = 'skill_4';
+        e.stateTimer = 0;
+        e.stateDuration = 0.5;
+        for (let j = 0; j < N; j++) {
+          const f = fighters[j];
+          if (j === ei || f.hp <= 0 || Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]) > 5 || Math.abs(f.pos[1] - e.pos[1]) > 2.5) continue;
+          applyHit(ei, e, f, 140, { heavy: true, knock: 9, launch: 5, state: 'launched', dur: 0.8, shake: 0.3 });
+        }
+      }
+      // 御林箭雨: on up to two who keep their distance
+      if (E.arrows <= 0) {
+        E.arrows = 1;
+        const far = others.filter((f) => (f.side ?? 0) !== 2 && Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]) > 5 && Math.hypot(f.pos[0] - e.pos[0], f.pos[2] - e.pos[2]) < 26);
+        if (far.length) {
+          E.arrows = wrath ? 8 : 12;
+          far.sort(() => Math.random() - 0.5);
+          for (const f of far.slice(0, 2)) {
+            const z = { x: f.pos[0], z: f.pos[2], r: 2.2, t: 1.4 };
+            E.zones.push(z);
+            bombZonesRef.current.push({ x: z.x, z: z.z, r: z.r });
+            vfx.ring(vB.set(z.x, terrainHeight(map.id, z.x, z.z) + 0.08, z.z), z.r, '#ff4040', 0.6, 0.1, 1.4);
+          }
+          vfx.damageNumber(vA.set(e.pos[0], e.pos[1] + 2.8, e.pos[2]), '放箭！', true, '#fca5a5');
+          gameAudio.playGong();
+        }
+      }
+    }
+    /** AI on 长安上元夜: the emperor keeps near his ridge; everyone else goes for the seal, and whoever has it keeps away */
+    function routeRooftop(i: number, c: CombatantState, foe: CombatantState, it: Intent) {
+      if (c.classId === 'Emperor') {
+        const dh = Math.hypot(c.pos[0] - EMPEROR_HOME[0], c.pos[2] - EMPEROR_HOME[1]);
+        const fh = Math.hypot(foe.pos[0] - EMPEROR_HOME[0], foe.pos[2] - EMPEROR_HOME[1]);
+        if (dh > EMPEROR_LEASH || (fh > EMPEROR_LEASH + 2 && dh > 2)) {
+          // too far from the throne: back he goes
+          it.move.set(EMPEROR_HOME[0] - c.pos[0], 0, EMPEROR_HOME[1] - c.pos[2]);
+          if (it.move.lengthSq() > 0.01) it.move.normalize();
+          if (fh > EMPEROR_LEASH + 2) it.request = null;
+        } else if (fh > EMPEROR_LEASH + 2) {
+          it.move.set(0, 0, 0);
+          it.request = null;
+        }
+        return;
+      }
+      const S = mapRuntime.seal;
+      if (!S || S.state === 0) return;
+      const nearFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      if (S.state === 1) {
+        // the seal is lying there: run for it (fight only whoever is in the way)
+        if (nearFoe < 2.2 && foe.hp > 0) return;
+        it.move.set(S.x - c.pos[0], 0, S.z - c.pos[2]);
+        if (it.move.lengthSq() > 0.01) it.move.normalize();
+        it.request = null;
+        it.block = false;
+        return;
+      }
+      if (S.holder === i) {
+        // holding it: keep away from the enemy, fight only when caught
+        let ex = 0;
+        let ez = 0;
+        for (const f of fighters) {
+          if (f === c || f.hp <= 0 || (f.side ?? 0) === (c.side ?? 0)) continue;
+          const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]);
+          if (d < 9) {
+            ex += (c.pos[0] - f.pos[0]) / Math.max(d, 0.5);
+            ez += (c.pos[2] - f.pos[2]) / Math.max(d, 0.5);
+          }
+        }
+        if (nearFoe < 2.2) return;
+        if (Math.hypot(ex, ez) > 0.01) {
+          it.move.set(ex, 0, ez).normalize();
+          it.request = Math.random() < dt * 0.6 ? 'dodge' : null;
+        } else {
+          it.move.set(0, 0, 0);
+          it.request = null;
+        }
+      }
+    }
     function courtyardFall(i: number) {
       const c = fighters[i];
+      if (c.classId === 'Emperor') {
+        // his guards haul him straight back up to the ridge
+        c.pos = [EMPEROR_HOME[0], terrainHeight(map.id, EMPEROR_HOME[0], EMPEROR_HOME[1]) + 1.5, EMPEROR_HOME[1]];
+        c.vel = [0, 0, 0];
+        c.isGrounded = false;
+        vfx.ring(vA.set(c.pos[0], c.pos[1], c.pos[2]), 2.4, '#ffd36a', 0.5, 0.12, 0.3);
+        return;
+      }
       vfx.dustPuff(vA.set(c.pos[0], ROOF.street + 0.2, c.pos[2]), 14, 1, 3, 1.2, '#8b7a66');
       gameAudio.playSlam();
       const [sx, sz] = safeSpot(c.pos[0], c.pos[2]);
@@ -5006,6 +5254,8 @@ function GameImpl({
         mapRuntime.ridgeWarn = 0;
         return;
       }
+      updateEmperor();
+      updateSeal();
       mapRuntime.boltT = Math.max(0, mapRuntime.boltT - dt * 1.6);
       if (R.warn > 0) {
         R.warn -= dt;
@@ -5024,7 +5274,7 @@ function GameImpl({
           controller?.addShake(0.35);
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,200,120,0.35)' });
           fighters.forEach((c, i) => {
-            if (c.pos[1] > ROOF.strikeY - 0.2 && Math.abs(c.pos[2]) < 2.2 && Math.abs(c.pos[0] - mapRuntime.boltX) < 4.5) envHit(i, 140, 7, '烟花');
+            if (c.classId !== 'Emperor' && c.pos[1] > ROOF.strikeY - 0.2 && Math.abs(c.pos[2]) < 2.2 && Math.abs(c.pos[0] - mapRuntime.boltX) < 4.5) envHit(i, 140, 7, '烟花'); // the fireworks are for him
           });
         }
       } else {

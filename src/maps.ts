@@ -576,6 +576,9 @@ export const MAPS = {
       '正殿屋脊最高，站上去居高临下；但上元节的烟花会落在正殿屋脊上，看到天上有烟花弹落下、屋脊冒火星就快下来',
       '殿宇之间是天井，被打进天井会摔伤，再被送回屋顶',
       '走路不会自己掉下去，被击飞才会',
+      '皇上出征：皇上立在正殿屋脊上，中立，谁靠近打谁。金甲护体，打不飞打不倒；有人近身会放「龙威」震开，离得远会被「御林箭雨」点名（脚下红圈，快躲）；血少了会龙颜大怒',
+      '这张图只看传国玉玺分胜负：斩下皇上，玉玺掉在屋顶上，抢到手守住 15 秒就赢；拿着玉玺的人倒下，玉玺就掉了，谁都能抢',
+      '可以把对面砍倒，但砍光了也不算赢，还得去拿玉玺；两边都倒下（比如被皇上收拾了）就是平局',
     ],
     homeClass: 'Ranger',
     homeClassName: '暗器',
@@ -903,6 +906,8 @@ export const mapRuntime = {
   helm: [0, 0] as [number, number],
   /** who is at each ship's helm (fighter index, -1 nobody) */
   helmUser: [-1, -1] as [number, number],
+  /** 长安上元夜 传国玉玺: state 0 not dropped yet (the emperor lives), 1 lying on the roof, 2 held by fighter `holder` for t seconds */
+  seal: { state: 0, x: 0, y: 0, z: 0, holder: -1, t: 0 },
   /** boarding: mode 0 apart, 1 closing, 2 alongside, 3 casting off; plank 0..1 how far the planks are down */
   board: { mode: 0, plank: 0 },
   /** crossbow bolts in flight or stuck in the planks (t: seconds left; stuck: embedded) */

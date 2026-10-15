@@ -1337,9 +1337,54 @@ function Haze() {
   );
 }
 
+/** 传国玉玺: a jade seal with a coiled-dragon knob. On the roof it stands in a pillar of green light; carried, it
+ *  floats over the holder's head, turning */
+function ImperialSeal() {
+  const g = useRef<THREE.Group>(null);
+  const beam = useRef<THREE.Mesh>(null);
+  const beamMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#9ff5c9', transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, side: THREE.DoubleSide }), []);
+  useFrame((st) => {
+    const S = mapRuntime.seal;
+    const o = g.current;
+    if (!o) return;
+    o.visible = !!S && S.state > 0;
+    if (!o.visible) return;
+    const t = st.clock.elapsedTime;
+    const held = S.state === 2;
+    o.position.set(S.x, S.y + (held ? 2.55 : 0.45) + Math.sin(t * 2.2) * 0.08, S.z);
+    o.rotation.y = t * 1.3;
+    if (beam.current) {
+      beam.current.visible = !held;
+      beam.current.position.y = 3.5;
+      beamMat.opacity = 0.18 + Math.sin(t * 3) * 0.06;
+    }
+  });
+  const jade = useMemo(() => new THREE.MeshStandardMaterial({ color: '#8fe3b5', roughness: 0.18, metalness: 0.05, emissive: new THREE.Color('#1f7a4a'), emissiveIntensity: 0.9, envMapIntensity: 1.6 }), []);
+  const gold = useMemo(() => new THREE.MeshStandardMaterial({ color: '#e8b84a', roughness: 0.3, metalness: 0.9, emissive: new THREE.Color('#3a2400') }), []);
+  return (
+    <group ref={g} visible={false}>
+      <mesh material={jade} castShadow>
+        <boxGeometry args={[0.42, 0.3, 0.42]} />
+      </mesh>
+      {/* a gold corner (the chipped corner of the legend, mended in gold) */}
+      <mesh material={gold} position={[0.17, -0.06, 0.17]}>
+        <boxGeometry args={[0.1, 0.19, 0.1]} />
+      </mesh>
+      {/* the dragon knob */}
+      <mesh material={jade} position={[0, 0.25, 0]}>
+        <torusKnotGeometry args={[0.1, 0.035, 48, 6, 2, 3]} />
+      </mesh>
+      <mesh ref={beam} material={beamMat}>
+        <cylinderGeometry args={[0.35, 0.6, 7, 16, 1, true]} />
+      </mesh>
+    </group>
+  );
+}
+
 export function ChanganMap() {
   return (
     <group>
+      <ImperialSeal />
       <NightSky />
       <City />
       <Landmarks />

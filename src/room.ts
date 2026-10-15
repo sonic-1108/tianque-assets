@@ -25,7 +25,7 @@ export function roomReady(room: RoomSeat[]) {
 }
 
 /** the fighters of a match, in slot order, as this browser (sitting in seat `local`) sees them */
-export function lineupOf(room: RoomSeat[], local: number): { seats: FighterSeat[]; me: number; seatOf: number[] } {
+export function lineupOf(room: RoomSeat[], local: number, mapId?: string): { seats: FighterSeat[]; me: number; seatOf: number[] } {
   const seats: FighterSeat[] = [];
   const seatOf: number[] = [];
   let me = 0;
@@ -41,6 +41,11 @@ export function lineupOf(room: RoomSeat[], local: number): { seats: FighterSeat[
       name: s.kind === 'ai' ? aiName(s.cls) : s.name || (s.kind === 'host' ? '房主' : '侠客'),
     });
   });
+  // 长安上元夜: the emperor stands on the main ridge, on nobody's side
+  if (mapId === 'rooftop') {
+    seatOf.push(-1);
+    seats.push({ cls: 'Emperor', side: 2, ctl: 'ai', name: '皇上' });
+  }
   return { seats, me, seatOf };
 }
 

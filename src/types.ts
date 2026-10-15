@@ -7,7 +7,8 @@ export type CharacterClassId =
   | 'LightHealer'
   | 'HeavyHealer'
   | 'Ranger'
-  | 'Shadowblade';
+  | 'Shadowblade'
+  | 'Emperor';
 
 export type CharacterActionState =
   | 'idle'
