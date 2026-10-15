@@ -217,6 +217,19 @@ export default function App() {
   const online = !!net && net.status === 'connected';
   // ---------- the room: four seats, two a side (offline too: the other seats are AIs or empty) ----------
   const [room, setRoom] = useState<RoomSeat[]>(() => defaultRoom('Berserker', '', 'Berserker'));
+  // While the lobby covers the screen, the 3D scene behind it isn't drawn until its shaders have compiled in the
+  // background: drawing it forced every shader to compile on the spot and froze the page for seconds
+  const [sceneReady, setSceneReady] = useState(false);
+  useEffect(() => {
+    if (sceneReady) return;
+    const t0 = performance.now();
+    const id = setInterval(() => {
+      const st = String((globalThis as any).__TQ_SHADERS ?? '');
+      if (st.startsWith('ready') || performance.now() - t0 > 20000) setSceneReady(true);
+    }, 250);
+    return () => clearInterval(id);
+  }, [sceneReady]);
+  (globalThis as any).__TQ_HIDE_SCENE = !sceneReady && isMapSelectOpen; // read by Game every frame
   // download the heroes on show straight away, in parallel with the 3D scene starting up
   useEffect(() => {
     const extra: CharacterClassId[] = mapId === 'rooftop' ? ['Emperor', 'Guard'] : []; // 长安's court

@@ -260,6 +260,11 @@ function GameImpl({
 }: GameSceneProps) {
   const { camera, gl, scene, size } = useThree();
   (globalThis as any).__TQ_SCENE = scene; // debugging hook
+  // behind the lobby, until the shaders have compiled in the background, the scene isn't drawn at all: drawing it
+  // forced every shader to compile on the spot and froze the page (the game itself keeps running)
+  useFrame(() => {
+    scene.visible = !(globalThis as any).__TQ_HIDE_SCENE;
+  }, -10);
   (globalThis as any).__TQ_GL = gl; // tests read draw-call counts
   (globalThis as any).__TQ_SCENE = scene;
   // nothing reaches the HUD from the silent "what if" passes of a team fight
@@ -507,7 +512,11 @@ function GameImpl({
     const t0 = performance.now();
     const warm = () => {
       const r = gl as any;
-      if (!r.compileAsync || !alive || g.__TQ_NOWARM) return; // tests on a software GPU skip it
+      if (!alive) return;
+      if (!r.compileAsync || g.__TQ_NOWARM) {
+        g.__TQ_SHADERS = 'ready (skipped)'; // tests on a software GPU skip it
+        return;
+      }
       // effects that only appear in a fight (palms, glyphs, rings, trails) sit hidden in pools; compile ignores
       // hidden objects, so show everything for the moment it takes to collect the materials, then hide it again
       // (no frame is drawn in between). Otherwise each effect's first use froze the game while it compiled.
