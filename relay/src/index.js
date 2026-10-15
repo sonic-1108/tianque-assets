@@ -39,9 +39,41 @@ export class Room {
   webSocketError() {}
 }
 
+// Who has the game open: every open game POSTs a small heartbeat to /p every few seconds (nickname, screen,
+// map, class, match type: nothing else); admin.html GETs /p for the list. Kept in memory, dropped after 30 s.
+export class Presence {
+  constructor(state) {
+    this.state = state;
+    this.list = new Map();
+  }
+  async fetch(req) {
+    const now = Date.now();
+    for (const [k, v] of this.list) if (now - v.seen > 30000) this.list.delete(k);
+    if (req.method === 'POST') {
+      try {
+        const p = await req.json();
+        if (p && typeof p.id === 'string' && p.id.length < 40) {
+          if (p.bye) this.list.delete(p.id);
+          else this.list.set(p.id, { ...p, seen: now });
+        }
+      } catch {
+        /* not ours */
+      }
+      return new Response('ok', { headers: CORS });
+    }
+    return new Response(JSON.stringify([...this.list.values()]), { headers: { ...CORS, 'content-type': 'application/json' } });
+  }
+}
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
+
 export default {
   async fetch(req, env) {
-    const m = new URL(req.url).pathname.match(/^\/r\/([A-Za-z0-9_-]{3,24})$/);
+    const path = new URL(req.url).pathname;
+    if (path === '/p') {
+      if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
+      return env.PRESENCE.get(env.PRESENCE.idFromName('all')).fetch(req);
+    }
+    const m = path.match(/^\/r\/([A-Za-z0-9_-]{3,24})$/);
     if (!m) return new Response('tianque relay ok', { headers: { 'access-control-allow-origin': '*' } });
     return env.ROOM.get(env.ROOM.idFromName(m[1].toUpperCase())).fetch(req);
   },

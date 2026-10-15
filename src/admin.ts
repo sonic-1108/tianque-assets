@@ -1,5 +1,5 @@
 // 天阙 admin: everyone with the game open right now, from the presence heartbeats (see presence.ts)
-import { PRESENCE_TOPIC, PRESENCE_BROKERS, BEAT_MS, PresenceState } from './presence';
+import { PRESENCE_TOPIC, PRESENCE_BROKERS, PRESENCE_HTTP, BEAT_MS, PresenceState } from './presence';
 
 const css = `
   :root { --bg:#0b0d10; --panel:#13161b; --line:#232830; --text:#e7e2d6; --dim:#8b8579; --gold:#d6b25e; --green:#5bd38a; --amber:#f0b545; --red:#e2685a; }
@@ -67,8 +67,8 @@ function render() {
   ]
     .map(([n, l]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`)
     .join('');
-  document.getElementById('conn')!.innerHTML = PRESENCE_BROKERS.map((b) => {
-    const host = (typeof b === 'string' ? b : b.url).replace(/^wss:\/\//, '').split(/[:/]/)[0];
+  document.getElementById('conn')!.innerHTML = [...(PRESENCE_HTTP ? ['天阙中转'] : []), ...PRESENCE_BROKERS].map((b) => {
+    const host = b === '天阙中转' ? b : (typeof b === 'string' ? b : b.url).replace(/^wss:\/\//, '').split(/[:/]/)[0];
     const ok = brokerOk[host];
     return `<span class="pill ${ok ? 'ok' : ok === false ? 'bad' : ''}">${ok ? '●' : '○'} ${host}</span>`;
   }).join('');
@@ -88,8 +88,33 @@ function render() {
     .join('');
 }
 
+/** our own relay's board: polled every 3 s (works where the public brokers are blocked) */
+function pollRelay() {
+  if (!PRESENCE_HTTP) return;
+  const tick = async () => {
+    try {
+      const r = await fetch(PRESENCE_HTTP, { cache: 'no-store' });
+      const list = (await r.json()) as (PresenceState & { seen: number })[];
+      brokerOk['天阙中转'] = true;
+      const now = Date.now();
+      for (const p of list) {
+        const cur = players.get(p.id);
+        // the relay's own clock says how long ago it heard from them
+        const seen = now - Math.max(0, Date.now() - p.seen);
+        if (!cur || cur.seen < seen) players.set(p.id, { ...p, seen });
+      }
+    } catch {
+      brokerOk['天阙中转'] = false;
+    }
+    render();
+  };
+  tick();
+  setInterval(tick, 3000);
+}
+
 async function start() {
   showPage();
+  pollRelay();
   const mqtt = (await import('mqtt')).default;
   for (const b of PRESENCE_BROKERS) {
     const url = typeof b === 'string' ? b : b.url;

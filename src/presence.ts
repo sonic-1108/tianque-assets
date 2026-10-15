@@ -55,9 +55,24 @@ const state: PresenceState = {
 let clients: any[] = [];
 let started = false;
 
+/** our own relay's presence board (https://…/p), when the build knows where the relay is */
+export const PRESENCE_HTTP: string | null = (() => {
+  const own = (import.meta as any).env?.VITE_TQ_RELAY as string | undefined;
+  return own ? own.replace(/^ws/, 'http').replace(/\/$/, '') + '/p' : null;
+})();
+function post(body: string) {
+  if (!PRESENCE_HTTP) return;
+  try {
+    fetch(PRESENCE_HTTP, { method: 'POST', body, keepalive: true, headers: { 'content-type': 'application/json' } }).catch(() => {});
+  } catch {
+    /* offline */
+  }
+}
+
 function send() {
   state.t = Date.now();
   const msg = JSON.stringify(state);
+  post(msg);
   for (const c of clients) if (c.connected) c.publish(PRESENCE_TOPIC + sid, msg, { qos: 0, retain: true });
 }
 
@@ -77,13 +92,14 @@ export async function startPresence(ver: string) {
   if (started || typeof window === 'undefined') return;
   started = true;
   state.ver = ver;
-  let mqtt: any;
+  send();
+  let mqtt: any = null;
   try {
     mqtt = (await import('mqtt')).default;
   } catch {
-    return;
+    /* only the relay board then */
   }
-  for (const b of PRESENCE_BROKERS) {
+  for (const b of mqtt ? PRESENCE_BROKERS : []) {
     const url = typeof b === 'string' ? b : b.url;
     const auth = typeof b === 'string' ? {} : { username: b.username, password: b.password };
     try {
@@ -106,6 +122,7 @@ export async function startPresence(ver: string) {
   }
   window.setInterval(send, BEAT_MS);
   window.addEventListener('pagehide', () => {
+    post(JSON.stringify({ id: sid, bye: true }));
     for (const c of clients) if (c.connected) c.publish(PRESENCE_TOPIC + sid, '', { qos: 0, retain: true });
   });
 }
