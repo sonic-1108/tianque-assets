@@ -5,7 +5,7 @@ import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
-import { EffectComposer, Bloom, Vignette, ToneMapping, N8AO, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, Vignette, ToneMapping, HueSaturation, BrightnessContrast } from '@react-three/postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { Effect } from 'postprocessing';
@@ -7396,7 +7396,8 @@ function GameImpl({
       <primitive object={vfx.root} />
 
       <EffectComposer multisampling={perfTier >= 2 ? 0 : quality === 'high' ? 4 : quality === 'medium' ? 2 : 0}>
-        {quality === 'high' && perfTier === 0 && <N8AO halfRes quality="medium" aoRadius={2.4} distanceFalloff={1.0} intensity={3.5} color="#1a1410" />}
+        {/* ambient occlusion is off: on high quality it blacked out lanterns and robe folds, threw dark halos round
+            anyone near the lens, and darkened the whole screen when a skill burst dust and debris in front of the camera */}
         <HueSaturation saturation={0.08} />
         <BrightnessContrast brightness={0} contrast={0.06} />
         <primitive object={clampNegative} />
