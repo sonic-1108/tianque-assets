@@ -541,11 +541,11 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     passiveName: '金甲护体',
     passiveDesc: '普通攻击打不出硬直，重击也只能让他晃一下，击不飞、打不倒。',
     skills: [
-      { id: 'dragon_might', name: '龙威', key: '-', description: '有人近身时一声断喝，金色气浪震开身边5米内所有人（140伤害并击飞）。', mpCost: 0, cooldown: 9, icon: '🐉' },
-      { id: 'imperial_arrows', name: '御林箭雨', key: '-', description: '一挥手，远处的人脚下亮起红圈，1.4秒后御林军的箭雨落下（170伤害）。', mpCost: 0, cooldown: 12, icon: '🏹' },
-      { id: 'dragon_wrath', name: '龙颜大怒', key: '-', description: '血量低于35%时大怒：出手更快更重。', mpCost: 0, cooldown: 0, icon: '👑' },
-      { id: 'blank_4', name: '天子剑', key: '-', description: '御剑三连斩。', mpCost: 0, cooldown: 0, icon: '⚔️' },
-      { id: 'blank_r', name: '九五之尊', key: '-', description: '天子不需要大招。', mpCost: 0, cooldown: 99, icon: '🏯', isSuper: true },
+      { id: 'dragon_might', name: '龙威', key: '-', description: '被围住或有人贴脸时，金光往他身上一收，随即一声断喝炸开金色气浪：5米内的人全部击飞（140伤害）。', mpCost: 0, cooldown: 9, icon: '🐉' },
+      { id: 'sweep_army', name: '横扫千军', key: '-', description: '剑上聚起金火，面前地上亮起一片红色扇形，蓄满后一记金色弧光横扫5.8米（160伤害并击倒）。看到红扇就往他身后或扇外跑。', mpCost: 0, cooldown: 7, icon: '⚔️' },
+      { id: 'true_dragon', name: '真龙降世', key: '-', description: '举剑召出一条金龙，绕身盘旋升空后扑向远处的人（优先拿着玉玺的）。俯冲前地上亮起金圈，约半秒后落下（210伤害并击飞）。', mpCost: 0, cooldown: 16, icon: '🐲' },
+      { id: 'imperial_arrows', name: '御林箭雨', key: '-', description: '远处的人脚下亮起红圈，1.4秒后御林军的箭从天而降插满一地（170伤害）。', mpCost: 0, cooldown: 12, icon: '🏹' },
+      { id: 'dragon_wrath', name: '龙颜大怒', key: '-', description: '血量低于35%时大怒：脚下燃起金焰，出手更快更重，招式冷却更短，蓄力更快。', mpCost: 0, cooldown: 0, icon: '👑', isSuper: true },
     ],
   },
   Guard: {

@@ -1,4 +1,5 @@
 import { MonkFX } from './MonkFX';
+import { EmperorFX } from './EmperorFX';
 import * as THREE from 'three';
 
 /**
@@ -611,6 +612,7 @@ export class VFXSystem {
   trails: RibbonTrail[] = [];
 
   monk!: MonkFX;
+  emperor!: EmperorFX;
   /** 锁链钩: up to two chains in flight, each a run of iron links ending in a hook */
   private chains = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => {
     const LINKS = 70;
@@ -646,6 +648,8 @@ export class VFXSystem {
     this.root.name = 'VFXSystem';
     for (const t of this.tracers) this.root.add(t.m);
     this.monk = new MonkFX(this.root);
+    this.emperor = new EmperorFX(this.root);
+    this.emperor.embers = (p, n, c) => this.embers(p, n, c, 0.25, 1.5, 0.08);
     this.root.add(this.sparks.points, this.dust.points, this.debris.mesh);
     for (const ch of this.chains) this.root.add(ch.links, ch.hook);
     for (const sl of this.slots) this.root.add(sl.vortex.group, sl.pillar.group);
@@ -1245,6 +1249,7 @@ export class VFXSystem {
         if (t.life <= 0) t.m.visible = false;
       }
     this.monk.update(dt);
+    this.emperor.update(dt, this.time);
     this.updateChains(dt);
     if (this.timers.length) {
       const due: (() => void)[] = [];
