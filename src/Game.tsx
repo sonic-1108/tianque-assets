@@ -1,4 +1,5 @@
 import { shipSteer, newNavState, shipGraph } from './shipNav';
+import { newStreetNav, streetSteer, streetLineClear } from './streetNav';
 import { desertSteer, newDesertNav } from './desertNav';
 import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
@@ -349,6 +350,7 @@ function GameImpl({
   const newShipAi = () => ({ helmWait: 10 + Math.random() * 8, goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
   const shipNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => newNavState()));
   const shipAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi));
+  const streetNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newStreetNav));
   const desertNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav));
   /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
   const desertAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
@@ -5265,25 +5267,37 @@ function GameImpl({
         it.block = false;
         return;
       }
-      // everyone else: two jumps up a wall that's in the way (stepping out from under the eaves first)
-      if (c.isGrounded && roofCeilAt(c.pos[0], c.pos[2], c.pos[1]) < 900 && (c.wallBlock || foe.pos[1] - c.pos[1] > 1.5)) {
-        let best: [number, number] | null = null;
-        for (let k = 0; k < 8; k++) {
-          const a = (k / 8) * Math.PI * 2;
-          const x = c.pos[0] + Math.cos(a) * 1.6;
-          const z = c.pos[2] + Math.sin(a) * 1.6;
-          if (roofCeilAt(x, z, c.pos[1]) > 900 && roofFloorAt(x, z, c.pos[1]) < c.pos[1] + 0.3) {
-            best = [x, z];
-            break;
+      // everyone else: round the buildings by the streets; up onto a roof with a double jump
+      const Sl = mapRuntime.seal;
+      const holding = Sl?.state === 2 && Sl.holder === i;
+      if (!holding) {
+        const forSeal = Sl?.state === 1 && Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]) > 2.2;
+        const tx = forSeal ? Sl.x : foe.pos[0];
+        const tz = forSeal ? Sl.z : foe.pos[2];
+        const ty = forSeal ? Sl.y : foe.pos[1];
+        const onStreet = c.pos[1] < ROOF.street + 0.8;
+        const up = ty > ROOF.street + 1.2;
+        const far = Math.hypot(tx - c.pos[0], tz - c.pos[2]);
+        if (onStreet && c.isGrounded && (up || (far > 2.5 && !streetLineClear(c.pos[0], c.pos[2], tx, tz)))) {
+          const st = streetSteer(streetNavRefs.current[i], c.pos[0], c.pos[2], tx, tz, up, dt);
+          if (st) {
+            if (st.arrived && up) {
+              // under them: jump, and jump again at the top
+              it.move.set(tx - c.pos[0], 0, tz - c.pos[2]);
+              if (it.move.lengthSq() > 0.01) it.move.normalize();
+              it.request = 'jump';
+              c.parkour = 1.4;
+            } else {
+              it.move.set(st.x - c.pos[0], 0, st.z - c.pos[2]);
+              if (it.move.lengthSq() > 0.01) it.move.normalize();
+              it.request = null;
+              it.block = false;
+            }
+            return;
           }
         }
-        if (best) {
-          it.move.set(best[0] - c.pos[0], 0, best[1] - c.pos[2]).normalize();
-          it.request = null;
-          return;
-        }
       }
-      if (c.wallBlock && c.isGrounded && !c.parkour && (it.move.lengthSq() > 0.04)) {
+      if (c.wallBlock && c.isGrounded && !c.parkour && it.move.lengthSq() > 0.04 && roofCeilAt(c.pos[0], c.pos[2], c.pos[1]) > 900) {
         it.request = 'jump';
         c.parkour = 1.3;
       } else if (c.parkour && !c.isGrounded && !c.doubleJumped && c.vel[1] < 1.2) it.request = 'jump';
