@@ -259,6 +259,7 @@ function GameImpl({
   onLoadProgress,
 }: GameSceneProps) {
   const { camera, gl, scene, size } = useThree();
+  (globalThis as any).__TQ_SCENE = scene; // debugging hook
   (globalThis as any).__TQ_GL = gl; // tests read draw-call counts
   (globalThis as any).__TQ_SCENE = scene;
   // nothing reaches the HUD from the silent "what if" passes of a team fight
@@ -415,6 +416,7 @@ function GameImpl({
     // effects go quiet during the silent "what if" passes of a team fight (projectile bookkeeping stays live)
     const keep = new Set(['constructor', 'update', 'takeProjectile', 'releaseProjectile', 'followFighter', 'createTrail', 'dispose', 'setViewportHeight']);
     muteable(v, Object.getOwnPropertyNames(VFXSystem.prototype).filter((n) => !keep.has(n)));
+    (globalThis as any).__TQ_VFX = v; // debugging hook (effect groups can be toggled from the console)
     return v;
   }, []);
   const trails = useMemo<{ right: RibbonTrail; left: RibbonTrail }[]>(
