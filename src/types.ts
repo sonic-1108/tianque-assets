@@ -255,6 +255,12 @@ export interface CombatantState {
   sandExpo?: number; // 大漠玉门关: seconds caught out in a thick sandstorm
   mantraTgt?: number; // 六字真言: who the words are hunting (-1 nobody in reach)
   zip?: { t: number; dir: 1 | -1 }; // 悬空栈道: sliding along the iron chain (t 0..1 from the step to the peak)
+  zipW?: { k: number; t: number; dir: 1 | -1 }; // 青冥古林: riding zip line k (t 0..1 from end a to end b)
+  trapT?: number; // 青冥古林: seconds left caught in a trap (can't move, can still fight)
+  trapAt?: [number, number]; // where that trap is
+  trapKit?: number; // traps carried (taken from the hunters' rack), 0 or 1
+  hasteT?: number; // 疾风果: seconds of extra speed left
+  bogDmg?: number; // swamp poison not yet shown as a number
   drinkWell?: number; // 大漠玉门关: drawing water at well n (1-based), 0 not
   drinkT?: number; // seconds into it
   beaconHold?: number; // 大漠玉门关: seconds of holding F at the beacon

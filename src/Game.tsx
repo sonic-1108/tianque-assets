@@ -20,7 +20,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -602,7 +602,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const fighters = fightersRef.current;
@@ -870,10 +870,14 @@ function GameImpl({
     // set down near them), under the temple roofs (lamps), or right up close. Otherwise it goes to where it last
     // saw or heard them and gropes about. Being hit, or someone running past within a few steps, gives them away.
     const candleLitAt = (x: number, z: number) =>
+      fixedLightAt(x, z) ||
       mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? (TREE_HOOKS[it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground));
     const aiSees = (c: CombatantState, foe: CombatantState) => {
-      if (map.id !== 'forest' || mapRuntime.night <= 0.55) return true;
+      if (map.id !== 'forest') return true;
       const d = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      // the bog's mist: nobody sees far into it, or out of it
+      if ((inSwamp(foe.pos[0], foe.pos[2]) || inSwamp(c.pos[0], c.pos[2])) && d > 7) return false;
+      if (mapRuntime.night <= 0.55) return true;
       return foe.candle === 2 || d <= (c.candle === 2 ? CANDLE_LIGHT.hand : 3) || candleLitAt(foe.pos[0], foe.pos[2]) || sheltered(foe.pos[0], foe.pos[2], foe.pos[1]);
     };
     /** true when the AI is groping in the dark this tick (it has set its own intent) */
@@ -910,6 +914,51 @@ function GameImpl({
       return true;
     };
 
+    /** 青冥古林: hurt and not pressed, go and pick a 血参; step round any trap it can see */
+    const aiForestErrands = (i: number, c: CombatantState, foe: CombatantState, it: Intent) => {
+      if ((c.trapT ?? 0) > 0 || c.zipW || c.treeClimb !== undefined) return;
+      const W = mapRuntime.wood;
+      const dFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      if (c.hp < c.maxHp * 0.55 && dFoe > 9) {
+        let best: (typeof W.herbs)[number] | null = null;
+        let bd = 32;
+        for (const h of W.herbs) {
+          if (h.t > 0 || h.kind !== 0) continue;
+          const d = Math.hypot(h.x - c.pos[0], h.z - c.pos[2]);
+          if (d < bd) {
+            bd = d;
+            best = h;
+          }
+        }
+        if (best) {
+          const dx = best.x - c.pos[0];
+          const dz = best.z - c.pos[2];
+          it.move.set(dx / Math.max(0.01, bd), 0, dz / Math.max(0.01, bd));
+          it.faceYaw = Math.atan2(-dx, -dz);
+          it.request = null;
+          it.interact = bd < 1.3 && !c.intPrev;
+        }
+      }
+      // traps: its own side's, or any within a few steps (that's when you notice the jaws in the grass)
+      for (const t of W.traps) {
+        if (t.sprung >= 0 || t.owner === (c.side ?? 0)) continue;
+        const dx = t.x - c.pos[0];
+        const dz = t.z - c.pos[2];
+        const d = Math.hypot(dx, dz);
+        if (d > 3.5 || d < 0.01) continue;
+        const along = (dx * it.move.x + dz * it.move.z) / d;
+        if (along > 0.3) {
+          // sidestep: turn the move away from it
+          const sx = -dz / d;
+          const sz = dx / d;
+          const sgn = sx * it.move.x + sz * it.move.z > 0 ? 1 : -1;
+          it.move.x += sx * sgn * 0.9 - (dx / d) * 0.5;
+          it.move.z += sz * sgn * 0.9 - (dz / d) * 0.5;
+          if (it.move.lengthSq() > 1) it.move.normalize();
+        }
+      }
+    };
+
     // Everyone else: the AI, a guest's controls, or (training dummy) nothing
     const intents: Intent[] = fighters.map((c, i) => (i === ME ? playerIntent : { move: new THREE.Vector3(), faceYaw: yawTo(c.pos, foes[i].pos), request: null, block: false }));
     // balance tests (__TQ_SIM): the player's seat is played by the AI too
@@ -944,6 +993,7 @@ function GameImpl({
           if (N > 2) teamSpacing(i, c, foes[i], it);
           aiHitRoyal(i, c, it);
           aiReflex(i, c, foes[i], it);
+          if (map.id === 'forest') aiForestErrands(i, c, foes[i], it);
         }
       } else if (!aiOn) {
         it.faceYaw = c.targetRotY;
@@ -1341,8 +1391,9 @@ function GameImpl({
     const enDist = Math.hypot(en.pos[0] - p1.pos[0], en.pos[2] - p1.pos[2]);
     // night: they show only if they carry a flame, stand in your candle's light, or near a candle that's been set down
     const litNear = (x: number, z: number) =>
+      fixedLightAt(x, z) ||
       mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? (TREE_HOOKS[it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground));
-    const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || lostInSand(en, enDist) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
+    const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || lostInSand(en, enDist) || (map.id === 'forest' && enDist > 7 && (inSwamp(en.pos[0], en.pos[2]) || inSwamp(p1.pos[0], p1.pos[2]))) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
       // itself is moved every frame without a re-render
@@ -1406,7 +1457,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -1701,6 +1752,7 @@ function GameImpl({
         return true;
       };
       if (c.zip) return report('出招', '铁索上滑行中'), false;
+      if (c.zipW) return report('出招', '滑索上滑行中'), false;
       if (c.treeClimb !== undefined) {
         if (c.climbMode !== 'ladder' || req !== 'jump') return report('出招', c.climbMode === 'ladder' ? '在梯子上，按空格跳下来' : '梯云纵上树中'), false;
         // jump off the ladder, away from the trunk
@@ -2075,7 +2127,7 @@ function GameImpl({
           if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
           if (inZen(c)) mult *= 0.5;
           if (c.swimming) mult *= 0.55;
-          else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= 0.65; // wading
+          else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= inSwamp(c.pos[0], c.pos[2]) ? 0.5 : 0.65; // wading (the bog's mud drags worse)
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
           const accel = c.isGrounded ? 18 : 6;
@@ -2346,6 +2398,7 @@ function GameImpl({
       if (map.id === 'plankway') {
         // 悬空栈道: a blow that lands on someone standing on a bridge cracks the plank under them; the chain lets go
         if (def.zip && def.hp < hp0) dropOffChain(def);
+        if (def.zipW && def.hp < hp0) dropOffZip(def);
         if (def.hp < hp0) crackPlank(def, oIn.heavy || (oIn.launch ?? 0) > 0 || (oIn.knock ?? 0) > 3 ? 2 : 1);
       }
     }
@@ -4242,6 +4295,11 @@ function GameImpl({
       for (const c of fighters) {
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
+        c.zipW = undefined;
+        c.trapT = 0;
+        c.trapKit = 0;
+        c.hasteT = 0;
+        c.bogDmg = 0;
         c.maxMp = cc.mp;
         c.name = cc.name;
         c.characterName = cc.defaultCharacter;
@@ -4355,6 +4413,14 @@ function GameImpl({
       mapRuntime.skyFlash = 0;
       mapRuntime.shadeSpot = Math.floor(Math.random() * FOREST.shadeSpots.length);
       mapRuntime.items = [];
+      {
+        // 青冥古林: six herbs growing somewhere, eight of the hunters' traps set in the grass
+        const pickSome = (list: [number, number][], n: number) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
+        mapRuntime.wood = {
+          herbs: pickSome(FOREST_X.herbSpots, 6).map(([x, z]) => ({ x, z, kind: Math.random() < 0.6 ? 0 : 1, t: 0 })),
+          traps: pickSome(FOREST_X.trapSpots, 8).map(([x, z]) => ({ x, z, owner: -1, sprung: -1 })),
+        };
+      }
       mapRuntime.rain = 0;
       mapRuntime.storm = 0;
       mapRuntime.strikeWarn = 0;
@@ -4424,6 +4490,10 @@ function GameImpl({
     function groundAt(x: number, z: number, y: number, base?: number) {
       let g = base ?? (map.id === 'sea' ? shipFloorAt(x, z, y) : map.id === 'rooftop' ? roofFloorAt(x, z, y) : map.terrain ? terrainHeight(map.id, x, z) : 0);
       if (map.id === 'forest') g = Math.max(g, FOREST.swimY); // deep water: you float
+      if (map.id === 'forest' && y > FOREST_X.cave.floor + FOREST_X.cave.roof - 0.45) {
+        const roof = caveRoofAt(x, z); // walking over the cave, on the bluff
+        if (roof !== null) g = Math.max(g, roof);
+      }
       for (const pl of map.pillars || []) {
         if (pl.h === undefined || y < pl.h - 0.45) continue;
         const d = Math.hypot(x - pl.x, z - pl.z);
@@ -4569,8 +4639,8 @@ function GameImpl({
       const sz = Math.sign(mdz);
       if (!c.isGrounded) {
         // 大漠玉门关, in the air: a wall face stops you; you can only come down on something your feet are above
-        if (map.id !== 'desert' && map.id !== 'rooftop' && map.id !== 'plankway') return;
-        const above = (x: number, z: number) => edgeMax(x, z) > c.pos[1] + 0.25;
+        if (map.id !== 'desert' && map.id !== 'rooftop' && map.id !== 'plankway' && map.id !== 'forest') return;
+        const above = (x: number, z: number) => edgeMax(x, z) > c.pos[1] + (map.id === 'forest' ? 1.2 : 0.25);
         if (!above(c.pos[0], c.pos[2])) return;
         splat();
         if (!above(c.pos[0], pz0)) {
@@ -4617,7 +4687,7 @@ function GameImpl({
       if (!map.terrain || !c.isGrounded || map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop') return; // on the ship (and off the beacon, ramps and walls in the desert) you may step off
       const s = c.actionState;
       // 悬空栈道: a roll doesn't take you over the edge either (only being knocked does)
-      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || (s === 'dodge' && map.id !== 'plankway') || c.hp <= 0 || c.zip) return;
+      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || (s === 'dodge' && map.id !== 'plankway') || c.hp <= 0 || c.zip || c.zipW) return;
       const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;
       if (!drop(c.pos[0], c.pos[2])) return;
       if (!drop(c.pos[0], pz0)) {
@@ -4958,6 +5028,16 @@ function GameImpl({
     /** let go of the chain (hit while sliding): straight down, unless right over solid ground */
     function dropOffChain(c: CombatantState) {
       c.zip = undefined;
+      c.isGrounded = false;
+      c.vel = [0, -1, 0];
+      c.actionState = 'launched';
+      c.stateTimer = 0;
+      c.stateDuration = 0.9;
+      vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '松手了！', true, '#fca5a5');
+    }
+    /** 青冥古林: let go of a zip line (hit while riding): drop from where you are */
+    function dropOffZip(c: CombatantState) {
+      c.zipW = undefined;
       c.isGrounded = false;
       c.vel = [0, -1, 0];
       c.actionState = 'launched';
@@ -5607,6 +5687,7 @@ function GameImpl({
         c.climbing = false;
         c.isGrounded = false;
       }
+      if (c.zipW) dropOffZip(c);
       vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), label ? `${label} ${dmg}` : dmg, false, '#ffb15a');
       if (launch > 0) {
         c.vel[1] = launch;
@@ -7086,6 +7167,35 @@ function GameImpl({
       c.intPrev = !!intent?.interact;
       c.interactHint = c.nearLadder ? '按住 F 爬梯子' : '';
       const items = mapRuntime.items;
+      // riding a zip line from one lookout to the next
+      if (c.zipW) {
+        const Z = zipLine(c.zipW.k);
+        if (c.hp <= 0) {
+          dropOffZip(c);
+          return;
+        }
+        c.zipW.t += (c.zipW.dir * dt * 14) / Math.max(5, Z.len);
+        const done = c.zipW.dir > 0 ? c.zipW.t >= 1 : c.zipW.t <= 0;
+        const [hx, hy, hz] = zipAt(c.zipW.k, Math.max(0, Math.min(1, c.zipW.t)));
+        c.pos = [hx, hy - 2.05, hz];
+        c.vel = [0, 0, 0];
+        c.isGrounded = false;
+        c.actionState = 'jump';
+        c.stateTimer = 0;
+        c.rotY = c.targetRotY = Math.atan2(-(Z.bx - Z.ax) * c.zipW.dir, -(Z.bz - Z.az) * c.zipW.dir);
+        if (Math.random() < 0.4) vfx.sparkBurst(vB.set(hx, hy + 0.05, hz), 1, '#e7d3a8', 1.5, 0.03);
+        c.interactHint = '滑索中 · 挨打会松手掉下去';
+        if (done) {
+          // step off onto the far deck
+          const fwd = c.zipW.dir > 0;
+          c.pos = fwd ? [Z.bx, Z.deckB + 0.05, Z.bz] : [Z.ax, Z.deckA + 0.05, Z.az];
+          c.zipW = undefined;
+          c.isGrounded = true;
+          c.actionState = 'idle';
+          vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 6, 0.4, 1.2, 0.5, '#c8b48a');
+        }
+        return;
+      }
       if ((c.meditateT ?? 0) > 0) {
         // sitting: any move, attack, or hit breaks it
         const moved = !!intent && (intent.move.lengthSq() > 0.01 || !!intent.request);
@@ -7163,6 +7273,65 @@ function GameImpl({
               items.splice(k, 1);
             });
         });
+        const W = mapRuntime.wood;
+        // herbs: 血参 gives back a sixth of your health, 疾风果 makes you fleet for eight seconds
+        W.herbs.forEach((h) => {
+          if (h.t > 0) return;
+          const d = Math.hypot(c.pos[0] - h.x, c.pos[2] - h.z);
+          if (d > 1.6 || Math.abs(c.pos[1] - forestFloor(h.x, h.z)) > 1.2) return;
+          offer(d, h.kind === 0 ? '按 F 采血参 · 回复气血' : '按 F 摘疾风果 · 跑得更快', () => {
+            if (h.kind === 0) {
+              const heal = Math.round(c.maxHp * 0.15);
+              c.hp = Math.min(c.maxHp, c.hp + heal);
+              vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), `+${heal}`, false, '#4ade80');
+              say(`采到血参，回复 ${heal} 气血`);
+            } else {
+              c.hasteT = 8;
+              say('吃了疾风果 · 八秒内身轻如燕');
+            }
+            vfx.sparkBurst(vB.set(h.x, c.pos[1] + 0.6, h.z), 14, h.kind === 0 ? '#f87171' : '#7dd3fc', 2.5, 0.06, UP, 0.7);
+            h.t = 22 + Math.random() * 10; // grows back somewhere else
+            gameAudio.playCrispClick();
+          });
+        });
+        // the hunters' rack at the camp: a trap to carry
+        {
+          const [rx, rz] = FOREST_X.camp.rack;
+          const d = Math.hypot(c.pos[0] - rx, c.pos[2] - rz);
+          if (d < 2.2 && !(c.trapKit ?? 0))
+            offer(d, (c.cooldowns['rack'] ?? 0) > 0 ? '猎户的架子 · 过一会儿再来拿' : '按 F 拿一个捕兽夹', () => {
+              if ((c.cooldowns['rack'] ?? 0) > 0) return;
+              c.trapKit = 1;
+              c.cooldowns['rack'] = 12;
+              say('拿了一个捕兽夹 · 走到想放的地方按 F 布下（对手走近才看得见）');
+            });
+        }
+        // a zip line from the deck you're on
+        if (c.isGrounded && c.treeClimb === undefined)
+          FOREST_X.zips.forEach((_, k) => {
+            const Z = zipLine(k);
+            for (const end of [0, 1] as const) {
+              const x = end ? Z.bx : Z.ax;
+              const z = end ? Z.bz : Z.az;
+              const deck = end ? Z.deckB : Z.deckA;
+              const d = Math.hypot(c.pos[0] - x, c.pos[2] - z);
+              if (d > 2.0 || Math.abs(c.pos[1] - deck) > 0.7) continue;
+              offer(d, '按 F 抓住滑索滑到另一棵树', () => {
+                if (fighters.some((o) => o !== c && o.zipW?.k === k)) return say('滑索上有人');
+                c.zipW = { k, t: end ? 1 : 0, dir: end ? -1 : 1 };
+                c.isBlocking = false;
+                gameAudio.playCrispClick();
+              });
+            }
+          });
+        // setting a trap at your feet
+        if ((c.trapKit ?? 0) > 0 && c.isGrounded && c.treeClimb === undefined && !c.swimming && c.pos[1] < forestFloor(c.pos[0], c.pos[2]) + 0.4 && W.traps.length < 24)
+          offer(80, '按 F 在脚下布下捕兽夹', () => {
+            W.traps.push({ x: c.pos[0], z: c.pos[2], owner: c.side ?? 0, sprung: -1 });
+            c.trapKit = 0;
+            gameAudio.playCrispClick();
+            say('捕兽夹布好了 · 你这边的人踩不到');
+          });
         // the prayer cushions: sit, breathe, and a tenth of what you've lost comes back (once a day, i.e. once a night)
         const day = Math.floor(weatherRef.current.t / WEATHER_CYCLE);
         if (onHill && (c.meditateT ?? 0) <= 0)
@@ -7440,8 +7609,75 @@ function GameImpl({
 
     /** 青冥古林: splashes in the river, and now and then a gust brings dead branches down */
     function updateForest() {
+      const W = mapRuntime.wood;
+      // herbs grow back, each somewhere new
+      for (const h of W.herbs)
+        if (h.t > 0 && !round.over) {
+          h.t -= dt;
+          if (h.t <= 0) {
+            const free = FOREST_X.herbSpots.filter(([x, z]) => !W.herbs.some((o) => o !== h && Math.hypot(o.x - x, o.z - z) < 2) && !fighters.some((f) => Math.hypot(f.pos[0] - x, f.pos[2] - z) < 12));
+            const [x, z] = free[Math.floor(Math.random() * free.length)] ?? [h.x, h.z];
+            h.x = x;
+            h.z = z;
+            h.kind = Math.random() < 0.6 ? 0 : 1;
+            h.t = 0;
+          }
+        }
+      for (let k = W.traps.length - 1; k >= 0; k--) {
+        const t = W.traps[k];
+        if (t.sprung >= 0) {
+          t.sprung += dt;
+          if (t.sprung > 20) W.traps.splice(k, 1); // the sprung jaws are cleared away after a while
+        }
+      }
       for (let i = 0; i < N; i++) {
         const c = fighters[i];
+        if ((c.hasteT ?? 0) > 0) {
+          c.hasteT = (c.hasteT ?? 0) - dt;
+          if (Math.random() < dt * 8 && Math.hypot(c.vel[0], c.vel[2]) > 2) vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.1, c.pos[2]), 2, 0.2, 1, 0.35, '#bae6fd');
+        }
+        // caught in a trap: pinned where it is (you can still fight back)
+        if ((c.trapT ?? 0) > 0) {
+          c.trapT = (c.trapT ?? 0) - dt;
+          if (c.trapAt && c.hp > 0) {
+            c.pos[0] = c.trapAt[0];
+            c.pos[2] = c.trapAt[1];
+            c.vel[0] = c.vel[2] = 0;
+          }
+        } else if (c.hp > 0 && c.isGrounded && !c.zipW && c.treeClimb === undefined)
+          for (const t of W.traps) {
+            if (t.sprung >= 0 || t.owner === (c.side ?? 0)) continue;
+            if (Math.hypot(c.pos[0] - t.x, c.pos[2] - t.z) > 0.7 || c.pos[1] > forestFloor(t.x, t.z) + 0.5) continue;
+            t.sprung = 0;
+            c.trapT = 2.2;
+            c.trapAt = [t.x, t.z];
+            envHit(i, 70, 0, '捕兽夹');
+            vfx.sparkBurst(vB.set(t.x, c.pos[1] + 0.3, t.z), 12, '#d4d4d8', 3, 0.05, UP, 0.5);
+            vfx.ring(vB, 1.0, '#a1a1aa', 0.3, 0.1, 0.3);
+            gameAudio.playSlam();
+            if (i === ME) onRoundEvent?.({ type: 'toast', text: '踩中捕兽夹！动不了两秒' });
+            break;
+          }
+        // walking through the campfire singes
+        {
+          const [fx, fz] = FOREST_X.camp.fire;
+          if (c.hp > 0 && c.isGrounded && Math.hypot(c.pos[0] - fx, c.pos[2] - fz) < 0.85 && (c.cooldowns['fire'] ?? 0) <= 0) {
+            c.cooldowns['fire'] = 0.8;
+            envHit(i, 15, 0, '烧着了');
+            vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.5, c.pos[2]), 10, '#ff8a3a', 0.6, 2.5, 0.07);
+          }
+        }
+        // the bog: poison while you wade in it (it never finishes you off)
+        if (c.hp > 1 && c.isGrounded && c.pos[1] < FOREST.waterY && inSwamp(c.pos[0], c.pos[2]) && waterDepth(c.pos[0], c.pos[2]) > 0.1) {
+          const d = 12 * HP_SCALE * dt;
+          c.hp = Math.max(1, c.hp - d);
+          c.bogDmg = (c.bogDmg ?? 0) + d;
+          if (c.bogDmg >= 24) {
+            vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.0, c.pos[2]), `瘴毒 ${Math.round(c.bogDmg)}`, false, '#a3e635');
+            c.bogDmg = 0;
+          }
+          if (Math.random() < dt * 4) vfx.dustPuff(vB.set(c.pos[0] + (Math.random() - 0.5), FOREST.waterY + 0.05, c.pos[2] + (Math.random() - 0.5)), 2, 0.15, 0.6, 0.6, '#84cc16');
+        }
         const moving = Math.hypot(c.vel[0], c.vel[2]) > 1.2;
         const wet = c.isGrounded && c.pos[1] < FOREST.waterY && waterDepth(c.pos[0], c.pos[2]) > 0.12;
         if ((wet || c.swimming) && moving && Math.random() < dt * (c.swimming ? 6 : 9)) vfx.dustPuff(vB.set(c.pos[0], FOREST.waterY + 0.05, c.pos[2]), c.swimming ? 4 : 3, 0.3, 1.4, 0.4, '#e0f2fe');

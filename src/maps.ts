@@ -125,6 +125,205 @@ export const FOREST = {
     [4.8, 8.8],
   ] as [number, number][],
 };
+/**
+ * 青冥古林's newer corners (all in world metres):
+ *   瀑布: a rock bluff on the east edge; the river comes over it into a deep pool. A cave runs in behind the falling
+ *         water (its mouth just north of the fall): dry, out of the rain and the lightning, an oil lamp inside.
+ *         A rubble ramp climbs the bluff's north end to a lookout over the fall.
+ *   猎户营地: tents round a campfire (it lights the clearing at night), a rack of hunters' traps (F takes one).
+ *   竹林: a dense bamboo grove; the 石灯笼 path runs from the north camp down past it to the ford, lit at night.
+ *   古塔: a ruined pagoda, a stone platform and the broken first and second storeys, climbed by rubble slopes.
+ *   沼泽: a sunken bog of black water and reeds. Wading in it is slow and it poisons; its mist hides you.
+ */
+export const FOREST_X = {
+  bluff: { x0: 183, x1: 230, z0: -18, z1: 60, h: 12 },
+  pool: { x: 171, z: riverZ(171), r: 11 },
+  fall: { x: 181.2, z0: riverZ(182) - 4, z1: riverZ(182) + 4 },
+  cave: { x0: 183, x1: 193, z0: riverZ(182) - 6, z1: riverZ(182) + 8.5, mouth: [riverZ(182) + 4.5, riverZ(182) + 8.5] as [number, number], floor: 0.3, roof: 4.2 },
+  /** the rubble ramp up the bluff's north end: from (x0, z) at the bottom to (x1, z) at the top */
+  ramp: { x0: 160, x1: 184, z: 56.5, half: 2.2 },
+  camp: { x: 108, z: -96, r: 15, fire: [108, -96] as [number, number], rack: [116.5, -91] as [number, number], tents: [[100, -103, 0.6], [116, -103, -0.7], [99, -88, 2.4]] as [number, number, number][] },
+  bamboo: { x: -128, z: 72, r: 30, clumps: [] as [number, number, number][] },
+  /** the stone lantern path: lanterns at these points */
+  lanterns: [] as [number, number][],
+  lanternPath: [[-30, 74], [-58, 62], [-84, 46], [-98, 26], [-102, 4]] as [number, number][],
+  pagoda: { x: 42, z: -122, base: 9.5, baseH: 1.0, s1: 7, s1H: 4.6, s2: 3.8, s2H: 6.8 },
+  swamp: { x: 132, z: -36, r: 27, snags: [] as [number, number, number][] },
+  /** the pagoda's fallen spire: drums lying in the grass south-west of it (x, z, radius, yaw) */
+  spire: [[30.5, -133, 1.25, 0.7], [27.2, -136.5, 1.05, 0.75], [24.4, -139.4, 0.85, 0.8]] as [number, number, number, number][],
+  /** log seats round the campfire */
+  seats: [] as [number, number, number][],
+  /** where herbs can grow (a few at a time) and where the hunters left traps */
+  herbSpots: [] as [number, number][],
+  trapSpots: [] as [number, number][],
+  /** zip lines between lookout decks: indexes into the lookout trees (FOREST.trees with a deck) */
+  zips: [] as [number, number][],
+};
+/** the lights that burn all night: the campfire, the lanterns, the cave lamp (x, z, reach) */
+export const FOREST_LIGHTS: [number, number, number][] = [];
+// stone lanterns every 11 m along the path
+{
+  const P = FOREST_X.lanternPath;
+  let carry = 4;
+  for (let k = 0; k + 1 < P.length; k++) {
+    const [ax, az] = P[k];
+    const [bx, bz] = P[k + 1];
+    const L = Math.hypot(bx - ax, bz - az);
+    for (let d = carry; d < L; d += 11) {
+      const t = d / L;
+      // a lantern each side, alternating, a little off the path
+      const nx = -(bz - az) / L;
+      const nz = (bx - ax) / L;
+      const side = FOREST_X.lanterns.length % 2 ? 1 : -1;
+      FOREST_X.lanterns.push([ax + (bx - ax) * t + nx * 1.9 * side, az + (bz - az) * t + nz * 1.9 * side]);
+      carry = d + 11 - L;
+    }
+  }
+  for (const [x, z] of FOREST_X.lanterns) FOREST_LIGHTS.push([x, z, 8]);
+  // bamboo clumps fill the grove; dead snags stand in the bog; three logs to sit on by the fire
+  const rb = frand(777);
+  const B = FOREST_X.bamboo;
+  for (let k = 0; k < 3000 && B.clumps.length < 95; k++) {
+    const a = rb() * Math.PI * 2;
+    const d = Math.sqrt(rb()) * (B.r - 1);
+    const x = B.x + Math.cos(a) * d;
+    const z = B.z + Math.sin(a) * d;
+    if (B.clumps.some(([cx, cz]) => Math.hypot(cx - x, cz - z) < 3.6)) continue;
+    B.clumps.push([x, z, 0.7 + rb() * 0.35]);
+  }
+  const S = FOREST_X.swamp;
+  for (let k = 0; k < 400 && S.snags.length < 9; k++) {
+    const a = rb() * Math.PI * 2;
+    const d = 3 + Math.sqrt(rb()) * (S.r - 5);
+    const x = S.x + Math.cos(a) * d;
+    const z = S.z + Math.sin(a) * d;
+    if (S.snags.some(([cx, cz]) => Math.hypot(cx - x, cz - z) < 7)) continue;
+    S.snags.push([x, z, rb() * Math.PI * 2]);
+  }
+  const [fx, fz] = FOREST_X.camp.fire;
+  for (const a of [0.4, 2.5, 4.4]) FOREST_X.seats.push([fx + Math.cos(a) * 3.3, fz + Math.sin(a) * 3.3, a + Math.PI / 2]);
+  FOREST_LIGHTS.push([FOREST_X.camp.fire[0], FOREST_X.camp.fire[1], 17]);
+  FOREST_LIGHTS.push([(FOREST_X.cave.x0 + FOREST_X.cave.x1) / 2 + 1, (FOREST_X.cave.z0 + FOREST_X.cave.z1) / 2, 7]);
+}
+/** is (x, z) inside one of the new features (keeps trees, logs and boulders out of them) */
+export function inForestFeature(x: number, z: number, pad = 0) {
+  const X = FOREST_X;
+  const B = X.bluff;
+  if (x > B.x0 - 6 - pad && z > B.z0 - 6 - pad && z < B.z1 + 6 + pad) return true;
+  if (Math.hypot(x - X.pool.x, z - X.pool.z) < X.pool.r + 4 + pad) return true;
+  if (Math.abs(z - X.ramp.z) < X.ramp.half + 3 + pad && x > X.ramp.x0 - 4 && x < X.ramp.x1) return true;
+  if (Math.hypot(x - X.camp.x, z - X.camp.z) < X.camp.r + pad) return true;
+  if (Math.hypot(x - X.pagoda.x, z - X.pagoda.z) < X.pagoda.base + 7 + pad) return true;
+  if (Math.hypot(x - X.swamp.x, z - X.swamp.z) < X.swamp.r + 2 + pad) return true;
+  if (Math.hypot(x - X.bamboo.x, z - X.bamboo.z) < X.bamboo.r + 2 + pad) return true;
+  for (const [lx, lz] of X.lanterns) if (Math.hypot(x - lx, z - lz) < 2.5 + pad) return true;
+  return false;
+}
+const sstepX = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+/** pagoda storey heights at (x, z): an octagon of radius r (to its flats) */
+function octIn(dx: number, dz: number, r: number) {
+  const a = Math.abs(dx);
+  const b = Math.abs(dz);
+  return a <= r && b <= r && a + b <= r * 1.414;
+}
+/** the rubble slopes up the pagoda: from the ground over the platform up to storey 1 (south side), and from
+ * storey 1's floor up to the broken storey 2 (east side). Null off them. */
+export function pagodaSlope(dx: number, dz: number): number | null {
+  const P = FOREST_X.pagoda;
+  if (Math.abs(dx) < 1.9 && dz <= -P.s1 + 0.3 && dz > -P.base - 5) {
+    const t = (-dz - P.s1 + 0.3) / (P.base + 5 - P.s1 + 0.3);
+    return P.s1H * (1 - t);
+  }
+  if (Math.abs(dz - 1.2) < 1.5 && dx >= P.s2 - 0.2 && dx < P.s1 - 0.3) {
+    const t = (P.s1 - 0.3 - dx) / (P.s1 - 0.3 - (P.s2 - 0.2));
+    return P.s1H + (P.s2H - P.s1H) * t;
+  }
+  return null;
+}
+/** extra ground from the new features (null where there's nothing) */
+export function forestFeatureHeight(x: number, z: number, h: number): number {
+  const X = FOREST_X;
+  // the pool below the fall: deep in the middle, a shelving rim
+  const pd = Math.hypot(x - X.pool.x, z - X.pool.z);
+  if (pd < X.pool.r + 3) h = Math.min(h, -0.2 - 3.2 * (1 - sstepX(X.pool.r * 0.45, X.pool.r + 2.5, pd)));
+  // the swamp: black water a hand deep or two, hummocks of dry ground
+  const sd = Math.hypot(x - X.swamp.x, z - X.swamp.z);
+  if (sd < X.swamp.r + 4) {
+    const hum = Math.sin(x * 0.31 + 1.7) * Math.cos(z * 0.27 - 0.4) + Math.sin(x * 0.13 - z * 0.17) * 0.6;
+    const bog = -1.15 + Math.max(0, hum - 0.55) * 1.4;
+    h = h + (bog - h) * (1 - sstepX(X.swamp.r - 3, X.swamp.r + 4, sd));
+  }
+  // the bluff: sheer faces, a flat top (the river runs in a notch to the lip)
+  const B = X.bluff;
+  const inB = x > B.x0 && z > B.z0 && z < B.z1;
+  if (inB) {
+    let top = B.h + Math.sin(z * 0.2) * 0.3;
+    if (Math.abs(z - X.pool.z) < 3.5 && x < B.x0 + 9) top = B.h - 1.2; // the notch the water pours from
+    h = Math.max(h, top);
+    // the cave: a hollow behind the fall; the rock face (its first metre) is open only at the mouth
+    const C = X.cave;
+    if (x < C.x1 && z > C.z0 && z < C.z1 && (x > B.x0 + 1.2 || (z >= C.mouth[0] && z <= C.mouth[1]))) h = C.floor;
+  }
+  // the ramp up the north end of the bluff
+  const R = X.ramp;
+  if (Math.abs(z - R.z) < R.half && x > R.x0 && x < R.x1 + 1) h = Math.max(h, B.h * Math.max(0, Math.min(1, (x - R.x0) / (R.x1 - R.x0))));
+  // the pagoda: platform, two storeys, the rubble between
+  const P = X.pagoda;
+  const dx = x - P.x;
+  const dz = z - P.z;
+  if (octIn(dx, dz, P.base)) {
+    let ph = P.baseH;
+    if (octIn(dx, dz, P.s1)) ph = P.s1H;
+    if (octIn(dx, dz, P.s2) && dx + dz > -1.5) ph = P.s2H; // storey 2 stands on its north-east half only (the rest fell)
+    h = Math.max(h, ph);
+  }
+  const sl = pagodaSlope(dx, dz);
+  if (sl !== null) h = Math.max(h, sl);
+  return h;
+}
+/** a zip line: anchors on the two lookout decks (hand height), deck heights, length */
+export function zipLine(k: number) {
+  const decks = FOREST.trees.filter((t) => t[3] > 0);
+  const [a, b] = FOREST_X.zips[k];
+  const A = decks[a];
+  const B = decks[b];
+  const L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+  const ux = (B[0] - A[0]) / L;
+  const uz = (B[1] - A[1]) / L;
+  const ra = A[2] + 0.75;
+  const rb = B[2] + 0.75;
+  return { ax: A[0] + ux * ra, az: A[1] + uz * ra, ay: A[3] + 2.45, deckA: A[3], bx: B[0] - ux * rb, bz: B[1] - uz * rb, by: B[3] + 2.45, deckB: B[3], len: L - ra - rb };
+}
+/** the rope at fraction t (0 = end a, 1 = end b), sagging in the middle */
+export function zipAt(k: number, t: number): [number, number, number] {
+  const Z = zipLine(k);
+  return [Z.ax + (Z.bx - Z.ax) * t, Z.ay + (Z.by - Z.ay) * t - 0.035 * Z.len * Math.sin(Math.PI * t), Z.az + (Z.bz - Z.az) * t];
+}
+/** inside the cave behind the waterfall */
+export function inCave(x: number, z: number, y: number) {
+  const C = FOREST_X.cave;
+  return x > FOREST_X.bluff.x0 - 0.2 && x < C.x1 && z > C.z0 && z < C.z1 && y < C.floor + C.roof;
+}
+/** the rock over the cave: its top (the bluff's) where (x, z) is over the cave, else null */
+export function caveRoofAt(x: number, z: number): number | null {
+  const C = FOREST_X.cave;
+  if (x > FOREST_X.bluff.x0 && x < C.x1 && z > C.z0 && z < C.z1) return FOREST_X.bluff.h + Math.sin(z * 0.2) * 0.3;
+  return null;
+}
+/** in the swamp's black water (wading) */
+export function inSwamp(x: number, z: number) {
+  const S = FOREST_X.swamp;
+  return Math.hypot(x - S.x, z - S.z) < S.r;
+}
+/** a lit night light (campfire, lantern, cave lamp) reaches (x, z) */
+export function fixedLightAt(x: number, z: number) {
+  for (const [lx, lz, r] of FOREST_LIGHTS) if (Math.hypot(x - lx, z - lz) < r) return true;
+  return false;
+}
+
 /** temple frame: hilltop centre, facing toward the middle of the map */
 export const TEMPLE_YAW = Math.atan2(-FOREST.hill.x, -FOREST.hill.z);
 /** temple-local (x, z) to world (x, z) */
@@ -149,6 +348,7 @@ export function underTempleRoof(x: number, z: number, y: number) {
 /** under any roof on the hill (the hall, or the bell pavilion): dry floor, and lightning can't reach you */
 export function sheltered(x: number, z: number, y: number) {
   if (underTempleRoof(x, z, y)) return true;
+  if (inCave(x, z, y)) return true;
   const [lx, lz] = worldToTemple(x, z);
   return Math.abs(lx + 7.2) < 1.9 && Math.abs(lz - 8.6) < 1.9 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 5;
 }
@@ -193,6 +393,7 @@ export const CANDLE_POINTS: [number, number][] = [
   const ok = (x: number, z: number, pad: number) => {
     if (Math.hypot(x, z) > FOREST.radius - 4) return false;
     if (Math.abs(z - riverZ(x)) < FOREST.bankHalf + pad) return false;
+    if (inForestFeature(x, z, pad + 2)) return false;
     if (Math.hypot(x, z - FOREST.spawnZ[0]) < 7 || Math.hypot(x, z - FOREST.spawnZ[1]) < 7) return false; // spawns
     if (Math.abs(x - FOREST.bridge.x) < 6 && Math.abs(z - riverZ(x)) < 14) return false; // bridge approaches
     // the temple hill, with room so no limb or crown reaches over the temple
@@ -253,6 +454,7 @@ export const CANDLE_POINTS: [number, number][] = [
       const z = Math.sin(a) * d;
       if (blockedT(x, z, 1)) continue;
       if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 1) continue;
+      if (inForestFeature(x, z, 0)) continue;
       const bank = Math.abs(Math.abs(z - riverZ(x)) - FOREST.deepHalf - 1.5) < 2.5;
       if (!bank && d < FOREST.radius - 2 && rr() < 0.8) continue;
       const sc = 0.25 + rr() * (bank ? 0.9 : 0.5);
@@ -263,6 +465,51 @@ export const CANDLE_POINTS: [number, number][] = [
   const [f0, f1] = FOREST.ford;
   const fx = (f0 + f1) / 2;
   for (let k = -3; k <= 3; k++) FOREST.stones.push([fx + (k % 2 ? 1.1 : -1.1), riverZ(fx) + k * 2.1]);
+  // herbs and traps: open ground, off the paths of the big features
+  const rs = frand(4321);
+  const clear = (x: number, z: number, list: [number, number][], gap: number) =>
+    ok(x, z, 1.5) && !FOREST.trees.some(([tx, tz, r]) => Math.hypot(tx - x, tz - z) < r + 2) && !list.some(([a, b]) => Math.hypot(a - x, b - z) < gap);
+  for (let k = 0; k < 4000 && FOREST_X.herbSpots.length < 26; k++) {
+    const a = rs() * Math.PI * 2;
+    const d = 14 + Math.sqrt(rs()) * (FOREST.radius - 22);
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    if (clear(x, z, FOREST_X.herbSpots, 16)) FOREST_X.herbSpots.push([x, z]);
+  }
+  for (let k = 0; k < 4000 && FOREST_X.trapSpots.length < 14; k++) {
+    const a = rs() * Math.PI * 2;
+    const d = 20 + Math.sqrt(rs()) * (FOREST.radius - 30);
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    if (clear(x, z, FOREST_X.trapSpots, 22) && !FOREST_X.herbSpots.some(([a2, b2]) => Math.hypot(a2 - x, b2 - z) < 5)) FOREST_X.trapSpots.push([x, z]);
+  }
+  // zip lines: lookout to lookout, 35 to 90 m apart, clear of the temple hill, each deck with two lines at most
+  const decks = FOREST.trees.map((t, i) => [t, i] as const).filter(([t]) => t[3] > 0);
+  const pairs: [number, number, number][] = [];
+  for (let a = 0; a < decks.length; a++)
+    for (let b = a + 1; b < decks.length; b++) {
+      const [A] = decks[a];
+      const [Bt] = decks[b];
+      const L = Math.hypot(A[0] - Bt[0], A[1] - Bt[1]);
+      if (L < 30 || L > 100) continue;
+      // nothing tall in the way: the hill, the pagoda, the other giants
+      let blocked = false;
+      for (let s2 = 0.08; s2 < 0.92; s2 += 0.04) {
+        const x = A[0] + (Bt[0] - A[0]) * s2;
+        const z = A[1] + (Bt[1] - A[1]) * s2;
+        if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 4 || Math.hypot(x - FOREST_X.pagoda.x, z - FOREST_X.pagoda.z) < FOREST_X.pagoda.base + 2) blocked = true;
+        if (FOREST.trees.some((t) => t !== A && t !== Bt && Math.hypot(t[0] - x, t[1] - z) < t[2] + 0.8)) blocked = true;
+      }
+      if (!blocked) pairs.push([a, b, L]);
+    }
+  pairs.sort((p, q) => p[2] - q[2]);
+  const used = new Map<number, number>();
+  for (const [a, b] of pairs) {
+    if ((used.get(a) ?? 0) >= 2 || (used.get(b) ?? 0) >= 2 || FOREST_X.zips.length >= 7) continue;
+    FOREST_X.zips.push([a, b]);
+    used.set(a, (used.get(a) ?? 0) + 1);
+    used.set(b, (used.get(b) ?? 0) + 1);
+  }
 })();
 
 const sstepF = (a: number, b: number, x: number) => {
@@ -309,7 +556,7 @@ export function forestFloor(x: number, z: number, steps = true) {
   // the forest floor rises into the trees beyond the arena
   const r = Math.hypot(x, z);
   h += sstepF(FOREST.radius, FOREST.radius + 14, r) * 4;
-  return h;
+  return forestFeatureHeight(x, z, h);
 }
 /** the podium's front steps (temple-local): n treads of depth dz between the forecourt and the podium top */
 export const PODIUM_STEPS = { half: 2.2, n: 2, dz: 0.45 };
@@ -411,6 +658,17 @@ function forestPillars(): Circle[] {
     for (const [px, pz] of [[-8.2, 7.6], [-6.2, 7.6], [-8.2, 9.6], [-6.2, 9.6]]) add(px, pz, 0.17); // bell pavilion
     add(0, 8.4, 0.62, FOREST.hill.h + 1.1); // incense burner
     for (const [sx, sz] of INCENSE_STANDS) add(sx, sz, 0.42); // incense stands
+  }
+  // the newer corners: tents, the trap rack, lanterns, bamboo, snags in the bog, the fallen spire, log seats
+  {
+    const X = FOREST_X;
+    for (const [x, z] of X.camp.tents) out.push({ x, z, r: 2.0 });
+    out.push({ x: X.camp.rack[0], z: X.camp.rack[1], r: 0.6 });
+    for (const [x, z, a] of X.seats) for (const k of [-1, 0, 1]) out.push({ x: x + Math.cos(a) * k * 0.6, z: z + Math.sin(a) * k * 0.6, r: 0.36, h: forestFloor(x, z) + 0.45 });
+    for (const [x, z] of X.lanterns) out.push({ x, z, r: 0.38 });
+    for (const [x, z] of X.bamboo.clumps) out.push({ x, z, r: 0.85 });
+    for (const [x, z] of X.swamp.snags) out.push({ x, z, r: 0.45 });
+    for (const [x, z, r] of X.spire) out.push({ x, z, r, h: forestFloor(x, z) + r * 1.6 });
   }
   // small stones you step onto; big boulders are solid (a flat standing top over a rounded rock reads as floating)
   for (const [x, z, sc] of FOREST.rocks) out.push(sc < 0.5 ? { x, z, r: sc * 1.1, h: forestFloor(x, z) + sc * 0.75 } : { x, z, r: sc * 1.15 });
@@ -659,6 +917,13 @@ MAPS.forest = {
     '梯子：走到梯子下按住 F 往上爬，S 往下，空格跳下来',
     '寺门前有两座香火台：拿着点燃的蜡烛走过去按 F 供上，寺前一片都亮了（有顶棚，不怕雨）',
     '山风一起，枯枝会砸下来，落点先出现红圈',
+    '东边断崖上挂着瀑布，瀑布旁的山洞能躲雨躲雷，崖北头有一道碎石坡可以爬上崖顶',
+    '几棵瞭望树之间拉着滑索：站在树台上按 F 滑到另一棵，滑的时候挨打会掉下去',
+    '林子里会长出发光的草药：红的血参回血，蓝的疾风果让你跑得更快，采了过一会儿换个地方再长',
+    '草里藏着猎人的捕兽夹，走近几步才看得见，踩中动不了两秒；东南猎户营地的架子上可以拿夹子自己布',
+    '东南有一片沼泽：蹚进去又慢又中瘴毒，雾里互相看不清，适合埋伏',
+    '西北竹林密得能藏人；石灯笼小路和营地篝火夜里会亮，走进光里就会被看见',
+    '南边有座倒塌的古塔，顺着碎砖坡能爬上半截塔身居高临下（打雷时最危险）',
   ],
   homeClass: 'Ranger',
   homeClassName: '暗器',
@@ -990,6 +1255,9 @@ export const mapRuntime = {
   viewSide: 0,
   /** 悬空栈道: bridge planks (hp per plank, 0 = broken; regrow seconds left), the mountain wind, who is on the chain */
   plank: { hp: [] as number[][], regrow: [] as number[][], gustWarn: 0, gust: 0, gustDir: [0, 1] as [number, number], gustNext: 20 },
+  /** 青冥古林: herbs growing (kind 0 血参 heals, 1 疾风果 hastens; t: seconds until it grows back when picked), traps
+   * on the ground (owner side, -1 = the hunters'; sprung: seconds since it snapped, -1 = still set) */
+  wood: { herbs: [] as { x: number; z: number; kind: number; t: number }[], traps: [] as { x: number; z: number; owner: number; sprung: number }[] },
   desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0, gate: [0, 0] as number[], gateTo: [0, 0] as number[], gateCd: [0, 0] as number[], wells: [] as { t: number; x: number; y: number; z: number; yaw: number }[], tornado: null as null | { x: number; z: number; vx: number; vz: number; a: number; life: number } },
 };
 

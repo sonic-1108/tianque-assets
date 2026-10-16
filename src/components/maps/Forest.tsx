@@ -5,8 +5,9 @@ import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, FGROW, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT, CUSHIONS } from '../../maps';
+import { FOREST, FOREST_X, zipLine, FGROW, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT, CUSHIONS } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
+import { ForestExtras } from './ForestExtras';
 
 // ==================================================================
 // 青冥古林: a clearing among thousand-year-old trees. Sunlight breaks
@@ -461,7 +462,7 @@ function River() {
     const depth: number[] = [];
     const idx: number[] = [];
     const x0 = -(R + 90);
-    const x1 = R + 90;
+    const x1 = FOREST_X.pool.x - 8; // from here the pool's own water takes over (and the bluff above it)
     const n = Math.round((x1 - x0) * 2);
     const across = 14;
     const W = FOREST.bankHalf + 1.5;
@@ -947,6 +948,15 @@ function blocked(x: number, z: number, pad: number) {
   for (const [tx, tz, r] of FOREST.trees) if (Math.hypot(x - tx, z - tz) < r + pad) return true;
   return false;
 }
+/** nothing grows on the bluff, the pagoda, the campfire's trodden ground or the paved path */
+const bare = (x: number, z: number) => {
+  const X = FOREST_X;
+  if (x > X.bluff.x0 - 1.5 && z > X.bluff.z0 - 1.5 && z < X.bluff.z1 + 1.5) return true;
+  if (Math.hypot(x - X.pagoda.x, z - X.pagoda.z) < X.pagoda.base + 1) return true;
+  if (Math.hypot(x - X.camp.x, z - X.camp.z) < 9) return true;
+  if (Math.abs(z - X.ramp.z) < X.ramp.half + 0.5 && x > X.ramp.x0 && x < X.ramp.x1) return true;
+  return false;
+};
 /** dry ground (no grass in the water) */
 const dry = (x: number, z: number, pad = 0.15) => floorAt(x, z) > FOREST.waterY + pad;
 /** the temple's paved hilltop and its stone stairs: nothing grows there */
@@ -969,7 +979,7 @@ function Grass() {
       const t = rand() * Math.PI * 2;
       const x = Math.cos(t) * r;
       const z = Math.sin(t) * r;
-      if (!dry(x, z) || blocked(x, z, 0.3) || paved(x, z)) continue;
+      if (!dry(x, z) || blocked(x, z, 0.3) || paved(x, z) || bare(x, z)) continue;
       // clumped: lush in patches and along the banks, thin on the worn ground
       const patch = vnoiseJS(x * 0.08, z * 0.08);
       const bank = Math.abs(z - riverZ(x)) < FOREST.bankHalf + 3 ? 0.5 : 0;
@@ -1047,7 +1057,7 @@ function Ferns() {
       const side = rand() < 0.5 ? -1 : 1;
       spots.push([x, riverZ(x) + side * (FOREST.bankHalf + 0.5 + rand() * 2.5), 0.7 + rand() * 0.5]);
     }
-    const ok = spots.filter(([x, z]) => dry(x, z, 0.2) && !paved(x, z));
+    const ok = spots.filter(([x, z]) => dry(x, z, 0.2) && !paved(x, z) && !bare(x, z));
     const im = new THREE.InstancedMesh(geo, mat, ok.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -2692,6 +2702,10 @@ function FMarkers() {
     }
     return out;
   }, []);
+  const zipEnds = useMemo(() => FOREST_X.zips.flatMap((_, k) => {
+    const Z = zipLine(k);
+    return [[Z.ax, Z.deckA + 1.6, Z.az], [Z.bx, Z.deckB + 1.6, Z.bz]] as [number, number, number][];
+  }), []);
   const [active, setActive] = useState<{ x: number; y: number; z: number; label: string } | null>(null);
   const activeRef = useRef('');
   const group = useRef<THREE.Group>(null);
@@ -2711,6 +2725,9 @@ function FMarkers() {
       if (it.label === '蜡烛' && mapRuntime.viewCarry === 1) return; // already carrying one
       consider(it.x, it.y, it.z, it.range, it.label);
     });
+    for (const h of mapRuntime.wood.herbs) if (h.t <= 0) consider(h.x, forestFloor(h.x, h.z) + 0.9, h.z, 3, h.kind === 0 ? '血参' : '疾风果');
+    consider(FOREST_X.camp.rack[0], forestFloor(FOREST_X.camp.rack[0], FOREST_X.camp.rack[1]) + 2.2, FOREST_X.camp.rack[1], 3.2, '捕兽夹');
+    zipEnds.forEach(([x, y, z]) => consider(x, y + 0.4, z, 2.6, '滑索'));
     for (const it of mapRuntime.items) {
       if (it.kind === 'candle' && mapRuntime.viewCarry !== 1) consider(it.x, it.y + (it.hook >= 0 ? 0.3 : 0.9), it.z, 3, '蜡烛');
       if (it.kind === 'shade') consider(it.x, it.y + 0.9, it.z, 3, '灯罩');
@@ -2776,6 +2793,7 @@ export function ForestMap() {
       <FallingLeaves />
       <StormSky />
       <Temple />
+      <ForestExtras />
       <FMarkers />
       <PlacedItems />
       <Rain />
