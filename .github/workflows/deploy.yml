@@ -52,10 +52,12 @@ jobs:
           cd relay
           # 战绩 database: Cloudflare D1 (created the first time); needs the token's D1 permission. Without it the
           # stats fall back to a Durable Object's SQLite, so the deploy goes on either way.
-          dbid=$(npx --yes wrangler@4 d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="tianque-db") | .uuid' 2>/dev/null)
+          # (every step here may fail without stopping the relay deploy: bash -e would otherwise end the step)
+          d1id() { npx --yes wrangler@4 d1 list --json 2>/dev/null | jq -r '.[]? | select(.name=="tianque-db") | .uuid' 2>/dev/null || true; }
+          dbid=$(d1id || true)
           if [ -z "$dbid" ]; then
             npx --yes wrangler@4 d1 create tianque-db > ../d1.log 2>&1 || true
-            dbid=$(npx --yes wrangler@4 d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="tianque-db") | .uuid' 2>/dev/null)
+            dbid=$(d1id || true)
           fi
           if [ -n "$dbid" ]; then
             printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "tianque-db"\ndatabase_id = "%s"\n' "$dbid" >> wrangler.toml
