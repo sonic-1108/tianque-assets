@@ -80,6 +80,6 @@ export const AI_LEVELS: Record<AiLevel, { name: string; think: number; react: nu
   // reflex: chance (per swing / shot) of an instant block, sidestep or punish; cc: how long your stuns hold it
   easy: { name: '简单', think: 0.55, react: 0.3, out: 0.6, in: 1.35, cd: 0.8, mp: 0.8, reflex: 0, cc: 1.2 },
   normal: { name: '中等', think: 1, react: 0.75, out: 1, in: 1, cd: 1, mp: 1, reflex: 0, cc: 1 },
-  hard: { name: '困难', think: 1.6, react: 0.97, out: 1.45, in: 0.65, cd: 1.5, mp: 1.5, reflex: 0.65, cc: 0.75 },
-  hell: { name: '地狱', think: 2.6, react: 1, out: 2.3, in: 0.36, cd: 2.2, mp: 2.4, reflex: 0.97, cc: 0.45 },
+  hard: { name: '困难', think: 1.6, react: 0.97, out: 1.15, in: 0.8, cd: 1.15, mp: 1.15, reflex: 0.65, cc: 0.8 },
+  hell: { name: '地狱', think: 2.6, react: 1, out: 1.35, in: 0.6, cd: 1.35, mp: 1.35, reflex: 0.97, cc: 0.55 },
 };
