@@ -1337,6 +1337,9 @@ function GameImpl({
       }
     }
     mapRuntime.viewSide = sideOf(p1);
+    mapRuntime.viewX = p1.pos[0];
+    mapRuntime.viewZ = p1.pos[2];
+    mapRuntime.camYaw = controller ? controller.yaw : 0;
     if (map.id === 'desert') {
       // inside a room the air is clear: only a little of the storm's haze
       const sd = mapRuntime.desert.sand * (desertIndoor(camera.position.x, camera.position.z, camera.position.y - 1.5) ? 0.2 : 1);
@@ -1394,6 +1397,14 @@ function GameImpl({
       fixedLightAt(x, z) ||
       mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? (TREE_HOOKS[it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground));
     const hiddenInDark = ((en.stealthT ?? 0) > 0) || ((en.burrowT ?? 0) > 0) || lostInSand(en, enDist) || (map.id === 'forest' && enDist > 7 && (inSwamp(en.pos[0], en.pos[2]) || inSwamp(p1.pos[0], p1.pos[2]))) || (map.id === 'forest' && mapRuntime.night > 0.55 && en.candle !== 2 && enDist > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(en.pos[0], en.pos[2]) && !sheltered(en.pos[0], en.pos[2], en.pos[1]));
+    {
+      // the same test for everyone, for the minimap: teammates always show, foes only when you could see them
+      const hidden = (c: CombatantState) => {
+        const d = Math.hypot(c.pos[0] - p1.pos[0], c.pos[2] - p1.pos[2]);
+        return (c.stealthT ?? 0) > 0 || (c.burrowT ?? 0) > 0 || lostInSand(c, d) || (map.id === 'forest' && d > 7 && (inSwamp(c.pos[0], c.pos[2]) || inSwamp(p1.pos[0], p1.pos[2]))) || (map.id === 'forest' && mapRuntime.night > 0.55 && c.candle !== 2 && d > (p1.candle === 2 ? CANDLE_LIGHT.hand : 3) && !litNear(c.pos[0], c.pos[2]) && !sheltered(c.pos[0], c.pos[2], c.pos[1]));
+      };
+      mapRuntime.seen = fighters.map((c) => c === p1 || (N > 2 && (c.side ?? 0) === (p1.side ?? 0)) || !hidden(c));
+    }
     {
       // React state only when something visible changes (or ~8 times a second for the edge arrow); the name tag
       // itself is moved every frame without a re-render

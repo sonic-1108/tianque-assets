@@ -1257,6 +1257,10 @@ export const mapRuntime = {
   plank: { hp: [] as number[][], regrow: [] as number[][], gustWarn: 0, gust: 0, gustDir: [0, 1] as [number, number], gustNext: 20 },
   /** 青冥古林: herbs growing (kind 0 血参 heals, 1 疾风果 hastens; t: seconds until it grows back when picked), traps
    * on the ground (owner side, -1 = the hunters'; sprung: seconds since it snapped, -1 = still set) */
+  /** per fighter: can the local player see them right now (night, the bog's mist, stealth); the minimap uses it */
+  seen: [] as boolean[],
+  /** the camera's yaw (the minimap turns with it) */
+  camYaw: 0,
   wood: { herbs: [] as { x: number; z: number; kind: number; t: number }[], traps: [] as { x: number; z: number; owner: number; sprung: number }[] },
   desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0, gate: [0, 0] as number[], gateTo: [0, 0] as number[], gateCd: [0, 0] as number[], wells: [] as { t: number; x: number; y: number; z: number; yaw: number }[], tornado: null as null | { x: number; z: number; vx: number; vz: number; a: number; life: number } },
 };
