@@ -866,8 +866,11 @@ function GameImpl({
 
     // Everyone else: the AI, a guest's controls, or (training dummy) nothing
     const intents: Intent[] = fighters.map((c, i) => (i === ME ? playerIntent : { move: new THREE.Vector3(), faceYaw: yawTo(c.pos, foes[i].pos), request: null, block: false }));
+    // balance tests (__TQ_SIM): the player's seat is played by the AI too
+    const SIM = !!(globalThis as any).__TQ_SIM;
+    if (SIM) intents[ME] = { move: new THREE.Vector3(), faceYaw: yawTo(fighters[ME].pos, foes[ME].pos), request: null, block: false };
     for (let i = 0; i < N; i++) {
-      if (i === ME) continue;
+      if (i === ME && !SIM) continue;
       const c = fighters[i];
       const it = intents[i];
       const seat = seatsNow[i];
@@ -2302,6 +2305,7 @@ function GameImpl({
     }
     /** an AI fighting against the player (not an ally, not a remote player, not online) */
     function isEnemyAI(f: CombatantState) {
+      if ((globalThis as any).__TQ_SIM) return true; // balance tests: every fighter is an AI at the chosen level
       if (net || !aiOn) return false;
       const me = fighters[ME];
       return f !== me && (f.side ?? 0) !== (me.side ?? 0) && seatsNow[fighters.indexOf(f)]?.ctl !== 'remote';
@@ -2478,7 +2482,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * aiLevelDmg(att, def) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * aiLevelDmg(att, def) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -4155,6 +4159,7 @@ function GameImpl({
     // ======================================================
     // MAP SYSTEM
     // ======================================================
+    (globalThis as any).__TQ_RESET = () => resetRound(true); // balance tests: end a stalemate
     function resetRound(fromKO: boolean) {
       round.over = false;
       if (map.id === 'sea') {
@@ -8445,7 +8450,8 @@ function GameImpl({
     }
   };
   useFrame((_, delta) => {
-    const n = Math.max(1, Math.min(20, (globalThis as any).__TQ_TURBO | 0 || 1));
+    const n = Math.max(1, Math.min((globalThis as any).__TQ_SIM ? 80 : 20, (globalThis as any).__TQ_TURBO | 0 || 1));
+    (globalThis as any).__TQ_GT = gameTimeRef.current;
     for (let k = 0; k < n; k++) mainTick(n > 1 ? 0.033 : delta);
   });
 
