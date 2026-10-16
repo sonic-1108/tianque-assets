@@ -2482,7 +2482,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * aiLevelDmg(att, def) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * aiLevelDmg(att, def) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.6 : 1.4) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -4195,7 +4195,7 @@ function GameImpl({
       });
       for (const c of fighters) {
         const cc = CLASS_CONFIGS[c.classId];
-        c.maxHp = isBossFighter(c) ? 5200 : cc.hp;
+        c.maxHp = isBossFighter(c) ? 6500 : cc.hp; // 长安 boss (was 5200)
         c.maxMp = cc.mp;
         c.name = cc.name;
         c.characterName = cc.defaultCharacter;
@@ -6611,19 +6611,19 @@ function GameImpl({
       const level = (f: CombatantState) => Math.abs(f.pos[1] - e.pos[1]) < 2.4;
       const front = others.filter((f) => level(f) && flat(f) < 5);
       if (E.might <= 0 && (front.filter((f) => flat(f) < 3.5).length >= 2 || near < 2.2)) {
-        E.might = wrath ? 6 : 9;
+        E.might = wrath ? 5 : 7.5;
         startEmpMove(ei, 'might', -1);
         return;
       }
       if (E.sweep <= 0 && front.length) {
-        E.sweep = wrath ? 5 : 7;
+        E.sweep = wrath ? 4 : 5.8;
         startEmpMove(ei, 'sweep', fighters.indexOf(front.sort((a, b) => flat(a) - flat(b))[0]));
         return;
       }
       const mid = others.filter((f) => flat(f) > (wrath ? 2.5 : 5) && flat(f) < 22);
       if (E.dragon <= 0 && mid.length) {
         const tgt = mid.find((f) => mapRuntime.seal?.state === 2 && fighters.indexOf(f) === mapRuntime.seal.holder) ?? mid[Math.floor(Math.random() * mid.length)];
-        E.dragon = wrath ? 11 : 16;
+        E.dragon = wrath ? 9 : 13;
         startEmpMove(ei, 'dragon', fighters.indexOf(tgt));
         return;
       }
@@ -6631,7 +6631,7 @@ function GameImpl({
         E.arrows = 1;
         const far = others.filter((f) => flat(f) > 5 && flat(f) < 26);
         if (far.length) {
-          E.arrows = wrath ? 8 : 12;
+          E.arrows = wrath ? 6.5 : 10;
           far.sort(() => Math.random() - 0.5);
           for (const f of far.slice(0, 2)) empArrows(ei, f.pos[0], f.pos[2]);
           (globalThis as any).__TQ_EMPLOG?.push('arrows');
