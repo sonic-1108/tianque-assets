@@ -75,11 +75,11 @@ export const QUALITY = {
  * AI difficulty. think: how often it decides (x normal); react: chance it reacts to an incoming swing (block,
  * dodge, counter); out / in: damage it deals / takes (enemy AI only, never online).
  */
-export const AI_LEVELS: Record<AiLevel, { name: string; think: number; react: number; out: number; in: number; cd: number; mp: number; reflex: number }> = {
+export const AI_LEVELS: Record<AiLevel, { name: string; think: number; react: number; out: number; in: number; cd: number; mp: number; reflex: number; cc: number }> = {
   // think: decisions x; react: notices your swings; out/in: damage dealt/taken; cd/mp: cooldown and mana speed;
-  // reflex: chance (per swing) of an instant block/sidestep, and of punishing your recovery at once
-  easy: { name: '简单', think: 0.55, react: 0.3, out: 0.6, in: 1.35, cd: 0.8, mp: 0.8, reflex: 0 },
-  normal: { name: '中等', think: 1, react: 0.75, out: 1, in: 1, cd: 1, mp: 1, reflex: 0 },
-  hard: { name: '困难', think: 1.5, react: 0.95, out: 1.3, in: 0.75, cd: 1.35, mp: 1.4, reflex: 0.55 },
-  hell: { name: '地狱', think: 2.4, react: 1, out: 1.8, in: 0.5, cd: 1.9, mp: 2, reflex: 0.92 },
+  // reflex: chance (per swing / shot) of an instant block, sidestep or punish; cc: how long your stuns hold it
+  easy: { name: '简单', think: 0.55, react: 0.3, out: 0.6, in: 1.35, cd: 0.8, mp: 0.8, reflex: 0, cc: 1.2 },
+  normal: { name: '中等', think: 1, react: 0.75, out: 1, in: 1, cd: 1, mp: 1, reflex: 0, cc: 1 },
+  hard: { name: '困难', think: 1.6, react: 0.97, out: 1.45, in: 0.65, cd: 1.5, mp: 1.5, reflex: 0.65, cc: 0.75 },
+  hell: { name: '地狱', think: 2.6, react: 1, out: 2.3, in: 0.36, cd: 2.2, mp: 2.4, reflex: 0.97, cc: 0.45 },
 };

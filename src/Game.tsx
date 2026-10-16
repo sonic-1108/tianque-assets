@@ -2330,6 +2330,33 @@ function GameImpl({
         return;
       }
       if (!isFree(c) || !c.isGrounded) return;
+      // something flying at it (darts, knives, 六字真言 seals): roll out of its line
+      const side = (vx: number, vz: number) => {
+        const l = Math.hypot(vx, vz) || 1;
+        const sgn = (A.rxSide = A.rxSide ?? (Math.random() < 0.5 ? 1 : -1));
+        return [(-vz / l) * sgn, (vx / l) * sgn];
+      };
+      const incoming = (px: number, pz: number, vx: number, vz: number, owner: number) => {
+        const o = fighters[owner];
+        if (!o || (o.side ?? 0) === (c.side ?? 0)) return false;
+        const dx = c.pos[0] - px;
+        const dz = c.pos[2] - pz;
+        const along = (dx * vx + dz * vz) / (Math.hypot(vx, vz) || 1);
+        if (along < 0 || along > 6) return false;
+        const lat = Math.abs(dx * vz - dz * vx) / (Math.hypot(vx, vz) || 1);
+        return lat < 1.3;
+      };
+      A.rxSeen = A.rxSeen ?? new WeakSet<object>();
+      for (const pr of [...projRef.current, ...glyphRef.current] as any[]) {
+        if (A.rxSeen.has(pr) || !incoming(pr.pos.x, pr.pos.z, pr.vel.x, pr.vel.z, pr.slot)) continue;
+        A.rxSeen.add(pr);
+        if (Math.random() > L.reflex) continue;
+        const [sx, sz] = side(pr.vel.x, pr.vel.z);
+        it.move.set(sx, 0, sz);
+        if ((c.stamina ?? 100) >= 25 && c.dodgeCooldownTimer <= 0 && map.id !== 'plankway') it.request = 'dodge';
+        else it.block = c.classId !== 'Ranger';
+        return;
+      }
       const fst = foe.actionState;
       const ph = phaseOf(foe).phase;
       const swing = SWING_STATES.has(fst) || fst === 'skill_4';
@@ -2371,12 +2398,33 @@ function GameImpl({
         it.block = false;
         it.faceYaw = yawTo(c.pos, foe.pos);
         it.request = c.classId === 'Ranger' ? 'attack' : Math.random() < 0.35 && (c.cooldowns.skill1 ?? 0) <= 0 ? 'skill1' : 'attack';
+        return;
+      }
+      // the foe is casting from range (a barrage that tracks where it stands): keep moving, zig-zag, roll
+      if ((fst.startsWith('skill_') || fst === 'ultimate') && dist > 3.5 && L.reflex > 0.5) {
+        A.rxZig = (A.rxZig ?? 0) - dt;
+        if (A.rxZig <= 0) {
+          A.rxZig = 0.35 + Math.random() * 0.3;
+          A.rxSide = -(A.rxSide ?? 1);
+        }
+        const [sx, sz] = side(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+        it.move.set(sx * 0.9 + ((foe.pos[0] - c.pos[0]) / (dist || 1)) * 0.4, 0, sz * 0.9 + ((foe.pos[2] - c.pos[2]) / (dist || 1)) * 0.4);
+        if (it.move.lengthSq() > 1) it.move.normalize();
+        if (!it.request && Math.random() < dt * 1.5 && (c.stamina ?? 100) >= 40 && map.id !== 'plankway') it.request = 'dodge';
+        return;
+      }
+      // pressure: in reach and nothing better to do, keep swinging
+      if (!swing && dist < 2.6 && !it.request && !it.block && Math.random() < dt * 6 * L.reflex) {
+        it.faceYaw = yawTo(c.pos, foe.pos);
+        it.request = 'attack';
       }
     }
     function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
       if (def.hp <= 0) return;
       if (att !== def && (att.side ?? 0) === (def.side ?? 0)) return; // no friendly fire
       const o = { ...oIn };
+      // 难度: your stuns don't hold a hard or hell AI as long
+      if (o.dur && isEnemyAI(def)) o.dur *= (AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal).cc;
       const attackerIsPlayer = slot === ME;
       const hitDir = vC.set(def.pos[0] - att.pos[0], 0, def.pos[2] - att.pos[2]).normalize();
       const chest = vB.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]).addScaledVector(hitDir, -0.35);
