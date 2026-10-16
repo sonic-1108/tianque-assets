@@ -439,6 +439,8 @@ function GameImpl({
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
   const newAiMem = (): AIMemory => ({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
   const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newAiMem));
+  /** 青冥古林 at night: where each AI last saw (or heard) its foe, and where it's poking about now */
+  const darkMemRef = useRef<({ x: number; z: number; wx: number; wz: number; hp: number; t: number } | undefined)[]>([]);
 
   // ---------- VFX ----------
   const vfx = useMemo(() => {
@@ -864,6 +866,50 @@ function GameImpl({
       ultHeld: !!actions.ultimate,
     };
 
+    // 青冥古林 at night the AI is as blind as you are: it sees a foe only by candlelight (theirs, its own, or one
+    // set down near them), under the temple roofs (lamps), or right up close. Otherwise it goes to where it last
+    // saw or heard them and gropes about. Being hit, or someone running past within a few steps, gives them away.
+    const candleLitAt = (x: number, z: number) =>
+      mapRuntime.items.some((it) => it.kind === 'candle' && it.lit && Math.hypot(it.x - x, it.z - z) < (it.hook >= 0 ? (TREE_HOOKS[it.hook]?.stand ? CANDLE_LIGHT.stand : CANDLE_LIGHT.hook) : CANDLE_LIGHT.ground));
+    const aiSees = (c: CombatantState, foe: CombatantState) => {
+      if (map.id !== 'forest' || mapRuntime.night <= 0.55) return true;
+      const d = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      return foe.candle === 2 || d <= (c.candle === 2 ? CANDLE_LIGHT.hand : 3) || candleLitAt(foe.pos[0], foe.pos[2]) || sheltered(foe.pos[0], foe.pos[2], foe.pos[1]);
+    };
+    /** true when the AI is groping in the dark this tick (it has set its own intent) */
+    const aiInDark = (i: number, c: CombatantState, foe: CombatantState, it: Intent) => {
+      const mem = (darkMemRef.current[i] ??= { x: foe.pos[0], z: foe.pos[2], wx: foe.pos[0], wz: foe.pos[2], hp: c.hp, t: 0 });
+      const d = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      const hurt = c.hp < mem.hp - 0.5;
+      mem.hp = c.hp;
+      const heard = (hurt && d < 12) || (d < 6 && Math.hypot(foe.vel[0], foe.vel[2]) > 5);
+      if (aiSees(c, foe) || heard) {
+        mem.x = mem.wx = foe.pos[0];
+        mem.z = mem.wz = foe.pos[2];
+        mem.t = 0;
+        if (aiSees(c, foe)) return false;
+      }
+      // feel the way to where they were, then cast about round it
+      mem.t += dt;
+      let tx = mem.wx - c.pos[0];
+      let tz = mem.wz - c.pos[2];
+      if (Math.hypot(tx, tz) < 1.5 || mem.t > 7) {
+        const a = Math.random() * Math.PI * 2;
+        const r = 3 + Math.random() * 10;
+        mem.wx = mem.x + Math.cos(a) * r;
+        mem.wz = mem.z + Math.sin(a) * r;
+        mem.t = 0;
+        tx = mem.wx - c.pos[0];
+        tz = mem.wz - c.pos[2];
+      }
+      const L = Math.max(0.001, Math.hypot(tx, tz));
+      it.move.set((tx / L) * 0.55, 0, (tz / L) * 0.55);
+      it.faceYaw = Math.atan2(-tx, -tz);
+      it.request = null;
+      it.block = false;
+      return true;
+    };
+
     // Everyone else: the AI, a guest's controls, or (training dummy) nothing
     const intents: Intent[] = fighters.map((c, i) => (i === ME ? playerIntent : { move: new THREE.Vector3(), faceYaw: yawTo(c.pos, foes[i].pos), request: null, block: false }));
     // balance tests (__TQ_SIM): the player's seat is played by the AI too
@@ -887,7 +933,7 @@ function GameImpl({
         r.reqTtl -= dt;
         if (r.reqTtl <= 0) r.req = null;
       } else if (aiOn && !round.over && c.hp > 0) {
-        if (!(N > 2 && aiGoRevive(i, c, it))) {
+        if (!(N > 2 && aiGoRevive(i, c, it)) && !aiInDark(i, c, foes[i], it)) {
           runAI(c, foes[i], it, dt);
           if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
           if (map.id === 'forest') leaveLookout(c, foes[i], it);
@@ -4304,6 +4350,7 @@ function GameImpl({
       mapRuntime.branches.length = 0;
       forestRef.current.timer = 14;
       weatherRef.current = { t: 12, phase: '', strike: 6, warn: 0 };
+      darkMemRef.current = [];
       mapRuntime.night = 0;
       mapRuntime.skyFlash = 0;
       mapRuntime.shadeSpot = Math.floor(Math.random() * FOREST.shadeSpots.length);
