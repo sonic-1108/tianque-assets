@@ -2723,7 +2723,11 @@ function GameImpl({
       if (c.classId === 'Emperor' && !c.actionState.startsWith('attack_')) return; // his skills land in updateEmperor
       const fwd = fwdOf(c.rotY).clone();
       // melee can't reach someone standing on a pillar above you (and vice versa)
-      let dist = Math.abs(foe.pos[1] - c.pos[1]) > 2.2 ? 99 : Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      // how far up or down a blade reaches: 2.2 m on the flat; on a slope (雪岭) a bit more for each metre across, so
+      // someone a few steps up the hillside in front of you isn't out of reach just because the ground rises
+      const hd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      const reachUp = 2.2 + (map.id === 'glacier' && c.isGrounded && foe.isGrounded ? Math.min(1.6, hd * 0.55) : 0);
+      let dist = Math.abs(foe.pos[1] - c.pos[1]) > reachUp ? 99 : hd;
       // nor through a wall, a cabin side or a tree trunk
       if (dist < 7.5 && !losClear(c.pos[0], c.pos[1] + 1.2, c.pos[2], foe.pos[0], foe.pos[1] + 1.2, foe.pos[2])) dist = 99;
       const inFront = (fwd.x * (foe.pos[0] - c.pos[0]) + fwd.z * (foe.pos[2] - c.pos[2])) / Math.max(0.001, dist) > 0.2;
@@ -4128,12 +4132,26 @@ function GameImpl({
       }
 
       if (ai.planTimer <= 0) ai.plan = dist > 10 ? 'approach' : dist < 5.5 ? 'retreat' : 'circle';
+      // 雪岭: no camping up the hillside out of a melee fighter's reach; when it's well above them it comes back down
+      // (backing off sideways or downhill instead of up)
+      const above = me.pos[1] - foe.pos[1];
+      if (map.id === 'glacier' && above > 1.4 && foe.classId !== 'Ranger') {
+        if (ai.plan === 'retreat') ai.plan = 'circle';
+        if (above > 2.6) ai.plan = 'approach';
+      }
       switch (ai.plan) {
         case 'approach':
           out.move.copy(toFoe).addScaledVector(side, 0.3 * ai.strafe);
           break;
         case 'retreat':
           out.move.copy(toFoe).multiplyScalar(-1).addScaledVector(side, 0.5 * ai.strafe);
+          if (map.id === 'glacier') {
+            // never back away uphill: slide along or down the slope instead
+            const [gx, gz] = terrainGradient(map.id, me.pos[0], me.pos[2]);
+            const up = out.move.x * gx + out.move.z * gz;
+            if (up > 0) out.move.set(out.move.x - gx * up * 1.2, 0, out.move.z - gz * up * 1.2);
+            if (out.move.lengthSq() > 1) out.move.normalize();
+          }
           break;
         default: {
           // circle at kiting range (6-9 m)
