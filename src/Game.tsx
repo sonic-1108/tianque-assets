@@ -722,9 +722,12 @@ function GameImpl({
 
     // ---------- shared timers ----------
     for (const c of fighters) {
+      // 难度: the enemy AI's cooldowns and mana come back faster on the harder levels
+      const lvlK = isEnemyAI(c) ? AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal : null;
+      const cdDt = dt * (lvlK ? lvlK.cd : 1);
       for (const k of Object.keys(c.cooldowns)) {
         const v = c.cooldowns[k];
-        c.cooldowns[k] = typeof v !== 'number' || isNaN(v) ? 0 : Math.max(0, v - dt);
+        c.cooldowns[k] = typeof v !== 'number' || isNaN(v) ? 0 : Math.max(0, v - cdDt);
       }
       c.buffs = c.buffs.map((b) => ({ ...b, duration: b.duration - dt })).filter((b) => b.duration > 0);
       if (c.hitStopTimer > 0) c.hitStopTimer -= rawDt;
@@ -738,7 +741,7 @@ function GameImpl({
           c.comboDamage = 0;
         }
       }
-      c.mp = Math.min(c.maxMp, c.mp + dt * 8);
+      c.mp = Math.min(c.maxMp, c.mp + dt * 8 * (lvlK ? lvlK.mp : 1));
       if ((c.counterTimer ?? 0) > 0) c.counterTimer = (c.counterTimer ?? 0) - dt;
       if ((c.rootTimer ?? 0) > 0) c.rootTimer = (c.rootTimer ?? 0) - dt;
       if ((c.doubleJumpTimer ?? 0) > 0) c.doubleJumpTimer = (c.doubleJumpTimer ?? 0) - dt;
@@ -891,6 +894,7 @@ function GameImpl({
           if (map.id === 'rooftop') routeRooftop(i, c, foes[i], it);
           if (N > 2) teamSpacing(i, c, foes[i], it);
           aiHitRoyal(i, c, it);
+          aiReflex(i, c, foes[i], it);
         }
       } else if (!aiOn) {
         it.faceYaw = c.targetRotY;
@@ -2296,13 +2300,78 @@ function GameImpl({
         if (def.hp < hp0) crackPlank(def, oIn.heavy || (oIn.launch ?? 0) > 0 || (oIn.knock ?? 0) > 3 ? 2 : 1);
       }
     }
+    /** an AI fighting against the player (not an ally, not a remote player, not online) */
+    function isEnemyAI(f: CombatantState) {
+      if (net || !aiOn) return false;
+      const me = fighters[ME];
+      return f !== me && (f.side ?? 0) !== (me.side ?? 0) && seatsNow[fighters.indexOf(f)]?.ctl !== 'remote';
+    }
     /** 难度: the enemy AI hits harder / takes less (or the other way) by level; allies and online play are untouched */
     function aiLevelDmg(att: CombatantState, def: CombatantState) {
-      if (net || !aiOn) return 1;
       const L = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
-      const me = fighters[ME];
-      const enemyAI = (f: CombatantState) => f !== me && (f.side ?? 0) !== (me.side ?? 0) && seatsNow[fighters.indexOf(f)]?.ctl !== 'remote';
-      return (enemyAI(att) ? L.out : 1) * (enemyAI(def) ? L.in : 1);
+      return (isEnemyAI(att) ? L.out : 1) * (isEnemyAI(def) ? L.in : 1);
+    }
+    /**
+     * 难度 困难/地狱: a reflex layer over whatever the AI decided. A swing coming at it gets blocked or sidestepped on
+     * the spot; the moment its foe is stuck in a move's recovery (a whiff, a long skill) it strikes; when it's
+     * knocked about it breaks free at once. Each foe swing is judged once, so it isn't perfect.
+     */
+    function aiReflex(i: number, c: CombatantState, foe: CombatantState, it: Intent) {
+      if (!isEnemyAI(c) || !foe || foe.hp <= 0 || c.hp <= 0) return;
+      const L = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      if (L.reflex <= 0) return;
+      const A = aiRefs.current[i] as any;
+      const st = c.actionState;
+      const dist = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      // knocked about: 受身 straight away
+      if ((st === 'hitstun' || st === 'launched' || st === 'knockdown') && (c.cooldowns.breakout ?? 0) <= 0 && (c.stunLoad ?? 0) >= 1) {
+        if (A.rxBreak !== c.stateTimer && Math.random() < L.reflex * 0.6) it.request = 'dodge';
+        A.rxBreak = c.stateTimer;
+        return;
+      }
+      if (!isFree(c) || !c.isGrounded) return;
+      const fst = foe.actionState;
+      const ph = phaseOf(foe).phase;
+      const swing = SWING_STATES.has(fst) || fst === 'skill_4';
+      // a new foe swing: decide once whether this one gets read
+      const key = fst + ':' + Math.round(foe.stateDuration * 100);
+      if (swing && A.rxKey !== key) {
+        A.rxKey = key;
+        A.rxRead = Math.random() < L.reflex;
+        A.rxPunished = false;
+      }
+      if (!swing) A.rxKey = '';
+      const reach = fst.startsWith('attack_') ? 3.4 : 6;
+      const facingMe = (() => {
+        const fx = -Math.sin(foe.rotY);
+        const fz = -Math.cos(foe.rotY);
+        const dx = c.pos[0] - foe.pos[0];
+        const dz = c.pos[2] - foe.pos[2];
+        const d = Math.hypot(dx, dz) || 1;
+        return (dx * fx + dz * fz) / d > 0.3;
+      })();
+      if (swing && A.rxRead && dist < reach && facingMe && (ph === 'startup' || ph === 'active')) {
+        // incoming: a sidestep roll if it has the legs for it, otherwise the guard
+        if ((c.stamina ?? 100) >= 30 && c.dodgeCooldownTimer <= 0 && Math.random() < 0.45 && map.id !== 'plankway') {
+          const sx = -(foe.pos[2] - c.pos[2]) / (dist || 1);
+          const sz = (foe.pos[0] - c.pos[0]) / (dist || 1);
+          const sgn = Math.random() < 0.5 ? 1 : -1;
+          it.move.set(sx * sgn, 0, sz * sgn);
+          it.request = 'dodge';
+        } else {
+          it.block = c.classId !== 'Ranger';
+          it.request = null;
+          it.move.set(0, 0, 0);
+        }
+        return;
+      }
+      // the foe is stuck finishing a move (or whiffed): punish it
+      if (swing && ph === 'recovery' && A.rxRead && !A.rxPunished && dist < 3.2) {
+        A.rxPunished = true;
+        it.block = false;
+        it.faceYaw = yawTo(c.pos, foe.pos);
+        it.request = c.classId === 'Ranger' ? 'attack' : Math.random() < 0.35 && (c.cooldowns.skill1 ?? 0) <= 0 ? 'skill1' : 'attack';
+      }
     }
     function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
       if (def.hp <= 0) return;
