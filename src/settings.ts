@@ -10,6 +10,8 @@ export interface Settings {
   amb: number;
   /** camera sensitivity multiplier, 0.4..2 */
   sens: number;
+  /** the player chose the quality themselves (in 设置); otherwise it is the default, high */
+  qualityPicked?: boolean;
 }
 const KEY = 'tq_settings';
 const DEFAULTS: Settings = { quality: 'high', sfx: 0.9, music: 0.8, amb: 0.8, sens: 1 };
@@ -17,7 +19,14 @@ const DEFAULTS: Settings = { quality: 'high', sfx: 0.9, music: 0.8, amb: 0.8, se
 function load(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) {
+      const s = { ...DEFAULTS, ...JSON.parse(raw) } as Settings;
+      // the automatic frame-rate guard used to save a lower quality for good (a few shader-compile hitches were
+      // enough to land on "low": 0.75x resolution, no anti-aliasing, no shadows). Only a quality the player
+      // picked is kept now.
+      if (!s.qualityPicked) s.quality = 'high';
+      return s;
+    }
   } catch {
     /* private mode or bad data */
   }

@@ -27,7 +27,7 @@ export function SettingsPanel() {
           <button
             key={id}
             title={tip}
-            onClick={() => setSettings({ quality: id })}
+            onClick={() => setSettings({ quality: id, qualityPicked: true })}
             className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors ${s.quality === id ? 'bg-amber-500 text-black border-amber-400' : 'bg-zinc-950 text-zinc-300 border-zinc-700 hover:border-amber-600'}`}
           >
             画质 {name}

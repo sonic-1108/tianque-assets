@@ -5,7 +5,8 @@ import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
-import { EffectComposer, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing';
+import { EffectComposer, Bloom, Vignette, ToneMapping, wrapEffect } from '@react-three/postprocessing';
+import { Effect } from 'postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig } from './constants';
@@ -307,7 +308,7 @@ function GameImpl({
   // ---- automatic quality: keep the frame rate up on laptops (retina screens render 4x the pixels)
   const setDpr = (d: number) => onAutoDpr?.(d);
   const [perfTier, setPerfTier] = useState(0); // 0 everything, 1 no ambient occlusion, 2 also no MSAA
-  const perf = useRef({ frames: 0, t0: 0, dpr: 1, max: 1, slow: 0, fast: 0, tier: 0, raisedAt: 0 });
+  const perf = useRef({ frames: 0, t0: 0, dpr: 1, max: 1, slow: 0, fast: 0, tier: 0, raisedAt: 0, last: 0, worst: 0 });
   useEffect(() => {
     const P = perf.current;
     P.max = Math.min(window.devicePixelRatio || 1, QUALITY[quality].dpr[1]);
@@ -327,32 +328,34 @@ function GameImpl({
       return;
     }
     P.frames++;
+    if (P.last) P.worst = Math.max(P.worst, now - P.last);
+    P.last = now;
     if (now - P.t0 < 1000) return;
     const fps = (P.frames * 1000) / (now - P.t0);
+    const hitch = P.worst > 180; // one long frame (a shader compiling the first time an effect shows): not a slow machine
     P.t0 = now;
     P.frames = 0;
-    if (fps < 50) {
+    P.worst = 0;
+    if (hitch) {
+      P.slow = 0;
+    } else if (fps < 45) {
       P.slow++;
       P.fast = 0;
     } else if (fps > 58) {
       P.fast++;
       P.slow = 0;
     } else P.slow = P.fast = 0;
-    if (P.slow >= 2) {
+    if (P.slow >= 4) {
       P.slow = 0;
       // a step up that made it slow again: settle at the lower resolution for good. Every resolution change
       // reallocates the render targets (a visible hitch), so going up and down every few seconds was itself
       // the stutter people saw.
       if (P.raisedAt && now - P.raisedAt < 20000) P.max = Math.max(1, P.dpr - 0.25);
       P.raisedAt = 0;
-      if (P.tier === 0 && quality === 'high') setPerfTier((P.tier = 1));
-      else if (P.dpr > 1.01) setDpr((P.dpr = Math.max(1, P.dpr - 0.25)));
-      else if (quality !== 'low') {
-        // still slow at native-ish resolution: a lighter preset (smaller shadows, coarser sea, no bloom) before going blurry
-        setSettings({ quality: quality === 'high' ? 'medium' : 'low' });
-        onRoundEvent?.({ type: 'toast', text: `画面有点卡，已自动把画质调到「${quality === 'high' ? '中' : '低'}」（设置里可改回）` });
-      } else if (P.dpr > 0.76) setDpr((P.dpr = Math.max(0.75, P.dpr - 0.25)));
-      else if (P.tier < 2) setPerfTier((P.tier = 2));
+      // only ever for this session, and never below 1x resolution or without anti-aliasing: the old guard
+      // saved "low" for good and ended at 0.75x with no anti-aliasing (big jagged edges) on fast Macs
+      if (P.dpr > 1.01) setDpr((P.dpr = Math.max(1, P.dpr - 0.25)));
+      else if (quality === 'low' && P.dpr > 0.76) setDpr((P.dpr = Math.max(0.75, P.dpr - 0.25)));
     } else if (P.fast >= 15 && P.dpr < P.max - 0.01) {
       P.fast = 0;
       P.raisedAt = now;
@@ -8069,11 +8072,33 @@ function GameImpl({
         <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
+        <SafeGrade />
       </EffectComposer>
     </group>
   );
 }
 
+
+/**
+ * A touch of saturation and contrast, applied last (after tone mapping, where colours are 0..1) and clamped.
+ * The old grading ran before bloom and pushed saturated reds below zero on Apple GPUs (black flashes);
+ * here nothing after it can spread a bad pixel, and nothing it outputs can go negative.
+ */
+class SafeGradeEffect extends Effect {
+  constructor() {
+    super(
+      'SafeGrade',
+      `void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+        vec3 c = clamp(inputColor.rgb, 0.0, 1.0);
+        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = mix(vec3(l), c, 1.12);
+        c = max((c - 0.22) * 1.1 + 0.22, 0.0); // around mid grey (linear), so it adds punch without darkening the picture
+        outputColor = vec4(clamp(c, 0.0, 1.0), inputColor.a);
+      }`
+    );
+  }
+}
+const SafeGrade = wrapEffect(SafeGradeEffect);
 
 /** 青冥古林: a candle carried in the hand: a warm light that shows you (and gives you away) in the dark */
 function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableRefObject<CombatantState>; socketsRef: React.MutableRefObject<RigSockets> }) {
