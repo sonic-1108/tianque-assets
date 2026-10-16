@@ -20,7 +20,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -893,6 +893,8 @@ function GameImpl({
         mem.t = 0;
         if (aiSees(c, foe)) return false;
       }
+      // the altars come first when there's nobody to be seen
+      if (aiGoShrine(i, c, foe, it, false)) return true;
       // feel the way to where they were, then cast about round it
       mem.t += dt;
       let tx = mem.wx - c.pos[0];
@@ -914,12 +916,73 @@ function GameImpl({
       return true;
     };
 
+    /** 祖坛: where this AI is heading (an altar, or the next step on the way to it), or null to just fight */
+    const aiShrineTarget = (i: number, c: CombatantState): [number, number] | null => {
+      const S = mapRuntime.shrine;
+      if (!S.on) return null;
+      const A = aiRefs.current[Math.max(0, i)] as any;
+      const sd = Math.min(1, c.side ?? 0);
+      A.shT = (A.shT ?? 0) - dt;
+      if (A.shT <= 0 || A.shK === undefined || (S.own[A.shK] === sd && !(S.busy[A.shK] & (sd === 0 ? 2 : 1)))) {
+        A.shT = 3 + Math.random() * 2;
+        // the nearest altar that isn't ours, or ours with the other side on it; otherwise none
+        let best = -1;
+        let bd = 1e9;
+        SHRINES.forEach((sh, k) => {
+          const theirsOn = !!(S.busy[k] & (sd === 0 ? 2 : 1));
+          if (S.own[k] === sd && !theirsOn) return;
+          // two AIs on one side spread out: the second one prefers another altar
+          const mates = fighters.filter((f, j) => j !== i && f.hp > 0 && (f.side ?? 0) === sd && (aiRefs.current[j] as any)?.shK === k).length;
+          const d = Math.hypot(sh.x - c.pos[0], sh.z - c.pos[2]) * (theirsOn ? 0.6 : 1) + mates * 60;
+          if (d < bd) {
+            bd = d;
+            best = k;
+          }
+        });
+        A.shK = best < 0 ? undefined : best;
+      }
+      if (A.shK === undefined) return null;
+      const sh = SHRINES[A.shK];
+      // the tower: up the rubble on its south side; the cave: in by its mouth
+      if (A.shK === 1 && c.pos[1] < sh.y - 1) {
+        const P = FOREST_X.pagoda;
+        const onSlope = Math.abs(c.pos[0] - P.x) < 1.3 && c.pos[2] < P.z - P.s1 + 0.6 && c.pos[2] > P.z - P.base - 5.5;
+        return onSlope ? [P.x, P.z - P.s1 + 1.2] : [P.x, P.z - P.base - 5];
+      }
+      if (A.shK === 2) {
+        const B = FOREST_X.bluff;
+        const mz = (FOREST_X.cave.mouth[0] + FOREST_X.cave.mouth[1]) / 2;
+        if (c.pos[0] < B.x0 + 0.6) return Math.hypot(c.pos[0] - (B.x0 - 1.6), c.pos[2] - mz) < 1.6 ? [B.x0 + 2.5, mz] : [B.x0 - 1.6, mz];
+      }
+      return [sh.x, sh.z];
+    };
+    /** steer toward the altar (true if it took the move over) */
+    const aiGoShrine = (i: number, c: CombatantState, foe: CombatantState, it: Intent, sees: boolean) => {
+      const tgt = aiShrineTarget(i, c);
+      if (!tgt) return false;
+      const dFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      if (sees && foe.hp > 0 && dFoe < 10) return false; // they're here: fight
+      const dx = tgt[0] - c.pos[0];
+      const dz = tgt[1] - c.pos[2];
+      const d = Math.hypot(dx, dz);
+      const A = aiRefs.current[Math.max(0, i)] as any;
+      const sh = SHRINES[A.shK];
+      const atAltar = Math.hypot(sh.x - c.pos[0], sh.z - c.pos[2]) < SHRINE.r - 1.2 && Math.abs(c.pos[1] - sh.y) < 1.5;
+      if (atAltar) it.move.set(0, 0, 0);
+      else it.move.set(dx / Math.max(0.01, d), 0, dz / Math.max(0.01, d));
+      it.faceYaw = sees ? yawTo(c.pos, foe.pos) : Math.atan2(-dx, -dz);
+      if (!sees || dFoe > 14) it.request = null;
+      it.block = false;
+      return true;
+    };
     /** 青冥古林: hurt and not pressed, go and pick a 血参; step round any trap it can see */
     const aiForestErrands = (i: number, c: CombatantState, foe: CombatantState, it: Intent) => {
       if ((c.trapT ?? 0) > 0 || c.zipW || c.treeClimb !== undefined) return;
       const W = mapRuntime.wood;
       const dFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-      if (c.hp < c.maxHp * 0.55 && dFoe > 9) {
+      const hurt = c.hp < c.maxHp * (mapRuntime.shrine.on ? 0.4 : 0.55);
+      if (!hurt) aiGoShrine(i, c, foe, it, aiSees(c, foe));
+      if (hurt && dFoe > 9) {
         let best: (typeof W.herbs)[number] | null = null;
         let bd = 32;
         for (const h of W.herbs) {
@@ -1468,7 +1531,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, shrine: { own: [...mapRuntime.shrine.own], prog: [...mapRuntime.shrine.prog], busy: [...mapRuntime.shrine.busy], score: [...mapRuntime.shrine.score], on: mapRuntime.shrine.on }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -4307,6 +4370,7 @@ function GameImpl({
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
         c.zipW = undefined;
+        c.respawnT = 0;
         c.trapT = 0;
         c.trapKit = 0;
         c.hasteT = 0;
@@ -4427,6 +4491,7 @@ function GameImpl({
       {
         // 青冥古林: six herbs growing somewhere, eight of the hunters' traps set in the grass
         const pickSome = (list: [number, number][], n: number) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
+        mapRuntime.shrine = { own: [-1, -1, -1], prog: [0, 0, 0], busy: [0, 0, 0], score: [0, 0], on: false };
         mapRuntime.wood = {
           herbs: pickSome(FOREST_X.herbSpots, 6).map(([x, z]) => ({ x, z, kind: Math.random() < 0.6 ? 0 : 1, t: 0 })),
           traps: pickSome(FOREST_X.trapSpots, 8).map(([x, z]) => ({ x, z, owner: -1, sprung: -1 })),
@@ -5046,6 +5111,88 @@ function GameImpl({
       c.stateDuration = 0.9;
       vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '松手了！', true, '#fca5a5');
     }
+    /** 祖坛: someone reached the goal */
+    function shrineWinCheck() {
+      const S = mapRuntime.shrine;
+      if (round.over || !aiOn) return;
+      const w = S.score[0] >= SHRINE.goal ? 0 : S.score[1] >= SHRINE.goal ? 1 : -1;
+      if (w < 0) return;
+      round.over = true;
+      round.timer = 3.2;
+      for (const f of fighters) if ((f.side ?? 0) === w && f.hp > 0) f.celebrate = true;
+      slowMoTimerRef.current = 0.7;
+      gameAudio.playGong();
+      onRoundEvent?.({ type: 'ko', winner: w === (p1.side ?? 0) ? 'player' : 'enemy', side: w, reason: '祖坛香火先满' });
+    }
+    /** 祖坛: capture, score, respawn */
+    function updateShrines() {
+      const S = mapRuntime.shrine;
+      S.on = aiOn;
+      SHRINES.forEach((sh, k) => {
+        const there = [0, 0];
+        for (const f of fighters) {
+          if (f.hp <= 0 || (f.side ?? 0) > 1) continue;
+          if (Math.hypot(f.pos[0] - sh.x, f.pos[2] - sh.z) < SHRINE.r && Math.abs(f.pos[1] - sh.y) < 2) there[f.side ?? 0]++;
+        }
+        S.busy[k] = there[0] && there[1] ? 3 : there[0] ? 1 : there[1] ? 2 : 0;
+        if (round.over || (there[0] > 0) === (there[1] > 0)) return; // nobody, or both: it holds
+        const sd = there[0] ? 0 : 1;
+        const dir = sd === 0 ? 1 : -1;
+        const was = S.own[k];
+        // a little faster with more of you on it
+        S.prog[k] = Math.max(-1, Math.min(1, S.prog[k] + (dir * dt * (1 + 0.35 * (Math.max(there[0], there[1]) - 1))) / SHRINE.capture));
+        if (S.prog[k] * dir >= 1 && was !== sd) {
+          S.own[k] = sd;
+          const pos = vB.set(sh.x, sh.y + 0.2, sh.z);
+          vfx.ring(pos, SHRINE.r + 0.5, sd === (p1.side ?? 0) ? '#4ade80' : '#f87171', 0.8, 0.15, 0.6);
+          vfx.sparkBurst(vC.set(sh.x, sh.y + 1.4, sh.z), 26, '#fde68a', 4, 0.07, UP, 0.7);
+          gameAudio.playPowerupChime();
+          onRoundEvent?.({ type: 'toast', text: sd === (p1.side ?? 0) ? `点燃了${sh.name}祖坛的香火` : `${sh.name}祖坛被对面占了！` });
+        } else if (was >= 0 && was !== sd && S.prog[k] * dir >= 0) {
+          // past the middle: their incense is out, the altar is nobody's until you finish lighting yours
+          S.own[k] = -1;
+          if (was === (p1.side ?? 0)) onRoundEvent?.({ type: 'toast', text: `${sh.name}祖坛的香火被掐灭了` });
+        }
+      });
+      if (!round.over && aiOn) {
+        for (const sd of [0, 1]) {
+          const n = S.own.filter((o) => o === sd).length;
+          S.score[sd] = Math.min(SHRINE.goal, S.score[sd] + SHRINE.rate[n] * dt);
+        }
+        shrineWinCheck();
+      }
+      // the fallen come back at their camp
+      fighters.forEach((c, i) => {
+        if ((c.respawnT ?? 0) <= 0) return;
+        if (c.hp > 0) {
+          c.respawnT = 0; // a teammate got them up first
+          return;
+        }
+        if (round.over) return;
+        c.respawnT = (c.respawnT ?? 0) - dt;
+        if ((c.respawnT ?? 0) > 0) return;
+        c.respawnT = 0;
+        const z = FOREST.spawnZ[Math.min(1, c.side ?? 0)];
+        const x = (Math.random() - 0.5) * 8;
+        c.pos = [x, fy(x, z, 0.5), z];
+        c.vel = [0, 0, 0];
+        c.hp = c.maxHp;
+        c.mp = c.maxMp;
+        c.isGrounded = true;
+        c.actionState = 'idle';
+        c.stateTimer = 0;
+        c.stateDuration = 0;
+        c.dodgeIframeTimer = 1.5;
+        c.celebrate = false;
+        c.revived = 0;
+        c.reviveT = 0;
+        c.swimming = false;
+        c.treeClimb = undefined;
+        c.rotY = c.targetRotY = z > 0 ? 0 : Math.PI;
+        vfx.ring(vB.set(x, c.pos[1] + 0.05, z), 2, '#fde68a', 0.6, 0.12, 0.5);
+        if (i === ME) onRoundEvent?.({ type: 'toast', text: '你在营地重生了' });
+      });
+    }
     /** 青冥古林: let go of a zip line (hit while riding): drop from where you are */
     function dropOffZip(c: CombatantState) {
       c.zipW = undefined;
@@ -5645,6 +5792,23 @@ function GameImpl({
       vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       if (def.ballista !== undefined) leaveBallista(defSlot, def);
+      if (map.id === 'forest') {
+        // 祖坛: down is not out. Back at your camp in a few seconds; the side that cut you down gets a little score
+        def.respawnT = SHRINE.respawn;
+        def.zipW = undefined;
+        def.trapT = 0;
+        if (def.candle) {
+          // what you carried falls where you fell
+          mapRuntime.items.push({ kind: 'candle', x: def.pos[0], y: fy(def.pos[0], def.pos[2], def.pos[1]), z: def.pos[2], lit: false, shade: def.shade, hook: -1 });
+          def.candle = 0;
+          def.shade = false;
+        }
+        const other = 1 - Math.min(1, def.side ?? 0);
+        mapRuntime.shrine.score[other] = Math.min(SHRINE.goal, mapRuntime.shrine.score[other] + SHRINE.koBonus);
+        onRoundEvent?.({ type: 'toast', text: defSlot === ME ? `你倒下了 · ${SHRINE.respawn} 秒后在营地重生` : `${def.tag || '对手'}倒下了 · 你方 +${SHRINE.koBonus} 分，趁现在去抢祖坛` });
+        shrineWinCheck();
+        return;
+      }
       if (map.id === 'rooftop' && fighters.some(isBossFighter)) {
         // 皇上出征: only the seal decides it. Cutting the other side down doesn't win; everyone down is a draw.
         if (isBossFighter(def)) {
@@ -7065,6 +7229,7 @@ function GameImpl({
       if (map.id === 'forest') {
         updateForest();
         updateWeather();
+        updateShrines();
       }
 
       if (map.id === 'lavacliff' && map.vents) {

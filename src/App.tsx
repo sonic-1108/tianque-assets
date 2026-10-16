@@ -18,6 +18,7 @@ import { NetSession, makeRoomCode, NetMessage, RoomSeat } from './net';
 import { defaultRoom, lineupOf, roomReady, seatGuests, SEAT_SIDE, aiName } from './room';
 import { UnitFrame, UnitStats } from './components/UnitFrame';
 import { Minimap } from './components/Minimap';
+import { ShrineHud } from './components/ShrineHud';
 import {
   GameState,
   CombatantState,
@@ -1096,6 +1097,7 @@ export default function App() {
           </div>
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
+        {mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
         {(mapId === 'forest' || mapId === 'desert') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}
         {!dummyScreenPos.visible && !dummyScreenPos.hidden && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
           <div

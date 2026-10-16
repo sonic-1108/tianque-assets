@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, FOREST_X, forestFloor, mapRuntime, riverZ, zipAt, zipLine, pagodaSlope } from '../../maps';
+import { FOREST, FOREST_X, forestFloor, mapRuntime, riverZ, zipAt, zipLine, pagodaSlope, SHRINES, SHRINE } from '../../maps';
 import { seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -1023,6 +1023,123 @@ function Traps() {
   );
 }
 
+// ---------------------------------------------------------------
+// 祖坛: a stone altar with an incense burner; its flame and the light pillar over it show whose it is,
+// and a ring on the ground fills as someone lights it
+// ---------------------------------------------------------------
+const MINE = new THREE.Color('#4ade80');
+const THEIRS = new THREE.Color('#f87171');
+const NOBODY = new THREE.Color('#e7e5e4');
+function Shrines() {
+  const parts = useMemo(
+    () =>
+      SHRINES.map(() => {
+        const ring = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          uniforms: { uProg: { value: 0 }, uCol: { value: new THREE.Color() }, uBase: { value: new THREE.Color() }, uTime: { value: 0 } },
+          vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+          fragmentShader: /* glsl */ `
+            uniform float uProg; uniform vec3 uCol; uniform vec3 uBase; uniform float uTime; varying vec2 vUv;
+            void main(){
+              vec2 p = vUv - 0.5; float r = length(p) * 2.0;
+              float band = smoothstep(0.84, 0.88, r) * (1.0 - smoothstep(0.97, 1.0, r));
+              float a = atan(p.x, p.y) / 6.28318 + 0.5;
+              float fill = step(a, abs(uProg));
+              vec3 col = mix(uBase, uCol, fill);
+              float inner = (1.0 - smoothstep(0.0, 0.84, r)) * 0.10 * (0.7 + 0.3 * sin(uTime * 2.0));
+              gl_FragColor = vec4(col, band * (0.55 + 0.4 * fill) + inner);
+            }`,
+        });
+        const beam = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          uniforms: { uCol: { value: new THREE.Color() }, uA: { value: 0 } },
+          vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+          fragmentShader: /* glsl */ `uniform vec3 uCol; uniform float uA; varying vec2 vUv;
+            void main(){ float e = 1.0 - abs(vUv.x - 0.5) * 2.0; gl_FragColor = vec4(uCol * uA * e * (1.0 - vUv.y) , 1.0); }`,
+          fog: false,
+        });
+        const flame = new THREE.SpriteMaterial({ map: glowTex('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+        return { ring, beam, flame };
+      }),
+    []
+  );
+  const lights = useRef<(THREE.PointLight | null)[]>([]);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    const S = mapRuntime.shrine;
+    const mine = mapRuntime.viewSide;
+    SHRINES.forEach((_, k) => {
+      const own = S.own[k];
+      const col = own < 0 ? NOBODY : own === mine ? MINE : THEIRS;
+      const P = parts[k];
+      // the ring fills toward whoever is lighting it
+      const lean = S.prog[k] > 0 ? 0 : 1;
+      P.ring.uniforms.uProg.value = Math.abs(S.prog[k]);
+      P.ring.uniforms.uCol.value.copy(lean === mine ? MINE : THEIRS);
+      P.ring.uniforms.uBase.value.copy(col).multiplyScalar(own < 0 ? 0.45 : 0.7);
+      P.ring.uniforms.uTime.value = t;
+      P.beam.uniforms.uCol.value.copy(col);
+      P.beam.uniforms.uA.value = (own < 0 ? 0.12 : 0.45) * (0.85 + 0.15 * Math.sin(t * 1.7 + k));
+      P.flame.color.copy(own < 0 ? new THREE.Color('#9ca3af') : col);
+      P.flame.opacity = own < 0 ? 0.35 : 0.95;
+      const L = lights.current[k];
+      if (L) {
+        L.color.copy(col);
+        L.intensity = own < 0 ? 0 : (3 + 9 * mapRuntime.night) * (0.85 + 0.15 * Math.sin(t * 9 + k));
+      }
+    });
+  });
+  return (
+    <group>
+      {SHRINES.map((sh, k) => (
+        <group key={k} position={[sh.x, sh.y, sh.z]}>
+          {/* the altar: a stepped stone block, a bronze burner with three legs on it */}
+          <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
+            <boxGeometry args={[1.9, 0.5, 1.3]} />
+            <meshStandardMaterial color="#7d776c" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, 0.62, 0]} castShadow>
+            <boxGeometry args={[1.4, 0.24, 0.9]} />
+            <meshStandardMaterial color="#8d867a" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, 0.98, 0]} castShadow>
+            <cylinderGeometry args={[0.34, 0.26, 0.42, 12]} />
+            <meshStandardMaterial color="#5c4a2a" metalness={0.6} roughness={0.45} />
+          </mesh>
+          {[0, 2.1, 4.2].map((a) => (
+            <mesh key={a} position={[Math.cos(a) * 0.36, 0.84, Math.sin(a) * 0.36]} rotation={[0, -a, 0.25]}>
+              <cylinderGeometry args={[0.03, 0.04, 0.24, 5]} />
+              <meshStandardMaterial color="#4a3a20" metalness={0.5} roughness={0.5} />
+            </mesh>
+          ))}
+          {/* three sticks of incense */}
+          {[-0.08, 0, 0.08].map((x) => (
+            <mesh key={x} position={[x, 1.38, 0]}>
+              <cylinderGeometry args={[0.012, 0.012, 0.5, 4]} />
+              <meshStandardMaterial color="#7f1d1d" />
+            </mesh>
+          ))}
+          <sprite position={[0, 1.7, 0]} scale={[0.7, 0.9, 1]} material={parts[k].flame} />
+          <pointLight ref={(el) => (lights.current[k] = el)} position={[0, 2, 0]} intensity={0} distance={14} decay={1.4} />
+          <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]} material={parts[k].ring} renderOrder={4}>
+            <planeGeometry args={[SHRINE.r * 2, SHRINE.r * 2]} />
+          </mesh>
+          {/* a pillar of light you can see across the forest */}
+          {[0, Math.PI / 2].map((r) => (
+            <mesh key={r} position={[0, 21, 0]} rotation={[0, r, 0]} material={parts[k].beam} renderOrder={6}>
+              <planeGeometry args={[1.4, 40]} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 /** everything above, plus the night value they share */
 export function ForestExtras() {
   useFrame(() => {
@@ -1031,7 +1148,7 @@ export function ForestExtras() {
   void riverZ;
   // test hook: __TQ_SKIPX = ['Bamboo', ...] leaves those parts out
   const skip: string[] = (globalThis as any).__TQ_SKIPX ?? [];
-  const parts: [string, React.FC][] = [['Waterfall', Waterfall], ['Camp', Camp], ['Bamboo', Bamboo], ['Lanterns', Lanterns], ['Pagoda', Pagoda], ['Swamp', Swamp], ['Ziplines', Ziplines], ['Herbs', Herbs], ['Traps', Traps]];
+  const parts: [string, React.FC][] = [['Waterfall', Waterfall], ['Camp', Camp], ['Bamboo', Bamboo], ['Lanterns', Lanterns], ['Pagoda', Pagoda], ['Swamp', Swamp], ['Ziplines', Ziplines], ['Herbs', Herbs], ['Traps', Traps], ['Shrines', Shrines]];
   return (
     <group>
       {parts.filter(([n]) => !skip.includes(n)).map(([n, C]) => (

@@ -352,6 +352,22 @@ export function sheltered(x: number, z: number, y: number) {
   const [lx, lz] = worldToTemple(x, z);
   return Math.abs(lx + 7.2) < 1.9 && Math.abs(lz - 8.6) < 1.9 && y > FOREST.hill.h - 0.5 && y < FOREST.hill.h + 5;
 }
+/**
+ * 青冥古林's three 祖坛 (ancestral altars): stand at one with nobody from the other side there and you light its incense
+ * (SHRINE.capture seconds from bare, twice that to turn one of theirs). Each one you hold scores every second; the first
+ * side to SHRINE.goal wins. Being cut down only costs you time: you're back at your camp after SHRINE.respawn seconds.
+ */
+export const SHRINE = { r: 3.2, capture: 5, goal: 100, respawn: 8, rate: [0, 1, 2.5, 5], koBonus: 5 };
+export const SHRINES: { name: string; x: number; y: number; z: number }[] = (() => {
+  const [tx, tz] = templeToWorld(0, 10.6);
+  const P = FOREST_X.pagoda;
+  const C = FOREST_X.cave;
+  return [
+    { name: '古寺', x: tx, y: FOREST.hill.h, z: tz },
+    { name: '古塔', x: P.x - 3.4, y: P.s1H, z: P.z - 3.4 },
+    { name: '山洞', x: (C.x0 + C.x1) / 2 + 1.5, y: C.floor, z: (C.z0 + C.z1) / 2 },
+  ];
+})();
 /** a candle or a candle-shade that someone has put down */
 export interface PlacedItem {
   kind: 'candle' | 'shade';
@@ -908,6 +924,7 @@ MAPS.forest = {
   icon: '🌲',
   sizeClass: '50Q',
   mechanics: [
+    '胜负：古寺、古塔、瀑布山洞各有一座祖坛，站上去点香就归你，对面在场就点不了。占得越多分涨得越快，先到 100 分赢；打倒对手加 5 分，倒下的人 8 秒后在营地重生',
     '50Q 大地图：方圆两百米，面积是演武场的四十倍，开局两人隔河相望',
     '大河横穿中间：深水区要游泳（游得慢、不能出招，只能翻滚潜游），西边有浅滩可以蹚过去，东边有一座木桥',
     '七棵古树上搭着猎人瞭望台：朝树跑过去按跳跃，施展「梯云纵」三步蹬上树顶（耗体力，途中被打会掉下来），站在台上居高临下；走到台边再跳就下来',
@@ -1257,6 +1274,8 @@ export const mapRuntime = {
   plank: { hp: [] as number[][], regrow: [] as number[][], gustWarn: 0, gust: 0, gustDir: [0, 1] as [number, number], gustNext: 20 },
   /** 青冥古林: herbs growing (kind 0 血参 heals, 1 疾风果 hastens; t: seconds until it grows back when picked), traps
    * on the ground (owner side, -1 = the hunters'; sprung: seconds since it snapped, -1 = still set) */
+  /** 祖坛: owner side per altar (-1 nobody), how far its capture has got (-1 .. 1: toward side 0 is +), who's on it, the score */
+  shrine: { own: [-1, -1, -1] as number[], prog: [0, 0, 0] as number[], busy: [0, 0, 0] as number[], score: [0, 0] as number[], on: false },
   /** per fighter: can the local player see them right now (night, the bog's mist, stealth); the minimap uses it */
   seen: [] as boolean[],
   /** the camera's yaw (the minimap turns with it) */

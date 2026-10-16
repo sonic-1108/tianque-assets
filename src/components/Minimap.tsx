@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { MAPS, MapId, terrainHeight, mapRuntime, FOREST, FOREST_X, TEMPLE_YAW, zipLine, riverZ as riverZAt } from '../maps';
+import { MAPS, MapId, terrainHeight, mapRuntime, FOREST, FOREST_X, TEMPLE_YAW, zipLine, riverZ as riverZAt, SHRINES } from '../maps';
 import type { CombatantState } from '../types';
 
 // 小地图: the whole of a big map in the corner, turning with the camera (up is the way you're looking).
@@ -268,6 +268,32 @@ export function Minimap({ mapId, fighters, me, hidden }: { mapId: MapId; fighter
           g.stroke();
         }
       }
+      // the altars: whose they are, a ring filling as one is taken
+      if (mapId === 'forest')
+        SHRINES.forEach((sh, k) => {
+          const S = mapRuntime.shrine;
+          const own = S.own[k];
+          const [a, b] = at(sh.x, sh.z);
+          const r = big ? 7 : 5.5;
+          g.fillStyle = own < 0 ? '#a8a29e' : own === mapRuntime.viewSide ? '#22c55e' : '#ef4444';
+          g.strokeStyle = 'rgba(0,0,0,0.8)';
+          g.lineWidth = 1.5;
+          g.beginPath();
+          g.moveTo(a, b - r);
+          g.lineTo(a + r, b);
+          g.lineTo(a, b + r);
+          g.lineTo(a - r, b);
+          g.closePath();
+          g.fill();
+          g.stroke();
+          if (Math.abs(S.prog[k]) > 0.02 && Math.abs(S.prog[k]) < 1) {
+            g.strokeStyle = (S.prog[k] > 0 ? 0 : 1) === mapRuntime.viewSide ? '#86efac' : '#fca5a5';
+            g.lineWidth = 2;
+            g.beginPath();
+            g.arc(a, b, r + 3, -Math.PI / 2 - yaw, -Math.PI / 2 - yaw + Math.PI * 2 * Math.abs(S.prog[k]));
+            g.stroke();
+          }
+        });
       // fighters
       const F = fighters.current;
       const mine = F[me];
