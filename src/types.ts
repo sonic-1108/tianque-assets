@@ -254,6 +254,7 @@ export interface CombatantState {
   twisterFall?: boolean; // in the air after being flung: the landing hurts
   sandExpo?: number; // 大漠玉门关: seconds caught out in a thick sandstorm
   mantraTgt?: number; // 六字真言: who the words are hunting (-1 nobody in reach)
+  zip?: { t: number; dir: 1 | -1 }; // 悬空栈道: sliding along the iron chain (t 0..1 from the step to the peak)
   drinkWell?: number; // 大漠玉门关: drawing water at well n (1-based), 0 not
   drinkT?: number; // seconds into it
   beaconHold?: number; // 大漠玉门关: seconds of holding F at the beacon

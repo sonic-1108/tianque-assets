@@ -1,6 +1,7 @@
 import { shipSteer, newNavState, shipGraph } from './shipNav';
 import { newStreetNav, streetSteer, streetLineClear } from './streetNav';
 import { desertBumped, desertSteer, newDesertNav } from './desertNav';
+import { plankBumped, plankSteer, newPlankNav } from './plankNav';
 import { DRINK } from './components/climbPose';
 import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
@@ -19,7 +20,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -395,6 +396,7 @@ function GameImpl({
   const shipAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi));
   const streetNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newStreetNav));
   const desertNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav));
+  const plankNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newPlankNav));
   /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
   const desertAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
   const lightningRef = useRef({ timer: 5 });
@@ -885,6 +887,7 @@ function GameImpl({
           if (map.id === 'forest') leaveLookout(c, foes[i], it);
           if (map.id === 'sea') routeOnShip(c, foes[i], it);
           if (map.id === 'desert') routeDesert(i, c, foes[i], it);
+          if (map.id === 'plankway') routePlank(i, c, foes[i], it);
           if (map.id === 'rooftop') routeRooftop(i, c, foes[i], it);
           if (N > 2) teamSpacing(i, c, foes[i], it);
           aiHitRoyal(i, c, it);
@@ -1038,6 +1041,7 @@ function GameImpl({
       c.pos[0] += c.vel[0] * cdt;
       c.pos[2] += c.vel[2] * cdt;
       if (map.id === 'desert') desertWind(c);
+      if (map.id === 'plankway') plankWind(c);
       ledgeGuard(c, px0, pz0);
       mountainWall(i, c, px0, pz0);
       if (map.id === 'sea') shipWall(i, c, px0, pz0);
@@ -1055,6 +1059,7 @@ function GameImpl({
         updateItems(i, c, intents[i]);
       }
       if (map.id === 'desert') updateDesertItems(i, c, intents[i]);
+      if (map.id === 'plankway') updatePlankItems(i, c, intents[i]);
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
@@ -1174,6 +1179,16 @@ function GameImpl({
         controller.groundAt = (x: number, z: number) => shipFloorAt(x, z, view.pos[1] + 0.8);
         controller.ceilAt = (x: number, z: number) => shipCeilAt(x, z, view.pos[1] + 0.5);
         controller.solidAt = (x: number, y: number, z: number) => shipSolidAt(x, y, z, 0.18, true); // the camera glides over steps and rails
+      } else if (map.id === 'plankway') {
+        // 悬空栈道: the cliff is solid to the camera (it pulls in, never climbs onto the cliff top); the floor is the
+        // road, ledge, bridge or peak at the player's level, and the chasm is open air
+        const vy = view.pos[1];
+        controller.groundAt = (x: number, z: number) => {
+          const h = terrainHeight(map.id, x, z);
+          return h > vy + 1.5 ? vy - 2.5 : Math.max(h, vy - 2.5);
+        };
+        controller.ceilAt = null;
+        controller.solidAt = (x: number, y: number, z: number) => y < terrainHeight(map.id, x, z) - 0.05;
       } else if (map.id === 'rooftop') {
         // 长安: the floor under the camera is the street or the roof at the player's level, and the halls are solid:
         // a roof between the camera and the player pulls the camera in along the boom (under the eaves, or down
@@ -1632,6 +1647,7 @@ function GameImpl({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
+      if (c.zip) return report('出招', '铁索上滑行中'), false;
       if (c.treeClimb !== undefined) {
         if (c.climbMode !== 'ladder' || req !== 'jump') return report('出招', c.climbMode === 'ladder' ? '在梯子上，按空格跳下来' : '梯云纵上树中'), false;
         // jump off the ladder, away from the trunk
@@ -2268,10 +2284,16 @@ function GameImpl({
     function applyHit(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
       const m = FX.mute;
       FX.mute = 0;
+      const hp0 = def.hp;
       try {
         applyHitInner(slot, att, def, base, oIn);
       } finally {
         FX.mute = m;
+      }
+      if (map.id === 'plankway') {
+        // 悬空栈道: a blow that lands on someone standing on a bridge cracks the plank under them; the chain lets go
+        if (def.zip && def.hp < hp0) dropOffChain(def);
+        if (def.hp < hp0) crackPlank(def, oIn.heavy || (oIn.launch ?? 0) > 0 || (oIn.knock ?? 0) > 3 ? 2 : 1);
       }
     }
     function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
@@ -4119,6 +4141,7 @@ function GameImpl({
       if (map.id === 'sea') shipGraph();
       shipAiRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi);
       desertNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav);
+      plankNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newPlankNav);
       desertAiRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
       {
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
@@ -4126,6 +4149,14 @@ function GameImpl({
         const swarmAt = map.id !== 'desert' ? -1 : force ? +force : Math.random() < DESERT.swarm.chance ? 30 + Math.random() * 45 : -1;
         mapRuntime.desert = { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt, swarmWarn: 0, swarm: 0, swarmLeft: 0, gate: [0, 0], gateTo: [0, 0], gateCd: [0, 0], wells: [], tornado: null };
       }
+      mapRuntime.plank = {
+        hp: PLANK.bridges.map((_, k) => new Array(plankCount(k)).fill(PLANK.plankHp)),
+        regrow: PLANK.bridges.map((_, k) => new Array(plankCount(k)).fill(0)),
+        gustWarn: 0,
+        gust: 0,
+        gustDir: [0, 1],
+        gustNext: 18 + Math.random() * 8,
+      };
       lightningRef.current = { timer: 5 };
       avalancheRef.current = { timer: 14, warn: 0, z: -999, hit: [false, false] };
       mapRuntime.avalancheZ = -999;
@@ -4281,7 +4312,7 @@ function GameImpl({
         // knocked into a wall face: the same crunch as a pillar
         if (i >= 0 && sp0 > 0.01) wallSplat(i, c, sp0, c.pos[0] + (vx0 / sp0) * 0.5, c.pos[2] + (vz0 / sp0) * 0.5);
       };
-      if ((map.id !== 'forest' && map.id !== 'desert' && map.id !== 'rooftop') || c.treeClimb !== undefined || c.actionState === 'buried') return;
+      if ((map.id !== 'forest' && map.id !== 'desert' && map.id !== 'rooftop' && map.id !== 'plankway') || c.treeClimb !== undefined || c.actionState === 'buried') return;
       if (c.pos[0] === px0 && c.pos[2] === pz0) return;
       // the body has some width: test the leading edge (straight ahead and either side of it), not just the
       // centre, or a shoulder sinks a third of a metre into a wall
@@ -4307,7 +4338,7 @@ function GameImpl({
       const sz = Math.sign(mdz);
       if (!c.isGrounded) {
         // 大漠玉门关, in the air: a wall face stops you; you can only come down on something your feet are above
-        if (map.id !== 'desert' && map.id !== 'rooftop') return;
+        if (map.id !== 'desert' && map.id !== 'rooftop' && map.id !== 'plankway') return;
         const above = (x: number, z: number) => edgeMax(x, z) > c.pos[1] + 0.25;
         if (!above(c.pos[0], c.pos[2])) return;
         splat();
@@ -4354,7 +4385,8 @@ function GameImpl({
     function ledgeGuard(c: CombatantState, px0: number, pz0: number) {
       if (!map.terrain || !c.isGrounded || map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop') return; // on the ship (and off the beacon, ramps and walls in the desert) you may step off
       const s = c.actionState;
-      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || s === 'dodge' || c.hp <= 0) return;
+      // 悬空栈道: a roll doesn't take you over the edge either (only being knocked does)
+      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || (s === 'dodge' && map.id !== 'plankway') || c.hp <= 0 || c.zip) return;
       const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;
       if (!drop(c.pos[0], c.pos[2])) return;
       if (!drop(c.pos[0], pz0)) {
@@ -4661,6 +4693,154 @@ function GameImpl({
       const k = c.isBlocking ? 0.4 : 1;
       c.pos[0] += D.wind * D.sand * 1.6 * k * dt;
     }
+    // ---------------------------------------------------------------- 悬空栈道
+    /** the plank under a fighter (if they're standing on one) takes `n` cracks; at 0 it gives way */
+    function crackPlank(c: CombatantState, n: number) {
+      const q = plankAt(c.pos[0], c.pos[2]);
+      if (!q) return;
+      const P = mapRuntime.plank;
+      if (Math.abs(c.pos[1] - bridgeY(q.t)) > 0.6) return;
+      const hp = P.hp[q.k];
+      if (!hp || hp[q.i] <= 0) return;
+      hp[q.i] = Math.max(0, hp[q.i] - n);
+      const y = bridgeY(q.t);
+      vfx.sparkBurst(vA.set(c.pos[0], y + 0.1, c.pos[2]), 6, '#c9a27a', 3, 0.05);
+      if (hp[q.i] > 0) {
+        vfx.damageNumber(vB.set(c.pos[0], y + 0.5, c.pos[2]), '桥板裂了', false, '#e7c9a0');
+        return;
+      }
+      // it goes: splinters, and whoever is on it drops
+      P.regrow[q.k][q.i] = PLANK.regrow;
+      vfx.rocks(vA.set(c.pos[0], y, c.pos[2]), 10, 3.5, 0.08);
+      vfx.dustPuff(vA.set(c.pos[0], y, c.pos[2]), 10, 0.6, 1.5, 0.6, '#b08a5a');
+      vfx.damageNumber(vB.set(c.pos[0], y + 0.8, c.pos[2]), '桥板断了！', true, '#ffb15a');
+      gameAudio.playHitHeavy();
+      for (const f of fighters) {
+        const r = plankAt(f.pos[0], f.pos[2]);
+        if (r && r.k === q.k && r.i === q.i && f.isGrounded) {
+          f.isGrounded = false;
+          f.vel[1] = Math.min(f.vel[1], 0);
+          if (f.actionState === 'idle' || f.actionState === 'run' || f.actionState === 'block') f.actionState = 'jump';
+        }
+      }
+    }
+    /** let go of the chain (hit while sliding): straight down, unless right over solid ground */
+    function dropOffChain(c: CombatantState) {
+      c.zip = undefined;
+      c.isGrounded = false;
+      c.vel = [0, -1, 0];
+      c.actionState = 'launched';
+      c.stateTimer = 0;
+      c.stateDuration = 0.9;
+      vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '松手了！', true, '#fca5a5');
+    }
+    /** the chain at fraction t (0 = the step end, 1 = the peak end): where the hands are */
+    function chainAt(t: number, out: THREE.Vector3) {
+      const C = PLANK.chain;
+      const ya = PLANK.step.h + C.high;
+      const yb = PLANK.peak.h + C.high;
+      return out.set(C.ax + (C.bx - C.ax) * t, ya + (yb - ya) * t - 0.35 * Math.sin(Math.PI * t), C.az + (C.bz - C.az) * t);
+    }
+    /** 山风 push (on the wind's side of anything; blocking halves it, sliding on the chain swings you but holds) */
+    function plankWind(c: CombatantState) {
+      const P = mapRuntime.plank;
+      if (P.gust <= 0 || c.hp <= 0 || c.zip) return;
+      const knocked = c.actionState === 'launched' || c.actionState === 'hitstun' || c.actionState === 'knockdown';
+      const k = (c.isBlocking ? 0.35 : 1) * (knocked ? 1.6 : 1) * Math.min(1, P.gust * 2);
+      c.pos[0] += P.gustDir[0] * PLANK.gust.push * k * dt;
+      c.pos[2] += P.gustDir[1] * PLANK.gust.push * k * dt;
+    }
+    /** planks regrow, the wind comes and goes */
+    function updatePlankway() {
+      const P = mapRuntime.plank;
+      if (!P.hp.length) return;
+      for (let k = 0; k < P.hp.length; k++)
+        for (let i = 0; i < P.hp[k].length; i++) {
+          if (P.hp[k][i] > 0) continue;
+          P.regrow[k][i] -= dt;
+          if (P.regrow[k][i] > 0) continue;
+          P.hp[k][i] = PLANK.plankHp;
+          const b = PLANK.bridges[k];
+          const t = (i + 0.5) / P.hp[k].length;
+          vfx.dustPuff(vA.set(b.ax + (b.bx - b.ax) * t, bridgeY(t), b.az + (b.bz - b.az) * t), 6, 0.4, 1, 0.4, '#d8c4a0');
+        }
+      // 山风
+      const G = PLANK.gust;
+      if (P.gust > 0) {
+        P.gust = Math.max(0, P.gust - dt / G.dur);
+        if (Math.random() < dt * 30) {
+          const f = fighters[ME];
+          vfx.dustPuff(vA.set(f.pos[0] + (Math.random() - 0.5) * 14 - P.gustDir[0] * 6, f.pos[1] + 0.5 + Math.random() * 2.5, f.pos[2] + (Math.random() - 0.5) * 14 - P.gustDir[1] * 6), 1, 0.2, 0.6, 0.6, '#ffffff');
+        }
+      } else if (P.gustWarn > 0) {
+        P.gustWarn -= dt;
+        if (P.gustWarn <= 0) {
+          P.gust = 1;
+          onRoundEvent?.({ type: 'toast', text: '山风来了！按住格挡站稳' });
+          controller?.addShake(0.15);
+        }
+      } else if (!round.over) {
+        P.gustNext -= dt;
+        if (P.gustNext <= 0) {
+          P.gustNext = G.every[0] + Math.random() * (G.every[1] - G.every[0]);
+          P.gustWarn = G.warn;
+          // mostly out from the cliff, over the edge; now and then along the road
+          const r = Math.random();
+          P.gustDir = r < 0.6 ? [0, 1] : r < 0.8 ? [1, 0] : [-1, 0];
+          const where = P.gustDir[1] > 0 ? '往崖外' : P.gustDir[0] > 0 ? '往东' : '往西';
+          onRoundEvent?.({ type: 'toast', text: `山里起风了：三秒后一阵大风${where}吹` });
+        }
+      }
+    }
+    /** 悬空栈道: F at either end of the iron chain to slide across; the slide itself */
+    function updatePlankItems(i: number, c: CombatantState, intent: Intent | null) {
+      const pressed = !!intent?.interact && !c.intPrev;
+      c.intPrev = !!intent?.interact;
+      c.interactHint = '';
+      const C = PLANK.chain;
+      if (c.zip) {
+        if (c.hp <= 0) {
+          dropOffChain(c);
+          return;
+        }
+        c.zip.t += (c.zip.dir * dt) / C.ride;
+        const done = c.zip.dir > 0 ? c.zip.t >= 1 : c.zip.t <= 0;
+        const t = Math.max(0, Math.min(1, c.zip.t));
+        const h = chainAt(t, vA);
+        c.pos = [h.x, h.y - 2.05, h.z];
+        c.vel = [0, 0, 0];
+        c.isGrounded = false;
+        c.actionState = 'jump';
+        c.stateTimer = 0;
+        c.rotY = c.targetRotY = Math.atan2(-(C.bx - C.ax) * c.zip.dir, -(C.bz - C.az) * c.zip.dir);
+        if (Math.random() < 0.5) vfx.sparkBurst(vB.set(h.x, h.y + 0.05, h.z), 1, '#ffd9a8', 2, 0.03);
+        if (done) {
+          // off at the far end, onto the ground
+          const end = c.zip.dir > 0 ? [C.bx, PLANK.peak.h, C.bz + 0.6] : [C.ax, PLANK.step.h, C.az - 0.3];
+          c.pos = [end[0], end[1], end[2]];
+          c.zip = undefined;
+          c.isGrounded = true;
+          c.actionState = 'idle';
+          vfx.dustPuff(vB.set(c.pos[0], c.pos[1] + 0.05, c.pos[2]), 6, 0.4, 1.2, 0.5);
+        }
+        return;
+      }
+      if (c.hp <= 0 || !c.isGrounded) return;
+      const st = c.actionState;
+      const free = st === 'idle' || st === 'run' || st === 'block';
+      const atA = Math.hypot(c.pos[0] - C.ax, c.pos[2] - C.az) < 1.6 && Math.abs(c.pos[1] - PLANK.step.h) < 0.5;
+      const atB = Math.hypot(c.pos[0] - C.bx, c.pos[2] - C.bz) < 1.6 && Math.abs(c.pos[1] - PLANK.peak.h) < 0.5;
+      if (!atA && !atB) return;
+      if (fighters.some((o) => o !== c && o.zip)) {
+        c.interactHint = '铁索上有人';
+        return;
+      }
+      c.interactHint = atA ? 'F 抓住铁索滑到孤峰 · 滑的时候挨打会松手' : 'F 抓住铁索滑回栈道 · 滑的时候挨打会松手';
+      if (!pressed || !free) return;
+      c.zip = { t: atA ? 0 : 1, dir: atA ? 1 : -1 };
+      c.isBlocking = false;
+      gameAudio.playCrispClick();
+    }
     /** 大漠玉门关: F at a well for a drink; hold F on top of the beacon tower to light it (or put out the other side's) */
     function updateDesertItems(i: number, c: CombatantState, intent: Intent | null) {
       const pressed = !!intent?.interact && !c.intPrev;
@@ -4794,6 +4974,62 @@ function GameImpl({
         vfx.dustPuff(vB.set(0, B.h + 0.6, 0), 20, 0.8, 2.5, 1.0, '#6b5a4a');
         onRoundEvent?.({ type: 'toast', text: `${who}踩灭了${ours ? '敌方' : '我方'}的烽火` });
       }
+    }
+    /**
+     * 悬空栈道 AI: walk the grid round to the foe (along the road, over a bridge, never off an edge); brace
+     * against the cliff when the wind comes; take the chain to the peak if both bridges are broken.
+     */
+    function routePlank(i: number, me: CombatantState, foe: CombatantState, out: Intent) {
+      const P = mapRuntime.plank;
+      const S = plankNavRefs.current[i];
+      out.interact = false;
+      if (me.zip) {
+        out.move.set(0, 0, 0);
+        out.request = null;
+        return;
+      }
+      if ((me.wallBlock ?? 0) > 0.2) plankBumped(S);
+      const edgeNear = () => {
+        for (let a = 0; a < 8; a++) {
+          const x = me.pos[0] + Math.cos((a / 8) * Math.PI * 2) * 1.6;
+          const z = me.pos[2] + Math.sin((a / 8) * Math.PI * 2) * 1.6;
+          if (terrainHeight(map.id, x, z) < me.pos[1] - 1.5) return true;
+        }
+        return false;
+      };
+      // the wind: brace (block) and lean away from the edge it blows toward
+      if ((P.gust > 0 || P.gustWarn > 0 && P.gustWarn < 1.2) && edgeNear()) {
+        out.block = true;
+        out.request = null;
+        out.move.set(-P.gustDir[0], 0, -P.gustDir[1]).multiplyScalar(0.6);
+        return;
+      }
+      const onPeak = (p: number[]) => Math.hypot(p[0] - PLANK.peak.x, p[2] - PLANK.peak.z) < PLANK.peak.r + 0.3;
+      const bridgeOut = (k: number) => P.hp[k]?.some((v) => v <= 0);
+      if (onPeak(foe.pos) !== onPeak(me.pos) && bridgeOut(0) && bridgeOut(1)) {
+        // both bridges are broken: the chain
+        const C = PLANK.chain;
+        const [tx, tz] = onPeak(me.pos) ? [C.bx, C.bz] : [C.ax, C.az];
+        const ty = onPeak(me.pos) ? PLANK.peak.h : PLANK.step.h;
+        if (Math.hypot(me.pos[0] - tx, me.pos[2] - tz) < 1.2 && Math.abs(me.pos[1] - ty) < 0.4) {
+          out.move.set(0, 0, 0);
+          out.request = null;
+          out.interact = !me.intPrev;
+          return;
+        }
+        const st = plankSteer(S, me.pos[0], me.pos[1], me.pos[2], tx, ty, tz, dt);
+        // (up onto the stone step: walking into its 1.1 m face makes a hop)
+        out.move.set((st ? st.x : tx) - me.pos[0], 0, (st ? st.z : tz) - me.pos[2]);
+        if (out.move.lengthSq() > 0.01) out.move.normalize();
+        out.request = null;
+        return;
+      }
+      const st = plankSteer(S, me.pos[0], me.pos[1], me.pos[2], foe.pos[0], foe.pos[1], foe.pos[2], dt);
+      if (!st) return; // a straight walk gets there: fight as usual
+      out.move.set(st.x - me.pos[0], 0, st.z - me.pos[2]);
+      if (out.move.lengthSq() > 0.01) out.move.normalize();
+      out.request = null;
+      out.block = false;
     }
     /**
      * 大漠玉门关 AI: walls are sheer, so it walks the grid round to the foe (through a gate, over the breach,
@@ -5193,6 +5429,21 @@ function GameImpl({
         return;
       }
 
+      if (map.id === 'plankway') {
+        // the cliff is a hard wall: nothing (a blink, a shove, a dash) puts anyone inside it or up on top of it
+        const lim = PLANK.cliffZ + 0.32;
+        if (c.pos[2] < lim) {
+          c.pos[2] = lim;
+          if (c.vel[2] < 0) c.vel[2] = 0;
+        }
+        if (c.pos[1] > 12) {
+          c.pos[1] = Math.max(0, terrainHeight(map.id, c.pos[0], c.pos[2]));
+          c.vel[1] = Math.min(0, c.vel[1]);
+        }
+        // over the edge: down into the cloud sea
+        if (c.pos[1] < -6.5) ringOut(i);
+        return;
+      }
       if (map.rect) {
         const { hx, hz } = map.rect;
         if (map.id === 'sea') {
@@ -5273,7 +5524,7 @@ function GameImpl({
 
     function ringOut(i: number) {
       const c = fighters[i];
-      if (map.id === 'summit') vfx.dustPuff(vA.set(c.pos[0], -6, c.pos[2]), 24, 2, 4, 2.2, '#f8fafc');
+      if (map.id === 'summit' || map.id === 'plankway') vfx.dustPuff(vA.set(c.pos[0], -6, c.pos[2]), 24, 2, 4, 2.2, '#f8fafc');
       else {
         vfx.sparkBurst(vA.set(c.pos[0], -6.5, c.pos[2]), 40, '#ff6a1a', 10, 0.14, new THREE.Vector3(0, 1, 0), 0.6);
         vfx.flash(vA.set(c.pos[0], -5, c.pos[2]), '#ff6a1a', 60, 0.5, 14);
@@ -5281,12 +5532,16 @@ function GameImpl({
       if (aiOn && !round.over && c.hp > 0) {
         c.hp = 0;
         c.revived = 9; // gone over the edge: nobody can help you up from that
-        const where = map.id === 'summit' ? '坠入云海' : '坠入岩浆';
+        const where = map.id === 'summit' ? '坠入云海' : map.id === 'plankway' ? '坠下悬崖' : '坠入岩浆';
         onRoundEvent?.({ type: 'toast', text: i === ME ? `你${where}！` : `${fighters[i].tag || '对手'}${where}！` });
         koCheck(i, '#ff6a1a');
       }
-      // respawn above the platform (practice mode, or after the KO is decided)
-      c.pos = [0, 4, 0];
+      // respawn above the platform (practice mode, or after the KO is decided); 悬空栈道: back on your side's ledge
+      if (map.id === 'plankway') {
+        const [sx, sz] = (c.side ?? 0) === 0 ? PLANK.spawnW : PLANK.spawnE;
+        c.pos = [sx, 3, sz];
+        c.zip = undefined;
+      } else c.pos = [0, 4, 0];
       c.vel = [0, 0, 0];
       c.isGrounded = false;
       c.actionState = 'launched';
@@ -6481,6 +6736,7 @@ function GameImpl({
       if (map.id === 'glacier') updateGlacier();
       if (map.id === 'rooftop') updateRooftop();
       if (map.id === 'desert') updateDesert(t);
+      if (map.id === 'plankway') updatePlankway();
       if (map.id === 'summit') updateSummit(t);
       if (map.id === 'forest') {
         updateForest();

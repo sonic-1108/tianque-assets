@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway';
 
 export interface Circle {
   x: number;
@@ -912,7 +912,8 @@ MAPS.desert = {
   pillars: desertPillars(),
 };
 
-export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit'];
+
+export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {
@@ -972,6 +973,8 @@ export const mapRuntime = {
   /** 大漠玉门关: sandstorm 0..1, warning glow on the horizon 0..1, wind along x (+1 / -1); the beacon: lit by side (-1 none), seconds left, cooldown */
   /** the local player's side (scenery colours the beacon flag ours / theirs) */
   viewSide: 0,
+  /** 悬空栈道: bridge planks (hp per plank, 0 = broken; regrow seconds left), the mountain wind, who is on the chain */
+  plank: { hp: [] as number[][], regrow: [] as number[][], gustWarn: 0, gust: 0, gustDir: [0, 1] as [number, number], gustNext: 20 },
   desert: { sand: 0, warn: 0, wind: 1, beaconSide: -1, beaconT: 0, beaconCool: 0, swarmAt: -1, swarmWarn: 0, swarm: 0, swarmLeft: 0, gate: [0, 0] as number[], gateTo: [0, 0] as number[], gateCd: [0, 0] as number[], wells: [] as { t: number; x: number; y: number; z: number; yaw: number }[], tornado: null as null | { x: number; z: number; vx: number; vz: number; a: number; life: number } },
 };
 
@@ -1306,12 +1309,128 @@ export function paradeNearest(x: number, z: number) {
 }
 
 /** Floor height for maps with a height field (0 for flat maps) */
+// ----------------------------------------------------------------------
+// 悬空栈道: a plank road pinned to a sheer cliff face, high over a sea of cloud. The cliff runs along the
+// north (z < cliffZ); the road (栈道) along its foot; a broad rock ledge at each end (the two camps). Out in
+// the chasm stands a lone rock peak (孤峰) with a pavilion, reached by two rope bridges whose planks can be
+// broken, or by an iron chain (铁索) from a stone step in the middle of the road. Everything else is a drop.
+// ----------------------------------------------------------------------
+export const PLANK = {
+  radius: 34,
+  cliffZ: -10,
+  roadZ: -6.5, // the road's outer (chasm) edge
+  roadX: 22,
+  ledge: { x0: 12, x1: 22.5, z0: -10, z1: -1, r: 2.2 },
+  peak: { x: 0, z: 9, r: 5.6, h: 0.8 },
+  step: { x0: -2.6, x1: 2.6, z0: -10, z1: -8.3, h: 1.1 },
+  /** rope bridges: ledge end (a) to peak end (b) */
+  bridges: [
+    { ax: -15.2, az: -1.7, bx: -4.5, bz: 6.2 },
+    { ax: 15.2, az: -1.7, bx: 4.5, bz: 6.2 },
+  ],
+  bridgeHalfW: 1.1,
+  plankLen: 1.0,
+  sag: 0.45,
+  plankHp: 3,
+  regrow: 14,
+  /** the iron chain: from the stone step out to the peak (anchors on the ground; the chain runs 2.4 m above) */
+  chain: { ax: 0, az: -9.0, bx: 0, bz: 4.6, high: 2.4, ride: 1.25 },
+  wall: 30,
+  abyss: -40,
+  /** 山风: every so often a gust out over the edge (warned a few seconds before) */
+  gust: { every: [22, 34] as [number, number], warn: 3.5, dur: 2.6, push: 3.4 },
+  spawnW: [-17, -5] as [number, number],
+  spawnE: [17, -5] as [number, number],
+};
+const bridgeLen = (b: (typeof PLANK.bridges)[number]) => Math.hypot(b.bx - b.ax, b.bz - b.az);
+/** how many planks bridge k has */
+export const plankCount = (k: number) => Math.round(bridgeLen(PLANK.bridges[k]) / PLANK.plankLen);
+/** heights at the bridge ends */
+const bridgeEnds = () => [0, PLANK.peak.h] as const;
+/** where (x, z) is on a bridge: which bridge, which plank, how far along (0..1) and across (metres), or null */
+export function plankAt(x: number, z: number) {
+  for (let k = 0; k < PLANK.bridges.length; k++) {
+    const b = PLANK.bridges[k];
+    const L = bridgeLen(b);
+    const ux = (b.bx - b.ax) / L;
+    const uz = (b.bz - b.az) / L;
+    const along = (x - b.ax) * ux + (z - b.az) * uz;
+    const across = -(x - b.ax) * uz + (z - b.az) * ux;
+    if (along < 0 || along > L || Math.abs(across) > PLANK.bridgeHalfW) continue;
+    const n = plankCount(k);
+    const i = Math.min(n - 1, Math.floor((along / L) * n));
+    return { k, i, t: along / L, across };
+  }
+  return null;
+}
+/** height of the bridge deck at fraction t (sagging in the middle) */
+export function bridgeY(t: number) {
+  const [ha, hb] = bridgeEnds();
+  return ha + (hb - ha) * t - PLANK.sag * Math.sin(Math.PI * t);
+}
+function inRoundRect(x: number, z: number, x0: number, x1: number, z0: number, z1: number, r: number) {
+  const cx = Math.max(x0 + r, Math.min(x1 - r, x));
+  const cz = Math.max(z0 + r, Math.min(z1 - r, z));
+  return x >= x0 && x <= x1 && z >= z0 && z <= z1 && Math.hypot(x - cx, z - cz) <= r;
+}
+/** Walkable height of 悬空栈道 at (x, z): the cliff (a wall), the road, the ledges, the peak, the bridges, or the drop */
+export function plankHeight(x: number, z: number) {
+  const P = PLANK;
+  if (z < P.cliffZ) return P.wall;
+  const S = P.step;
+  if (x > S.x0 && x < S.x1 && z < S.z1) return S.h;
+  if (z <= P.roadZ && Math.abs(x) <= P.roadX) return 0;
+  const L = P.ledge;
+  if (inRoundRect(Math.abs(x), z, L.x0 - 3, L.x1, L.z0 - 1, L.z1, L.r)) return 0;
+  if (Math.hypot(x - P.peak.x, z - P.peak.z) <= P.peak.r) return P.peak.h;
+  const q = plankAt(x, z);
+  if (q) {
+    const hp = mapRuntime.plank?.hp?.[q.k]?.[q.i];
+    if (hp === undefined || hp > 0) return bridgeY(q.t);
+  }
+  return P.abyss;
+}
+
+MAPS.plankway = {
+  id: 'plankway',
+  name: '悬空栈道',
+  subtitle: '千仞绝壁上的一条木栈道，脚下是万丈云海',
+  icon: '🧗',
+  mechanics: [
+    '栈道钉在绝壁上，外侧没有护栏：走路不会掉下去，被打飞出边缘直接坠崖判负',
+    '两座吊桥通往云海中的孤峰：桥板挨打会裂，打断了人就掉下去，14 秒后新桥板补上',
+    '栈道中间的石台上有一条铁索直通孤峰：站在索头按 F 滑过去，滑行时被打中会松手坠落',
+    '山风：每隔半分钟左右刮一阵大风，起风前三秒有提示。风把人往崖外吹，按住格挡能站稳',
+  ],
+  homeClass: 'Ranger',
+  homeClassName: '暗器',
+  homeBonus: '伤害 +10%',
+  available: true,
+  terrain: true,
+  radius: PLANK.radius,
+  spawnPlayer: PLANK.spawnW,
+  spawnEnemy: PLANK.spawnE,
+  background: '#c9d3e0',
+  fog: [70, 380],
+  hemi: ['#dfe8f5', '#5a5048', 0.8],
+  keyColor: '#ffe0b0',
+  keyIntensity: 2.6,
+  exposure: 0.88,
+  bloom: 0.7,
+  cardGradient: 'from-slate-500/60 via-stone-700/70 to-zinc-950/90',
+  pillars: [
+    // the pavilion's four posts on the peak, and the two chain anchors
+    ...[[-2.3, -2.3], [2.3, -2.3], [-2.3, 2.3], [2.3, 2.3]].map(([dx, dz]) => ({ x: PLANK.peak.x + dx, z: PLANK.peak.z + 1.2 + dz, r: 0.22 })),
+  ],
+} as MapDef;
+
 export function terrainHeight(id: MapId, x: number, z: number) {
   if (id === 'sea') return shipFloorAt(x, z, 99);
   if (id === 'glacier') return glacierHeight(x, z);
   if (id === 'forest') return forestHeight(x, z);
   if (id === 'rooftop') return roofHeight(x, z);
   if (id === 'desert') return desertHeight(x, z);
+  if (id === 'plankway') return plankHeight(x, z);
   return 0;
 }
 /** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */

@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { Sky, KarstPeaks, CloudSea, CloudPuffs, Banner, seeded, cloudPuffTexture } from './Scenery';
 import { ChanganMap } from './maps/Changan';
 import { SummitMap } from './maps/Summit';
+import { PlankwayMap } from './maps/Plankway';
 import { ForestMap } from './maps/Forest';
 import { GlacierMap } from './maps/Glacier';
 import { DesertMap } from './maps/Desert';
@@ -1291,6 +1292,7 @@ export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'glacier') return <GlacierMap />;
   if (mapId === 'rooftop') return <ChanganMap />;
   if (mapId === 'summit') return <SummitMap />;
+  if (mapId === 'plankway') return <PlankwayMap />;
   if (mapId === 'forest') return <ForestMap />;
   if (mapId === 'desert') return <DesertMap />;
   return <TempleMap />;

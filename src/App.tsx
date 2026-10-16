@@ -208,7 +208,7 @@ export default function App() {
     else gameAudio.startMusic();
   }, [isMusicMuted]);
   useEffect(() => {
-    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' || mapId === 'forest' ? mapId : mapId === 'desert' ? 'glacier' : 'temple');
+    gameAudio.setAmbience(mapId === 'lavacliff' || mapId === 'sea' || mapId === 'glacier' || mapId === 'rooftop' || mapId === 'summit' || mapId === 'forest' ? mapId : mapId === 'desert' || mapId === 'plankway' ? (mapId === 'plankway' ? 'summit' : 'glacier') : 'temple');
   }, [mapId]);
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
