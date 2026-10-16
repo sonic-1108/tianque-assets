@@ -75,11 +75,12 @@ export const QUALITY = {
  * AI difficulty. think: how often it decides (x normal); react: chance it reacts to an incoming swing (block,
  * dodge, counter); out / in: damage it deals / takes (enemy AI only, never online).
  */
-export const AI_LEVELS: Record<AiLevel, { name: string; think: number; react: number; out: number; in: number; cd: number; mp: number; reflex: number; cc: number }> = {
-  // think: decisions x; react: notices your swings; out/in: damage dealt/taken; cd/mp: cooldown and mana speed;
-  // reflex: chance (per swing / shot) of an instant block, sidestep or punish; cc: how long your stuns hold it
-  easy: { name: '简单', think: 0.55, react: 0.3, out: 0.6, in: 1.35, cd: 0.8, mp: 0.8, reflex: 0, cc: 1.2 },
-  normal: { name: '中等', think: 1, react: 0.75, out: 1, in: 1, cd: 1, mp: 1, reflex: 0, cc: 1 },
-  hard: { name: '困难', think: 1.6, react: 0.97, out: 1.15, in: 0.8, cd: 1.15, mp: 1.15, reflex: 0.65, cc: 0.8 },
-  hell: { name: '地狱', think: 2.6, react: 1, out: 1.35, in: 0.6, cd: 1.35, mp: 1.35, reflex: 0.97, cc: 0.55 },
+export const AI_LEVELS: Record<AiLevel, { name: string; think: number; react: number; out: number; in: number; cd: number; mp: number; reflex: number; cc: number; footwork: number }> = {
+  // Every level fights with exactly the player's numbers (damage, damage taken, cooldowns, mana, stun times: all
+  // x1). Only how well it fights changes. think: how often it decides; react: notices your swings; reflex: chance
+  // (per swing / shot) of an instant block, sidestep or punish; footwork: circling, spacing, feints
+  easy: { name: '简单', think: 0.55, react: 0.3, out: 1, in: 1, cd: 1, mp: 1, reflex: 0, cc: 1, footwork: 0 },
+  normal: { name: '中等', think: 1, react: 0.75, out: 1, in: 1, cd: 1, mp: 1, reflex: 0, cc: 1, footwork: 0 },
+  hard: { name: '困难', think: 1.6, react: 0.97, out: 1, in: 1, cd: 1, mp: 1, reflex: 0.65, cc: 1, footwork: 0.6 },
+  hell: { name: '地狱', think: 2.6, react: 1, out: 1, in: 1, cd: 1, mp: 1, reflex: 0.97, cc: 1, footwork: 1 },
 };

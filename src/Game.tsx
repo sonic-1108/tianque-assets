@@ -2417,6 +2417,34 @@ function GameImpl({
       if (!swing && dist < 2.6 && !it.request && !it.block && Math.random() < dt * 6 * L.reflex) {
         it.faceYaw = yawTo(c.pos, foe.pos);
         it.request = 'attack';
+        return;
+      }
+      // 走位 (footwork): at mid range it never walks straight in. It circles, changing direction now and then,
+      // drifts in and out of the edge of your reach to draw a swing, then steps in behind it. Close in, it
+      // side-steps round you instead of standing in front of you.
+      if (L.footwork > 0 && !it.request && !it.block && dist > 1.2 && dist < 6.5 && c.classId !== 'Ranger') {
+        A.fwT = (A.fwT ?? 0) - dt;
+        if (A.fwT <= 0) {
+          A.fwT = 0.5 + Math.random() * 0.9;
+          A.fwDir = Math.random() < 0.5 ? 1 : -1;
+          // sometimes bait (hover just outside reach), sometimes commit (come right in)
+          A.fwWant = Math.random() < 0.55 ? 3.3 + Math.random() * 0.6 : 1.6;
+        }
+        const tx = (foe.pos[0] - c.pos[0]) / (dist || 1);
+        const tz = (foe.pos[2] - c.pos[2]) / (dist || 1);
+        const radial = Math.max(-1, Math.min(1, (dist - (A.fwWant ?? 2)) * 0.9));
+        const k = L.footwork;
+        const mx = -tz * A.fwDir * 0.85 * k + tx * radial;
+        const mz = tx * A.fwDir * 0.85 * k + tz * radial;
+        // blend with what it was going to do anyway, so skills and routing still steer it
+        it.move.set(it.move.x * (1 - k * 0.7) + mx * k * 0.7, 0, it.move.z * (1 - k * 0.7) + mz * k * 0.7);
+        if (it.move.lengthSq() > 1) it.move.normalize();
+        it.faceYaw = yawTo(c.pos, foe.pos);
+        // an occasional quick dash in when it's hovering at the edge and you've just finished a move
+        if (dist < 4 && dist > 2.4 && isFree(foe) && Math.random() < dt * 0.8 * k && (c.stamina ?? 100) > 50 && map.id !== 'plankway') {
+          it.move.set(tx, 0, tz);
+          it.request = 'dodge';
+        }
       }
     }
     function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
