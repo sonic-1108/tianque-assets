@@ -11,7 +11,7 @@ import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId, mapRuntime, desertIndoor } from './maps';
 import { SettingsPanel } from './components/SettingsPanel';
-import { useSettings, QUALITY } from './settings';
+import { useSettings, QUALITY, AI_LEVELS } from './settings';
 import type { CharacterClassId } from './types';
 import { NetSession, makeRoomCode, NetMessage, RoomSeat } from './net';
 import { defaultRoom, lineupOf, roomReady, seatGuests, SEAT_SIDE, aiName } from './room';
@@ -1281,7 +1281,7 @@ export default function App() {
           <span className="text-lg font-black text-amber-300 tracking-[0.25em] leading-tight">
             {aiEnabled || online ? `${score.player} : ${score.enemy}` : '自由试炼'}
           </span>
-          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`} · 版本 {__BUILD__}
+          <span className="text-[9px] text-zinc-500">{online ? '联机对战' : `${aiEnabled ? `AI ${AI_LEVELS[settings.aiLevel]?.name ?? '中等'} · ` : ''}P 切换${aiEnabled ? '木桩' : '对战'} · M 换地图`} · 版本 {__BUILD__}
             {hudMirror.fps > 0 && <span className={hudMirror.fps < 45 ? ' text-red-400' : ''}> · {hudMirror.fps} 帧</span>}
             {online && hudMirror.ping > 0 && (
               <span className={hudMirror.ping > 200 ? ' text-red-400' : ''}>

@@ -18,7 +18,7 @@ import { GameInputSnapshot, InputKeyAction } from './input';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
-import { useSettings, QUALITY, setSettings } from './settings';
+import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
 import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
@@ -2296,6 +2296,14 @@ function GameImpl({
         if (def.hp < hp0) crackPlank(def, oIn.heavy || (oIn.launch ?? 0) > 0 || (oIn.knock ?? 0) > 3 ? 2 : 1);
       }
     }
+    /** 难度: the enemy AI hits harder / takes less (or the other way) by level; allies and online play are untouched */
+    function aiLevelDmg(att: CombatantState, def: CombatantState) {
+      if (net || !aiOn) return 1;
+      const L = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      const me = fighters[ME];
+      const enemyAI = (f: CombatantState) => f !== me && (f.side ?? 0) !== (me.side ?? 0) && seatsNow[fighters.indexOf(f)]?.ctl !== 'remote';
+      return (enemyAI(att) ? L.out : 1) * (enemyAI(def) ? L.in : 1);
+    }
     function applyHitInner(slot: number, att: CombatantState, def: CombatantState, base: number, oIn: HitOpts) {
       if (def.hp <= 0) return;
       if (att !== def && (att.side ?? 0) === (def.side ?? 0)) return; // no friendly fire
@@ -2325,7 +2333,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * aiLevelDmg(att, def) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.45 : 1.25) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -3902,7 +3910,8 @@ function GameImpl({
       const side = new THREE.Vector3(-toFoe.z, 0, toFoe.x);
       out.faceYaw = yawTo(me.pos, foe.pos);
 
-      ai.think -= dt2;
+      const lvl = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      ai.think -= dt2 * lvl.think; // 难度: a harder AI makes up its mind sooner
       ai.planTimer -= dt2;
       if (ai.request) {
         ai.requestTtl -= dt2;
@@ -3914,7 +3923,14 @@ function GameImpl({
         ai.request = r;
         ai.requestTtl = 0.35;
       };
-      const foeAttacking = SWING_STATES.has(foe.actionState) && phaseOf(foe).phase !== 'recovery';
+      // 难度: whether it notices this swing coming (decided now and then, not every frame)
+      const A = ai as any;
+      A.reactT = (A.reactT ?? 0) - dt2;
+      if (A.reactT <= 0) {
+        A.reactT = 0.35;
+        A.reacts = Math.random() < lvl.react;
+      }
+      const foeAttacking = SWING_STATES.has(foe.actionState) && phaseOf(foe).phase !== 'recovery' && !!A.reacts;
       if (aiBreakout(me, ai, dt2)) {
         out.move.copy(toFoe).multiplyScalar(-1);
         out.request = ai.request;
@@ -8064,14 +8080,22 @@ function GameImpl({
       const side = new THREE.Vector3(-toFoe.z, 0, toFoe.x);
       out.faceYaw = yawTo(me.pos, foe.pos);
 
-      ai.think -= dt2;
+      const lvl = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      ai.think -= dt2 * lvl.think; // 难度: a harder AI makes up its mind sooner
       ai.planTimer -= dt2;
       if (ai.request) {
         ai.requestTtl -= dt2;
         if (ai.requestTtl <= 0) ai.request = null;
       }
 
-      const foeAttacking = SWING_STATES.has(foe.actionState) && phaseOf(foe).phase !== 'recovery';
+      // 难度: whether it notices this swing coming (decided now and then, not every frame)
+      const A = ai as any;
+      A.reactT = (A.reactT ?? 0) - dt2;
+      if (A.reactT <= 0) {
+        A.reactT = 0.35;
+        A.reacts = Math.random() < lvl.react;
+      }
+      const foeAttacking = SWING_STATES.has(foe.actionState) && phaseOf(foe).phase !== 'recovery' && !!A.reacts;
       const ready = (k: string) => (me.cooldowns[k] ?? 0) <= 0;
       const free = isFree(me);
       const ask = (r: InputKeyAction) => {

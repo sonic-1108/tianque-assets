@@ -1,3 +1,4 @@
+import { useSettings, setSettings, AI_LEVELS, type AiLevel } from '../../settings';
 import type { RoomSeat } from '../../net';
 import React, { useState } from 'react';
 import { InkBackdrop } from './InkBackdrop';
@@ -59,6 +60,7 @@ export interface LobbyProps {
 }
 
 export function Lobby(p: LobbyProps) {
+  const settings = useSettings();
   const [showOnline, setShowOnline] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   // the battlefield you're looking at; the live game keeps its map until you press 出征
@@ -185,6 +187,15 @@ export function Lobby(p: LobbyProps) {
                 <button className={!p.aiEnabled ? 'on' : ''} onClick={() => p.onAI(false)}>
                   木桩
                 </button>
+              </span>
+            )}
+            {!p.online && p.aiEnabled && (
+              <span className="tq-seg tq-lvl" title="AI 难度：困难和地狱的 AI 反应更快、更会格挡闪避，伤害更高也更耐打">
+                {(Object.keys(AI_LEVELS) as AiLevel[]).map((k) => (
+                  <button key={k} className={`${settings.aiLevel === k ? 'on' : ''} ${k}`} onClick={() => setSettings({ aiLevel: k })}>
+                    {AI_LEVELS[k].name}
+                  </button>
+                ))}
               </span>
             )}
           </div>
@@ -338,6 +349,8 @@ const LOBBY_CSS = `
 .tq-seg { display:inline-flex; margin-left:14px; border:1px solid rgba(31,28,24,.22); border-radius:999px; overflow:hidden; background:rgba(246,241,231,.55); }
 .tq-seg button { border:none; background:none; padding:6px 14px; font:600 12.5px "Noto Serif SC",serif; letter-spacing:.15em; color:var(--ink2); cursor:pointer; }
 .tq-seg button.on { background:var(--ink); color:var(--paper); }
+.tq-lvl button.hell.on { background:#7a1712; }
+.tq-lvl button.hard.on { background:#a8362a; }
 
 .tq-l-maps { display:grid; grid-template-columns:minmax(220px,300px) 1fr auto; gap:1.8vw; align-items:end; }
 .tq-map-info { position:relative; padding-bottom:4px; }

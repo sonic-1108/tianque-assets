@@ -64,7 +64,110 @@ function paintRock(g: THREE.BufferGeometry, mossy = 0.35) {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 }
-const rockMat = () => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
+/** a tiling grey noise texture (fbm), for rock detail */
+let detailTex: THREE.Texture | null = null;
+function rockDetail() {
+  if (detailTex) return detailTex;
+  const N = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      // tileable: sample noise on a torus
+      const a = (x / N) * Math.PI * 2;
+      const b = (y / N) * Math.PI * 2;
+      const u = Math.cos(a) * 3 + 10;
+      const v = Math.sin(a) * 3 + Math.cos(b) * 3 + 10;
+      const w = Math.sin(b) * 3;
+      const n = fbm(u * 1.7 + w, v * 1.7 - w) * 0.6 + fbm(u * 5 + w * 2, v * 5) * 0.4;
+      const cr = Math.abs(fbm(u * 2.5 - w, v * 2.5 + w) - 0.5) < 0.03 ? 0.55 : 1; // fine cracks
+      const k = Math.max(0, Math.min(255, (0.35 + n * 0.9) * cr * 255));
+      const i = (y * N + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = k;
+      img.data[i + 3] = 255;
+    }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  detailTex = t;
+  return t;
+}
+/**
+ * Rock material: vertex colours for the big shapes, and a world-space (triplanar) noise texture multiplied in
+ * for close-up grain and cracks, so the faces read as stone instead of flat painted facets.
+ */
+const rockMat = () => {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
+  const tex = rockDetail();
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uDetail = { value: tex };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uDetail;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          vec3 w = abs(normalize(vWNrm));
+          w = w * w;
+          w /= max(w.x + w.y + w.z, 1e-4);
+          float s = 0.28;
+          float d = texture2D(uDetail, vWPos.zy * s).r * w.x + texture2D(uDetail, vWPos.xz * s).r * w.y + texture2D(uDetail, vWPos.xy * s).r * w.z;
+          float d2 = texture2D(uDetail, vWPos.xy * 0.06 + vWPos.zz * 0.03).r;
+          diffuseColor.rgb *= clamp(0.55 + d * 0.75, 0.0, 1.6) * clamp(0.8 + d2 * 0.4, 0.0, 1.4);
+        }`
+      );
+  };
+  m.customProgramCacheKey = () => 'plankway-rock';
+  return m;
+};
+
+/** wood grain for planks and boards */
+let woodTex: THREE.Texture | null = null;
+function wood() {
+  if (woodTex) return woodTex;
+  const W = 128;
+  const H = 512;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#8a6a48';
+  g.fillRect(0, 0, W, H);
+  const rand = seeded(91);
+  for (let i = 0; i < 140; i++) {
+    const x = rand() * W;
+    const wv = 1 + rand() * 3;
+    g.strokeStyle = `rgba(${40 + rand() * 30},${25 + rand() * 20},${12 + rand() * 10},${0.15 + rand() * 0.3})`;
+    g.lineWidth = 0.6 + rand() * 1.6;
+    g.beginPath();
+    for (let y = 0; y <= H; y += 8) g.lineTo(x + Math.sin(y * 0.02 + i) * wv, y);
+    g.stroke();
+  }
+  // knots
+  for (let i = 0; i < 6; i++) {
+    const x = rand() * W;
+    const y = rand() * H;
+    const gr = g.createRadialGradient(x, y, 0, x, y, 7 + rand() * 6);
+    gr.addColorStop(0, 'rgba(40,24,12,0.8)');
+    gr.addColorStop(1, 'rgba(40,24,12,0)');
+    g.fillStyle = gr;
+    g.beginPath();
+    g.ellipse(x, y, 6, 12, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  woodTex = t;
+  return t;
+}
 
 /** where the cliff's rock surface is at (x, y): behind the road line, leaning back as it rises */
 function cliffSurfaceZ(x: number, y: number) {
@@ -137,14 +240,79 @@ function roundRect(x0: number, x1: number, z0: number, z1: number, r: number): [
   return pts;
 }
 
+/** a tile of weathered, naturally split rock: irregular slabs (Voronoi), dark mossy seams, grain (sRGB) */
+let groundTexC: THREE.Texture | null = null;
+function groundTex() {
+  if (groundTexC) return groundTexC;
+  const N = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(N, N);
+  const rand = seeded(303);
+  const P = 26;
+  const pts = Array.from({ length: P }, () => [rand() * N, rand() * N, 0.82 + rand() * 0.3] as [number, number, number]);
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      let d1 = 1e9;
+      let d2 = 1e9;
+      let tone = 1;
+      for (const [px, py, t] of pts) {
+        let dx = Math.abs(x - px);
+        let dy = Math.abs(y - py);
+        if (dx > N / 2) dx = N - dx; // wrap: the tile repeats seamlessly
+        if (dy > N / 2) dy = N - dy;
+        const d = dx * dx + dy * dy;
+        if (d < d1) {
+          d2 = d1;
+          d1 = d;
+          tone = t;
+        } else if (d < d2) d2 = d;
+      }
+      const edge = Math.sqrt(d2) - Math.sqrt(d1); // pixels from the seam
+      const grain = 0.88 + hash(x * 0.71, y * 1.13) * 0.24;
+      const a = (x / N) * Math.PI * 2;
+      const b = (y / N) * Math.PI * 2;
+      const blot = fbm(Math.cos(a) * 2 + 5, Math.sin(a) * 2 + Math.cos(b) * 2 + Math.sin(b) * 2);
+      let r = 128 * tone * grain;
+      let gg = 123 * tone * grain;
+      let bb = 112 * tone * grain;
+      // lichen and dirt blotches
+      if (blot > 0.6) {
+        const k = Math.min(1, (blot - 0.6) * 3);
+        r = r * (1 - k) + 96 * k;
+        gg = gg * (1 - k) + 104 * k;
+        bb = bb * (1 - k) + 70 * k;
+      }
+      // the seam: dark, a little moss
+      if (edge < 5) {
+        const k = 1 - edge / 5;
+        r = r * (1 - k) + 46 * k;
+        gg = gg * (1 - k) + 54 * k;
+        bb = bb * (1 - k) + 34 * k;
+      }
+      const o = (y * N + x) * 4;
+      img.data[o] = r;
+      img.data[o + 1] = gg;
+      img.data[o + 2] = bb;
+      img.data[o + 3] = 255;
+    }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  groundTexC = t;
+  return t;
+}
 /** the walkable top of a rock: a fine grid (so it can carry colour), weathered stone with grass in the hollows */
 function topCap(inside: (x: number, z: number) => boolean, x0: number, x1: number, z0: number, z1: number, y: number, seed: number) {
   const cell = 0.5;
   const pos: number[] = [];
   const col: number[] = [];
-  const stone = new THREE.Color('#857f72');
-  const dark = new THREE.Color('#57524a');
-  const grass = new THREE.Color('#5a6e38');
+  const stone = new THREE.Color('#ffffff');
+  const dark = new THREE.Color('#c9c3b8');
+  const grass = new THREE.Color('#b9cc96');
   const c = new THREE.Color();
   const paint = (x: number, z: number) => {
     const m = fbm(x * 0.35 + seed, z * 0.35);
@@ -154,7 +322,6 @@ function topCap(inside: (x: number, z: number) => boolean, x0: number, x1: numbe
     // flagstone joints
     const jx = Math.abs(((x * 0.9 + Math.floor(z * 0.9) * 0.5) % 1 + 1) % 1 - 0.5);
     const jz = Math.abs(((z * 0.9) % 1 + 1) % 1 - 0.5);
-    if (Math.max(jx, jz) > 0.46 && g < 0.55) c.multiplyScalar(0.62);
     col.push(c.r, c.g, c.b);
   };
   for (let x = x0; x < x1; x += cell)
@@ -176,6 +343,9 @@ function topCap(inside: (x: number, z: number) => boolean, x0: number, x1: numbe
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const uv: number[] = [];
+  for (let i = 0; i < pos.length; i += 3) uv.push(pos[i] / 5, pos[i + 2] / 5); // one tile every 5 m
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.computeVertexNormals();
   return g;
 }
@@ -190,12 +360,15 @@ function Tops() {
     };
     for (const s of [-1, 1]) parts.push(topCap((x, z) => rr(s * x, z, L.x0 - 3, L.x1, L.z0 - 1, L.z1, L.r) && !(Math.abs(x) < 9.6 && z < PLANK.roadZ) && z > PLANK.cliffZ - 0.6, s < 0 ? -L.x1 : L.x0 - 3, s < 0 ? -(L.x0 - 3) : L.x1, L.z0 - 1, L.z1, 0, s * 5));
     parts.push(topCap((x, z) => Math.hypot(x - PLANK.peak.x, z - PLANK.peak.z) <= PLANK.peak.r - 0.05, -PLANK.peak.r, PLANK.peak.r, PLANK.peak.z - PLANK.peak.r, PLANK.peak.z + PLANK.peak.r, PLANK.peak.h, 13));
-    return mergeGeometries(parts, false)!;
+    return parts;
   }, []);
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, map: groundTex(), roughness: 0.95 }), []);
   return (
-    <mesh geometry={geo} receiveShadow>
-      <meshStandardMaterial vertexColors roughness={0.95} />
-    </mesh>
+    <group>
+      {geo.map((g, i) => (
+        <mesh key={i} geometry={g} material={mat} receiveShadow />
+      ))}
+    </group>
   );
 }
 
@@ -249,7 +422,7 @@ function Road() {
       let k = 0;
       for (const g of boards) {
         const shade = 0.8 + ((k++ * 7919) % 100) / 300;
-        for (let i = 0; i < g.attributes.position.count; i++) bc.push(0.47 * shade, 0.33 * shade, 0.2 * shade);
+        for (let i = 0; i < g.attributes.position.count; i++) bc.push(shade, shade * 0.95, shade * 0.9);
       }
     }
     bg.setAttribute('color', new THREE.Float32BufferAttribute(bc, 3));
@@ -298,10 +471,10 @@ function Road() {
   return (
     <group>
       <mesh geometry={boards} castShadow receiveShadow>
-        <meshStandardMaterial vertexColors roughness={0.85} />
+        <meshStandardMaterial vertexColors map={wood()} roughness={0.85} />
       </mesh>
       <mesh geometry={beams} castShadow>
-        <meshStandardMaterial color="#3d2b1c" roughness={0.9} />
+        <meshStandardMaterial color="#6b5440" map={wood()} roughness={0.9} />
       </mesh>
       <mesh geometry={posts} castShadow>
         <meshStandardMaterial color="#4a3422" roughness={0.85} />
@@ -322,7 +495,7 @@ function Bridge({ k }: { k: number }) {
   const planks = useRef<THREE.InstancedMesh>(null);
   const sway = useRef<THREE.Group>(null);
   const plankGeo = useMemo(() => new THREE.BoxGeometry(PLANK.bridgeHalfW * 2 - 0.1, 0.08, PLANK.plankLen - 0.12), []);
-  const plankMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#7a5634', roughness: 0.9 }), []);
+  const plankMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#ffffff', map: wood(), roughness: 0.9 }), []);
   const { ropes, ends } = useMemo(() => {
     const rope: THREE.BufferGeometry[] = [];
     const W = PLANK.bridgeHalfW;
@@ -381,7 +554,7 @@ function Bridge({ k }: { k: number }) {
       scl.setScalar(alive ? 1 : 0.0001);
       m4.compose(pos, q, scl);
       im.setMatrixAt(i, m4);
-      im.setColorAt(i, cracked ? new THREE.Color('#5a3c22') : new THREE.Color(i % 3 ? '#7a5634' : '#6a4a2c'));
+      im.setColorAt(i, cracked ? new THREE.Color('#6a5040') : new THREE.Color(i % 3 ? '#c8b29a' : '#b09878'));
     }
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -533,7 +706,7 @@ function Pines() {
       t.translate(x, y, z);
       trunk.push(t.toNonIndexed());
       for (let k = 0; k < 3; k++) {
-        const c = new THREE.ConeGeometry((1.1 - k * 0.25) * s, 0.7 * s, 7);
+        const c = new THREE.ConeGeometry((1.1 - k * 0.25) * s, 0.7 * s, 7, 1, true); // open: no grey disc under it seen from below
         c.scale(1, 1, 0.7);
         c.translate((rand() - 0.5) * 0.3 * s, (1.4 + k * 0.45) * s, 0);
         c.rotateX(lean);
@@ -559,11 +732,100 @@ function Pines() {
   return (
     <group>
       <mesh geometry={geo.needles} castShadow>
-        <meshStandardMaterial color="#2f4a33" roughness={0.9} flatShading />
+        <meshStandardMaterial color="#2f4a33" roughness={0.9} flatShading side={THREE.DoubleSide} />
       </mesh>
       <mesh geometry={geo.trunk} castShadow>
         <meshStandardMaterial color="#4a3526" roughness={0.9} />
       </mesh>
+    </group>
+  );
+}
+
+/** grass tufts and small stones on the ledges and the peak, and a campfire at each camp (decoration only) */
+function Dressing() {
+  const geo = useMemo(() => {
+    const rand = seeded(29);
+    const L = PLANK.ledge;
+    const spots: [number, number, number][] = [];
+    const onLedge = (x: number, z: number) => Math.abs(x) > L.x0 - 2.5 && Math.abs(x) < L.x1 - 0.6 && z > L.z0 + 0.4 && z < L.z1 - 0.5 && !(Math.abs(x) < 9.6 && z < PLANK.roadZ);
+    const onPeak = (x: number, z: number) => Math.hypot(x - PLANK.peak.x, z - PLANK.peak.z) < PLANK.peak.r - 0.5 && Math.hypot(x - PLANK.peak.x, z - PLANK.peak.z - 1.2) > 3.2;
+    for (let k = 0; k < 900 && spots.length < 260; k++) {
+      const x = (rand() - 0.5) * 48;
+      const z = -10 + rand() * 25;
+      if (onLedge(x, z)) spots.push([x, 0, z]);
+      else if (onPeak(x, z)) spots.push([x, PLANK.peak.h, z]);
+    }
+    const blades: THREE.BufferGeometry[] = [];
+    const stones: THREE.BufferGeometry[] = [];
+    for (const [x, y, z] of spots) {
+      // tufts where the grass is (the same noise as the ground's colour), stones elsewhere
+      const g = fbm(x * 0.18 - (x > 0 ? 5 : -5), z * 0.18 + 3);
+      if (g > 0.45 || rand() < 0.35) {
+        for (let b = 0; b < 5; b++) {
+          const h = 0.18 + rand() * 0.22;
+          const c = new THREE.ConeGeometry(0.035, h, 3);
+          c.translate(0, h / 2, 0);
+          c.rotateZ((rand() - 0.5) * 0.7);
+          c.rotateY(rand() * Math.PI);
+          c.translate(x + (rand() - 0.5) * 0.25, y, z + (rand() - 0.5) * 0.25);
+          blades.push(c.toNonIndexed());
+        }
+      } else {
+        const r = 0.08 + rand() * 0.18;
+        const d = new THREE.DodecahedronGeometry(r, 0);
+        d.scale(1, 0.55, 1);
+        d.rotateY(rand() * 6);
+        d.translate(x, y + r * 0.3, z);
+        stones.push(d.toNonIndexed());
+      }
+    }
+    // a campfire: a ring of stones and crossed logs, at each camp
+    const logs: THREE.BufferGeometry[] = [];
+    for (const s of [-1, 1]) {
+      const cx = s * 19.5;
+      const cz = -3.4;
+      for (let k = 0; k < 9; k++) {
+        const a = (k / 9) * Math.PI * 2;
+        const d = new THREE.DodecahedronGeometry(0.16, 0);
+        d.scale(1, 0.6, 1);
+        d.translate(cx + Math.cos(a) * 0.55, 0.06, cz + Math.sin(a) * 0.55);
+        stones.push(d.toNonIndexed());
+      }
+      for (let k = 0; k < 3; k++) {
+        const l = new THREE.CylinderGeometry(0.06, 0.07, 0.8, 6);
+        l.rotateZ(Math.PI / 2 - 0.25);
+        l.rotateY((k / 3) * Math.PI);
+        l.translate(cx, 0.15, cz);
+        logs.push(l.toNonIndexed());
+      }
+    }
+    return { blades: mergeGeometries(blades, false)!, stones: mergeGeometries(stones, false)!, logs: mergeGeometries(logs, false)! };
+  }, []);
+  const glow = useRef<THREE.Mesh[]>([]);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    glow.current.forEach((m, i) => m && m.scale.setScalar(0.85 + Math.sin(t * 9 + i * 2) * 0.12 + Math.sin(t * 23 + i) * 0.06));
+  });
+  return (
+    <group>
+      <mesh geometry={geo.blades}>
+        <meshStandardMaterial color="#6f8a3e" roughness={0.9} />
+      </mesh>
+      <mesh geometry={geo.stones} castShadow>
+        <meshStandardMaterial color="#7d776c" roughness={0.95} flatShading />
+      </mesh>
+      <mesh geometry={geo.logs}>
+        <meshStandardMaterial color="#3a2618" roughness={0.9} />
+      </mesh>
+      {[-1, 1].map((s, i) => (
+        <group key={s} position={[s * 19.5, 0.12, -3.4]}>
+          <mesh ref={(m) => m && (glow.current[i] = m)} position={[0, 0.22, 0]}>
+            <coneGeometry args={[0.22, 0.6, 7]} />
+            <meshBasicMaterial color={new THREE.Color('#ffb04a').multiplyScalar(2.2)} toneMapped={false} transparent opacity={0.85} />
+          </mesh>
+          <pointLight color="#ff9a40" intensity={6} distance={6} decay={2} position={[0, 0.6, 0]} />
+        </group>
+      ))}
     </group>
   );
 }
@@ -581,9 +843,11 @@ export function PlankwayMap() {
       <CloudSea y={-24} color="#fbf7f0" shadow="#98a0b4" horizon="#ece0cc" sunDir={SUN_DIR} />
       <KarstPeaks seed={44} baseY={-45} haze="#dcd8d0" rock="#5a5f5a" light="#ffdca8" lightDir={SUN_DIR} layers={PEAK_LAYERS} />
       <CloudPuffs count={34} inner={20} outer={140} y={PUFF_Y} color="#fffdf8" seed={71} />
+      <CloudPuffs count={14} inner={10} outer={30} y={[-24, -17]} color="#ffffff" seed={5} />
       <Cliff />
       <Rocks />
       <Tops />
+      <Dressing />
       <Road />
       <Bridge k={0} />
       <Bridge k={1} />
