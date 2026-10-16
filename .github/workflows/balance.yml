@@ -1,0 +1,84 @@
+# 英雄平衡测试: every pair of heroes fights N rounds, AI against AI, each pair on its own machine at the same
+# time (a matrix of 10 jobs), then one job adds it all up into a win-rate table on the run's summary page.
+# Run it from the Actions tab ("Run workflow"), or it runs by itself when hero numbers change.
+name: Hero balance test
+on:
+  workflow_dispatch:
+    inputs:
+      rounds: { description: 'Rounds per pair', default: '40' }
+      level: { description: 'AI level (easy / normal / hard / hell)', default: 'hard' }
+      map: { description: 'Map id (temple is a plain arena)', default: 'temple' }
+  push:
+    branches: [main]
+    paths: ['src/components/CombatData.ts', 'src/game/heroes/**']
+permissions:
+  contents: read
+concurrency: { group: balance, cancel-in-progress: true }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx vite build --outDir sim-build --base /
+      - uses: actions/upload-artifact@v4
+        with: { name: sim-build, path: sim-build, retention-days: 1 }
+  fight:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pair:
+          - 狂刃 暗器
+          - 狂刃 梵音
+          - 狂刃 影刃
+          - 狂刃 天子
+          - 暗器 梵音
+          - 暗器 影刃
+          - 暗器 天子
+          - 梵音 影刃
+          - 梵音 天子
+          - 影刃 天子
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/download-artifact@v4
+        with: { name: sim-build, path: sim-build }
+      - name: Browser
+        run: |
+          npm i --no-save playwright@1.56.0 http-server@14.1.1
+          npx playwright install --with-deps chromium
+      - name: Fight
+        env:
+          URL: http://127.0.0.1:4180/
+        run: |
+          npx http-server sim-build -p 4180 -s &
+          sleep 3
+          set -- ${{ matrix.pair }}
+          node tools/balance/balance.cjs $1 $2 ${{ inputs.rounds || '40' }} ${{ inputs.map || 'temple' }} ${{ inputs.level || 'hard' }} | tee result.jsonl
+      - uses: actions/upload-artifact@v4
+        with: { name: 'result-${{ strategy.job-index }}', path: result.jsonl, retention-days: 30 }
+  report:
+    needs: fight
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'result-*', path: results }
+      - name: Win rates
+        run: |
+          cat results/*/result.jsonl > all.jsonl
+          python3 tools/balance/report.py all.jsonl | tee report.md
+          cat report.md >> $GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balance-report
+          retention-days: 90
+          path: |
+            all.jsonl
+            report.md
