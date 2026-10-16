@@ -2,6 +2,7 @@ import { useSettings, setSettings, AI_LEVELS, type AiLevel } from '../../setting
 import type { RoomSeat } from '../../net';
 import React, { useState } from 'react';
 import { InkBackdrop } from './InkBackdrop';
+import { StatsPanel } from './StatsPanel';
 import { MAPS, MAP_ORDER, MapId } from '../../maps';
 import { CLASS_CONFIGS } from '../CombatData';
 import { CharacterClassId } from '../../types';
@@ -62,6 +63,7 @@ export interface LobbyProps {
 export function Lobby(p: LobbyProps) {
   const settings = useSettings();
   const [showOnline, setShowOnline] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   // the battlefield you're looking at; the live game keeps its map until you press 出征
   const [pick, setPick] = useState<MapId>(p.mapId);
@@ -81,6 +83,9 @@ export function Lobby(p: LobbyProps) {
             </button>
           </div>
           <div className="tq-l-tools">
+            <button className={`tq-chip ${showStats ? 'on' : ''}`} onClick={() => setShowStats(true)} title="我的战绩 · 排行榜 · 英雄胜率">
+              战绩
+            </button>
             <button className={`tq-chip ${showOnline || p.onlineBadge ? 'on' : ''}`} onClick={() => setShowOnline((v) => !v)}>
               联机{p.onlineBadge ? <em>{p.onlineBadge}</em> : null}
             </button>
@@ -95,6 +100,7 @@ export function Lobby(p: LobbyProps) {
               {p.onlinePanel}
             </div>
           )}
+          {showStats && <StatsPanel onClose={() => setShowStats(false)} />}
         </header>
 
         {/* ---- the heroes ---- */}

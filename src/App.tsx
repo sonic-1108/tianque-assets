@@ -11,7 +11,8 @@ import { useGameInput } from './input';
 import { Game, RoundEvent } from './Game';
 import { MAPS, MAP_ORDER, MapId, mapRuntime, desertIndoor } from './maps';
 import { SettingsPanel } from './components/SettingsPanel';
-import { useSettings, QUALITY, AI_LEVELS } from './settings';
+import { useSettings, QUALITY, AI_LEVELS, getSettings } from './settings';
+import { reportRound, rename as renameAccount, getAccount } from './stats';
 import type { CharacterClassId } from './types';
 import { NetSession, makeRoomCode, NetMessage, RoomSeat } from './net';
 import { defaultRoom, lineupOf, roomReady, seatGuests, SEAT_SIDE, aiName } from './room';
@@ -191,6 +192,7 @@ export default function App() {
     if (!v) return;
     setNickname(v);
     setEditingName(false);
+    if (getAccount()) renameAccount(v).catch(() => {}); // the 战绩 board shows the new name too
     try {
       localStorage.setItem('tq_nickname', v);
     } catch {
@@ -255,6 +257,10 @@ export default function App() {
     return l;
   }, [lineupKey, mapId]);
   const teamFight = lineup.seats.length > 2;
+  const lineupRef = useRef(lineup);
+  lineupRef.current = lineup;
+  // 战绩: when the current round started, and the damage dealt so far then
+  const roundStartRef = useRef({ t: Date.now(), dmg: 0 });
   const [toast, setToast] = useState<{ n: number; text: string }>({ n: 0, text: '' });
 
   // Versus mode: 霍岩影 fights back (toggle in pause menu or press P)
@@ -286,6 +292,30 @@ export default function App() {
   const handleRoundEvent = useCallback((e: RoundEvent) => {
     const n = netRef.current;
     if (n && n.role === 'host' && e.type !== 'playerHit' && e.type !== 'toast') n.send({ t: 're', e });
+    if (e.type === 'ko' || e.type === 'draw') {
+      // 战绩: one finished round (versus the AI or online; never the training dummy)
+      const L = lineupRef.current;
+      const meSeat = L.seats[L.me];
+      const foeSeat = L.seats.find((x) => x.side !== meSeat?.side && x.side !== 2) ?? L.seats.find((x) => x !== meSeat);
+      const isOnline = !!netRef.current && netRef.current.status === 'connected';
+      if (meSeat && foeSeat && (aiEnabledRef.current || isOnline)) {
+        const st = roundStartRef.current;
+        const p1 = p1RefState.current;
+        const won = e.type === 'ko' ? (e.winner === 'player' ? 1 : 0) : 2;
+        reportRound(nicknameRef.current, {
+          hero: meSeat.cls,
+          foe: foeSeat.cls,
+          map: mapIdRef.current,
+          mode: isOnline ? 'online' : getSettings().aiLevel,
+          result: won as 0 | 1 | 2,
+          dur: (Date.now() - st.t) / 1000,
+          dmg: Math.max(0, (p1?.totalDamageDealt ?? 0) - st.dmg),
+        }).then((r) => {
+          if (r && r.gain) setToast((t) => ({ n: t.n + 1, text: `修为 +${r.gain} · 等级 ${r.level}` }));
+        });
+      }
+    }
+    if (e.type === 'reset') roundStartRef.current = { t: Date.now(), dmg: p1RefState.current?.totalDamageDealt ?? 0 };
     if (e.type === 'ko') {
       setRoundBanner(e.winner);
       setBannerReason(e.reason ?? '');
@@ -564,6 +594,10 @@ export default function App() {
   }, []);
 
   const p1RefState = useRef<CombatantState>(createCombatant('f0', true));
+  useEffect(() => {
+    // a match starts: the 战绩 clock for its first round
+    if (!isMapSelectOpen) roundStartRef.current = { t: Date.now(), dmg: p1RefState.current?.totalDamageDealt ?? 0 };
+  }, [isMapSelectOpen]);
   const dummyRefState = useRef<CombatantState>(createCombatant('f1', false));
   // every fighter of the match, slot order (2 to 4); slot 0 and 1 reuse the two above
   const fightersRef = useRef<CombatantState[]>([p1RefState.current, dummyRefState.current]);

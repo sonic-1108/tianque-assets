@@ -75,6 +75,9 @@ jobs:
           cat results/*/result.jsonl > all.jsonl
           python3 tools/balance/report.py all.jsonl | tee report.md
           cat report.md >> $GITHUB_STEP_SUMMARY
+          # the same table as an annotation too (readable through the API, e.g. by tools that can't fetch artifacts)
+          msg=$(python3 -c "import sys; print(open('report.md', encoding='utf-8').read().replace('%', '%25').replace('\r', '').replace('\n', '%0A'))")
+          echo "::notice title=balance-report::$msg"
       - uses: actions/upload-artifact@v4
         with:
           name: balance-report

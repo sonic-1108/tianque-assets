@@ -50,6 +50,19 @@ jobs:
           # the account's workers.dev subdomain, as set in the dashboard (not a secret)
           [ -z "$sub" ] && sub=msjzxy2022
           cd relay
+          # 战绩 database: Cloudflare D1 (created the first time); needs the token's D1 permission. Without it the
+          # stats fall back to a Durable Object's SQLite, so the deploy goes on either way.
+          dbid=$(npx --yes wrangler@4 d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="tianque-db") | .uuid' 2>/dev/null)
+          if [ -z "$dbid" ]; then
+            npx --yes wrangler@4 d1 create tianque-db > ../d1.log 2>&1 || true
+            dbid=$(npx --yes wrangler@4 d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="tianque-db") | .uuid' 2>/dev/null)
+          fi
+          if [ -n "$dbid" ]; then
+            printf '\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "tianque-db"\ndatabase_id = "%s"\n' "$dbid" >> wrangler.toml
+            echo "::notice::stats database: D1 tianque-db"
+          else
+            echo "::warning::D1 not available ($(grep -m1 -i 'error\|permission\|auth' ../d1.log | cut -c1-160)); stats use Durable Object storage. Add the D1 Edit permission to the Cloudflare token to switch to D1."
+          fi
           if npx --yes wrangler@4 deploy > ../wrangler.log 2>&1; then
             echo "url=wss://tianque-relay.$sub.workers.dev" >> $GITHUB_OUTPUT
             echo "::notice::relay deployed: wss://tianque-relay.$sub.workers.dev"

@@ -1,3 +1,5 @@
+import { api, Store } from './stats.js';
+export { Store };
 // 天阙 relay (Cloudflare Worker + Durable Object, WebSocket hibernation).
 // wss://<worker>/r/<ROOM>?side=h  the host        wss://<worker>/r/<ROOM>?side=g  a guest
 // Whatever the host sends goes to every guest of that room; whatever a guest sends goes to the host.
@@ -69,6 +71,7 @@ const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 export default {
   async fetch(req, env) {
     const path = new URL(req.url).pathname;
+    if (path.startsWith('/api/')) return api(req, env); // 战绩 / 排行榜 / 账号
     if (path === '/p') {
       if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
       return env.PRESENCE.get(env.PRESENCE.idFromName('all')).fetch(req);

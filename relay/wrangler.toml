@@ -13,6 +13,10 @@ class_name = "Room"
 name = "PRESENCE"
 class_name = "Presence"
 
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "Store"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
@@ -20,3 +24,10 @@ new_sqlite_classes = ["Room"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Presence"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Store"]
+
+# The D1 database (tianque-db) is bound at deploy time by .github/workflows/deploy.yml, which creates it the
+# first time and appends its [[d1_databases]] block here; without it the stats live in the Store object.
