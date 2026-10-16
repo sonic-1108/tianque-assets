@@ -5,7 +5,7 @@ import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { FOREST, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT, CUSHIONS } from '../../maps';
+import { FOREST, FGROW, riverZ, forestFloor, bridgeDeck, mapRuntime, ladderAngle, TEMPLE_YAW, templeToWorld, worldToTemple, CANDLE_POINTS, HILL_STAIRS, PODIUM_STEPS, hillStairTread, MAX_ITEMS, TREE_HOOKS, CANDLE_LIGHT, CUSHIONS } from '../../maps';
 import { Sky, seeded, GLSL_NOISE, cloudPuffTexture } from '../Scenery';
 
 // ==================================================================
@@ -19,8 +19,19 @@ const SUN = new THREE.Vector3(8, 14, 6).normalize();
 const R = FOREST.radius; // arena radius
 
 const RIVER_GLSL = /* glsl */ `
-  float riverZ(float x){ return 2.0 + 6.0 * sin(x * 0.045 + 0.4) + 2.0 * sin(x * 0.11 + 1.3); }
+  float riverZ(float x){ float u = x / ${FGROW.toFixed(5)}; return ${FGROW.toFixed(5)} * (2.0 + 6.0 * sin(u * 0.045 + 0.4) + 2.0 * sin(u * 0.11 + 1.3)); }
 `;
+/** split clusters into square sectors so each part of the map can be culled on its own */
+function bySector<T>(items: T[], at: (t: T) => [number, number], size = 70): T[][] {
+  const m = new Map<string, T[]>();
+  for (const it of items) {
+    const [x, z] = at(it);
+    const k = `${Math.floor(x / size)},${Math.floor(z / size)}`;
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(it);
+  }
+  return [...m.values()];
+}
 const floorAt = (x: number, z: number) => forestFloor(x, z, false);
 
 /** shared uniforms: time and wind gust */
@@ -288,12 +299,36 @@ function foliageMaterial(tex: THREE.Texture, opts: { sway: number; grass?: boole
 // the river channel is cut into it (pebbles under water, wet mud on the banks)
 // ---------------------------------------------------------------
 function terrainGeometry() {
-  const size = 320;
-  const seg = 320;
+  const size = Math.ceil((R + 70) * 2);
+  const seg = Math.round(size / 1.25);
   const g = new THREE.PlaneGeometry(size, size, seg, seg);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) pos.setY(i, floorAt(pos.getX(i), pos.getZ(i)));
+  const roots = new Float32Array(pos.count);
+  // trees bucketed on a 10 m grid: each vertex only looks at the trees near it
+  const cell = 10;
+  const grid = new Map<string, [number, number, number][]>();
+  for (const [x, z, r] of FOREST.trees) {
+    const k = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k)!.push([x, z, r]);
+  }
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    pos.setY(i, floorAt(x, z));
+    let rt = 0;
+    const cx = Math.floor(x / cell);
+    const cz = Math.floor(z / cell);
+    for (let a = -1; a <= 1; a++)
+      for (let b = -1; b <= 1; b++)
+        for (const [tx, tz, r] of grid.get(`${cx + a},${cz + b}`) ?? []) {
+          const t = Math.max(0, Math.min(1, (Math.hypot(x - tx, z - tz) - r) / 4.5));
+          rt = Math.max(rt, 1 - t * t * (3 - 2 * t));
+        }
+    roots[i] = rt;
+  }
+  g.setAttribute('aRoots', new THREE.BufferAttribute(roots, 1));
   g.computeVertexNormals();
   return g;
 }
@@ -301,20 +336,18 @@ function terrainGeometry() {
 function Ground() {
   const { geo, mat } = useMemo(() => {
     const m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.95, metalness: 0 });
-    const trees = FOREST.trees.map(([x, z, r]) => new THREE.Vector3(x, z, r));
     m.onBeforeCompile = (sh) => {
       sh.uniforms.uTime = shared.uTime;
-      sh.uniforms.uTrees = { value: trees };
       sh.uniforms.uWaterY = { value: FOREST.waterY };
       sh.uniforms.uRain = shared.uRain;
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vWP; varying vec3 vWN;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);');
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWP; varying vec3 vWN; attribute float aRoots; varying float vRoots;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal); vRoots = aRoots;');
       sh.fragmentShader = sh.fragmentShader
         .replace(
           '#include <common>',
           `#include <common>
-          uniform float uTime; uniform vec3 uTrees[${trees.length}]; uniform float uWaterY; uniform float uRain;
+          uniform float uTime; uniform float uWaterY; uniform float uRain; varying float vRoots;
           float gPuddle;
           varying vec3 vWP; varying vec3 vWN;
           ${GLSL_NOISE}
@@ -338,11 +371,7 @@ function Ground() {
             float worn = max(smoothstep(0.58, 0.78, n1), path * 0.85);
             vec3 col = mix(moss, grass, smoothstep(0.4, 0.6, n2 + n3 * 0.3));
             col = mix(col, earth, worn * 0.85);
-            float roots = 0.0;
-            for (int i = 0; i < ${trees.length}; i++) {
-              float d = length(p - uTrees[i].xy) - uTrees[i].z;
-              roots = max(roots, 1.0 - smoothstep(0.0, 4.5, d));
-            }
+            float roots = vRoots;
             float leafy = smoothstep(0.66, 0.72, noise(p * 9.5 + 11.0)) * (0.25 + roots * 0.6);
             vec3 leafCol = mix(vec3(0.42, 0.26, 0.08), vec3(0.55, 0.4, 0.12), noise(p * 13.0));
             col = mix(col, leafCol, leafy);
@@ -431,9 +460,9 @@ function River() {
     const uv: number[] = [];
     const depth: number[] = [];
     const idx: number[] = [];
-    const x0 = -170;
-    const x1 = 170;
-    const n = 680;
+    const x0 = -(R + 90);
+    const x1 = R + 90;
+    const n = Math.round((x1 - x0) * 2);
     const across = 14;
     const W = FOREST.bankHalf + 1.5;
     for (let i = 0; i <= n; i++) {
@@ -743,10 +772,14 @@ function mergeGeos(geos: THREE.BufferGeometry[]) {
 }
 
 function GiantTrees() {
-  const { wood, clusters } = useMemo(() => {
+  const { woods, clusterSets } = useMemo(() => {
+    const woods: THREE.BufferGeometry[] = [];
+    const clusterSets: Cluster[][] = [];
+    const idx = FOREST.trees.map((t, i) => [t, i] as const);
+    for (const group of bySector(idx, ([t]) => [t[0], t[1]])) {
     const parts: THREE.BufferGeometry[] = [];
     const clusters: Cluster[] = [];
-    FOREST.trees.forEach(([x, z, r, deck], i) => {
+    group.forEach(([[x, z, r, deck], i]) => {
       const base = Math.min(floorAt(x - r, z), floorAt(x + r, z), floorAt(x, z - r), floorAt(x, z + r));
       const h = 19 + (i % 3) * 3;
       const deckRel = deck > 0 ? deck - base : 0;
@@ -758,13 +791,22 @@ function GiantTrees() {
       clusters.push(...L.clusters);
       parts.push(...rootGeometries(x, z, r, 300 + i, base));
     });
-    return { wood: mergeGeos(parts), clusters };
+    const w = mergeGeos(parts);
+    w.computeBoundingSphere();
+    woods.push(w);
+    clusterSets.push(clusters);
+    }
+    return { woods, clusterSets };
   }, []);
   const per = useMemo(() => (c: Cluster) => Math.round(c.r * c.r * 4.2), []);
   return (
     <group>
-      <mesh geometry={wood} material={barkMaterial()} castShadow receiveShadow />
-      <CanopyCards clusters={clusters} perCluster={per} size={2.4} seed={61} />
+      {woods.map((w, k) => (
+        <mesh key={k} geometry={w} material={barkMaterial()} castShadow receiveShadow />
+      ))}
+      {clusterSets.map((cs, k) => (
+        <CanopyCards key={k} clusters={cs} perCluster={per} size={2.4} seed={61 + k} />
+      ))}
       <Lookouts />
     </group>
   );
@@ -850,9 +892,9 @@ function BackgroundForest() {
   const { trunks, clusters } = useMemo(() => {
     const rand = seeded(71);
     const spots: [number, number, number][] = [];
-    for (let k = 0; k < 2400 && spots.length < 360; k++) {
+    for (let k = 0; k < 9000 && spots.length < 900; k++) {
       const a = rand() * Math.PI * 2;
-      const r = R + 4 + Math.pow(rand(), 0.9) * 90;
+      const r = R + 4 + Math.pow(rand(), 0.9) * 60;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
       if (nearRiver(x, z, 1)) continue; // the river keeps its open corridor out of the forest
@@ -885,13 +927,15 @@ function BackgroundForest() {
     });
     im.receiveShadow = true;
     im.instanceMatrix.needsUpdate = true;
-    return { trunks: im, clusters };
+    return { trunks: im, clusters: bySector(clusters, (c) => [c.c.x, c.c.z], 90) };
   }, []);
   const per = useMemo(() => (c: Cluster) => Math.round(c.r * 4.5), []);
   return (
     <group>
       <primitive object={trunks} />
-      <CanopyCards clusters={clusters} perCluster={per} size={3.6} seed={73} />
+      {clusters.map((cs, k) => (
+        <CanopyCards key={k} clusters={cs} perCluster={per} size={3.6} seed={73 + k} />
+      ))}
     </group>
   );
 }
@@ -920,7 +964,7 @@ function Grass() {
     const geo = mergeGeos([a, b]);
     const mat = foliageMaterial(grassTexture(), { sway: 0.12, grass: true });
     const spots: [number, number, number][] = [];
-    for (let k = 0; k < 90000 && spots.length < 18000; k++) {
+    for (let k = 0; k < 320000 && spots.length < 50000; k++) {
       const r = Math.sqrt(rand()) * (R + 10);
       const t = rand() * Math.PI * 2;
       const x = Math.cos(t) * r;
@@ -993,12 +1037,12 @@ function Ferns() {
         const d = r + 0.8 + rand() * 2.5;
         spots.push([tx + Math.cos(a) * d, tz + Math.sin(a) * d, 0.8 + rand() * 0.6]);
       }
-    for (let k = 0; k < 520; k++) {
+    for (let k = 0; k < 1400; k++) {
       const a = rand() * Math.PI * 2;
       const d = R - 2 + rand() * 12;
       spots.push([Math.cos(a) * d, Math.sin(a) * d, 1 + rand() * 0.8]);
     }
-    for (let k = 0; k < 200; k++) {
+    for (let k = 0; k < 540; k++) {
       const x = (rand() - 0.5) * 2 * R;
       const side = rand() < 0.5 ? -1 : 1;
       spots.push([x, riverZ(x) + side * (FOREST.bankHalf + 0.5 + rand() * 2.5), 0.7 + rand() * 0.5]);
@@ -1028,8 +1072,8 @@ function EdgeShrubs() {
   const clusters = useMemo(() => {
     const rand = seeded(89);
     const out: Cluster[] = [];
-    for (let k = 0; k < 150; k++) {
-      const a = (k / 150) * Math.PI * 2 + rand() * 0.03;
+    for (let k = 0; k < 400; k++) {
+      const a = (k / 400) * Math.PI * 2 + rand() * 0.03;
       const r = R + 1.8 + rand() * 3.5;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
@@ -1037,10 +1081,16 @@ function EdgeShrubs() {
       if (Math.hypot(x - SHRINE[0], z - SHRINE[1]) < 4) continue;
       out.push({ c: new THREE.Vector3(x, floorAt(x, z) + 0.6 + rand() * 0.6, z), r: 1.3 + rand() * 1.1 });
     }
-    return out;
+    return bySector(out, (c) => [c.c.x, c.c.z], 90);
   }, []);
   const per = useMemo(() => (c: Cluster) => Math.round(c.r * 14), []);
-  return <CanopyCards clusters={clusters} perCluster={per} size={1.3} seed={91} />;
+  return (
+    <group>
+      {clusters.map((cs, k) => (
+        <CanopyCards key={k} clusters={cs} perCluster={per} size={1.3} seed={91 + k} />
+      ))}
+    </group>
+  );
 }
 
 // ---------------------------------------------------------------
@@ -1131,7 +1181,7 @@ function Stones() {
 }
 
 function Mushrooms() {
-  const items = useMemo(() => {
+  const { stems, caps } = useMemo(() => {
     const rand = seeded(101);
     const out: [number, number, number, number, number][] = [];
     for (const [tx, tz, r] of FOREST.trees)
@@ -1142,22 +1192,23 @@ function Mushrooms() {
         const z = tz + Math.sin(a) * d;
         out.push([x, floorAt(x, z), z, 0.6 + rand() * 0.7, rand() < 0.3 ? 1 : 0]);
       }
-    return out;
+    const stems = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.025, 0.035, 0.16, 6).translate(0, 0.08, 0), new THREE.MeshStandardMaterial({ color: '#e8dcc4', roughness: 0.8 }), out.length);
+    const caps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.55, 1).translate(0, 0.16, 0), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6 }), out.length);
+    const m = new THREE.Matrix4();
+    const red = new THREE.Color('#b3261e');
+    const brown = new THREE.Color('#a87b4a');
+    out.forEach(([x, y, z, sc, r], i) => {
+      m.makeScale(sc, sc, sc).setPosition(x, y, z);
+      stems.setMatrixAt(i, m);
+      caps.setMatrixAt(i, m);
+      caps.setColorAt(i, r ? red : brown);
+    });
+    return { stems, caps };
   }, []);
   return (
     <group>
-      {items.map(([x, y, z, s, red], i) => (
-        <group key={i} position={[x, y, z]} scale={s}>
-          <mesh position={[0, 0.08, 0]}>
-            <cylinderGeometry args={[0.025, 0.035, 0.16, 6]} />
-            <meshStandardMaterial color="#e8dcc4" roughness={0.8} />
-          </mesh>
-          <mesh position={[0, 0.16, 0]} scale={[1, 0.55, 1]}>
-            <sphereGeometry args={[0.09, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2]} />
-            <meshStandardMaterial color={red ? '#b3261e' : '#a87b4a'} roughness={0.6} />
-          </mesh>
-        </group>
-      ))}
+      <primitive object={stems} />
+      <primitive object={caps} />
     </group>
   );
 }
@@ -1259,7 +1310,7 @@ function GodRays() {
     // the beams come down along the sun direction, through gaps in the canopy
     const dir = SUN.clone().multiplyScalar(-1);
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
-    for (let k = 0; k < 22; k++) {
+    for (let k = 0; k < 60; k++) {
       const a = rand() * Math.PI * 2;
       const d = 3 + Math.sqrt(rand()) * (R - 6);
       const fx = Math.cos(a) * d;
@@ -1286,14 +1337,13 @@ function GodRays() {
 
 function Motes() {
   const pts = useMemo(() => {
-    const n = 2400;
+    // a 60 m tile that wraps round the camera (you only see the motes within ~26 m anyway)
+    const n = 1000;
     const rand = seeded(109);
     const pos = new Float32Array(n * 3);
     const seed = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      const a = rand() * Math.PI * 2;
-      const r = Math.sqrt(rand()) * (R - 4);
-      pos.set([Math.cos(a) * r, 0.3 + rand() * 9, Math.sin(a) * r], i * 3);
+      pos.set([rand() * 60, 0.3 + rand() * 9, rand() * 60], i * 3);
       seed[i] = rand();
     }
     const g = new THREE.BufferGeometry();
@@ -1309,6 +1359,8 @@ function Motes() {
         uniform float uTime; uniform float uRain; attribute float seed; varying float vA;
         void main(){
           vec3 p = position + vec3(sin(uTime * 0.3 + seed * 30.0), sin(uTime * 0.2 + seed * 17.0) * 0.6, cos(uTime * 0.25 + seed * 23.0)) * 0.8;
+          p.xz = cameraPosition.xz + mod(p.xz - cameraPosition.xz + 30.0, 60.0) - 30.0;
+          p.y += max(0.0, cameraPosition.y - 6.0);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           gl_PointSize = clamp(10.0 / -mv.z, 1.0, 4.0);
           vA = (0.35 + 0.65 * pow(0.5 + 0.5 * sin(uTime * (1.0 + seed * 2.0) + seed * 40.0), 4.0)) * (1.0 - smoothstep(14.0, 26.0, -mv.z)) * (1.0 - smoothstep(0.05, 0.4, uRain));
@@ -1358,11 +1410,14 @@ function FallingLeaves() {
       d.x += dt * (Math.sin(t * 0.8 + d.s * 20) * 0.6 + gust * 6);
       d.z += dt * (Math.cos(t * 0.6 + d.s * 13) * 0.4 + gust * 2.5);
       d.spin += dt * (2 + d.s * 3 + gust * 8);
-      if (d.y < Math.max(floorAt(d.x, d.z), FOREST.waterY) + 0.03 || Math.hypot(d.x, d.z) > R + 8 || (Math.hypot(d.x - FOREST.hill.x, d.z - FOREST.hill.z) < 11 && d.y < FOREST.hill.h + 14)) {
+      const vx = mapRuntime.viewX ?? 0;
+      const vz = mapRuntime.viewZ ?? 0;
+      if (d.y < Math.max(floorAt(d.x, d.z), FOREST.waterY) + 0.03 || Math.hypot(d.x, d.z) > R + 8 || Math.hypot(d.x - vx, d.z - vz) > 48 || (Math.hypot(d.x - FOREST.hill.x, d.z - FOREST.hill.z) < 11 && d.y < FOREST.hill.h + 14)) {
+        // they fall round the player: the map is too big to fill
         const a = Math.random() * Math.PI * 2;
-        const r = Math.sqrt(Math.random()) * (R + 2);
-        d.x = Math.cos(a) * r;
-        d.z = Math.sin(a) * r;
+        const r = Math.sqrt(Math.random()) * 40;
+        d.x = vx + Math.cos(a) * r;
+        d.z = vz + Math.sin(a) * r;
         d.y = 14 + Math.random() * 6;
       }
       e.set(d.spin, d.spin * 0.7, Math.sin(d.spin) * 0.8);
@@ -1379,7 +1434,7 @@ function FallingLeaves() {
 function Mist() {
   const items = useMemo(() => {
     const rand = seeded(127);
-    return Array.from({ length: 40 }, () => {
+    return Array.from({ length: 100 }, () => {
       const a = rand() * Math.PI * 2;
       const r = R + 6 + rand() * 50;
       return { p: [Math.cos(a) * r, 1.5 + rand() * 2.5, Math.sin(a) * r] as [number, number, number], s: 14 + rand() * 12 };

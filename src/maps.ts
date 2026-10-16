@@ -71,6 +71,10 @@ const ring = (n: number, radius: number, r: number, offset = 0): Circle[] =>
     return { x: Math.cos(a) * radius, z: Math.sin(a) * radius, r };
   });
 
+/** 青冥古林 is spread out much further than the arenas: its radius is 200 m (58 m before any growing) */
+export const FGROW = 200 / 58;
+const gf = (v: number) => Math.round(v * FGROW * 100) / 100;
+
 // ----------------------------------------------------------------------
 // 青冥古林 (50Q): a big clearing among thousand-year-old trees with a river
 // across the middle. Deep water is swum, the ford is waded, the bridge is
@@ -85,18 +89,20 @@ function frand(seed: number) {
 }
 /** the river's centre line: z as a function of x */
 export function riverZ(x: number) {
-  const u = x / GROW; // the whole forest was spread out 1.3x: the river's meanders with it
-  return GROW * (2 + 6 * Math.sin(u * 0.045 + 0.4) + 2 * Math.sin(u * 0.11 + 1.3));
+  const u = x / FGROW; // the whole forest is spread out FGROW times: the river's meanders with it
+  return FGROW * (2 + 6 * Math.sin(u * 0.045 + 0.4) + 2 * Math.sin(u * 0.11 + 1.3));
 }
 export const FOREST = {
-  radius: g1(58),
+  radius: gf(58),
+  /** the two camps, either side of the river (closer in than the edge, so a round doesn't open with a long march) */
+  spawnZ: [70, -68] as [number, number],
   waterY: -0.55, // river surface
   swimY: -1.5, // a swimmer's feet: body level with the surface
   deepHalf: 4.2, // half width of the deep channel
   bankHalf: 8.0, // where the banks meet the forest floor
   bedY: -3.0,
-  ford: [g1(-34), g1(-24)] as [number, number], // x range where the river runs shallow (waist-deep wading)
-  bridge: { x: g1(21), half: 1.6, deck: 0.7 }, // footbridge across the river at x = 21 (+-half), deck height at the middle
+  ford: [gf(-34), gf(-24)] as [number, number], // x range where the river runs shallow (waist-deep wading)
+  bridge: { x: gf(21), half: 1.6, deck: 0.7 }, // footbridge across the river at x = 21 (+-half), deck height at the middle
   /** giant trees: x, z, trunk radius, lookout deck height (0 = no deck) */
   trees: [] as [number, number, number, number][],
   logs: [] as [number, number, number, number][],
@@ -108,7 +114,7 @@ export const FOREST = {
   /** boulders: x, z, size, yaw */
   rocks: [] as [number, number, number, number][],
   /** the hill with the old temple on top */
-  hill: { x: g1(-26), z: g1(-33), r: 20, top: 13, h: 5.5 },
+  hill: { x: gf(-26), z: gf(-33), r: 20, top: 13, h: 5.5 },
   /** temple hall on the hilltop (local frame: +z faces the map centre) */
   temple: { w: 14, d: 10, podium: 0.9, col: 6.2 },
   /** where the candle-shade can be hidden (temple-local x, z) */
@@ -187,7 +193,7 @@ export const CANDLE_POINTS: [number, number][] = [
   const ok = (x: number, z: number, pad: number) => {
     if (Math.hypot(x, z) > FOREST.radius - 4) return false;
     if (Math.abs(z - riverZ(x)) < FOREST.bankHalf + pad) return false;
-    if (Math.hypot(x, z - g1(30)) < 7 || Math.hypot(x, z + g1(28)) < 7) return false; // spawns
+    if (Math.hypot(x, z - FOREST.spawnZ[0]) < 7 || Math.hypot(x, z - FOREST.spawnZ[1]) < 7) return false; // spawns
     if (Math.abs(x - FOREST.bridge.x) < 6 && Math.abs(z - riverZ(x)) < 14) return false; // bridge approaches
     // the temple hill, with room so no limb or crown reaches over the temple
     if (Math.hypot(x - FOREST.hill.x, z - FOREST.hill.z) < FOREST.hill.r + 6 + pad) return false;
@@ -202,20 +208,29 @@ export const CANDLE_POINTS: [number, number][] = [
     [-47, 8],
     [36, 12],
     [-40, 22],
+    [8, 42],
+    [-30, -46],
+    [36, -30],
+    [40, 30],
+    [-50, -12],
   ];
-  for (const [x, z] of lookouts) FOREST.trees.push([g1(x), g1(z), 1.9 + rand() * 0.4, 7.5 + rand() * 2]);
-  for (let k = 0; k < 900 && FOREST.trees.length < 30; k++) {
+  for (const [x, z] of lookouts) {
+    const r = 1.9 + rand() * 0.4;
+    const deck = 7.5 + rand() * 2;
+    if (ok(gf(x), gf(z), 1)) FOREST.trees.push([gf(x), gf(z), r, deck]);
+  }
+  for (let k = 0; k < 6000 && FOREST.trees.length < 110; k++) {
     const a = rand() * Math.PI * 2;
-    const d = (10 + Math.sqrt(rand()) * 44) * GROW;
+    const d = (10 + Math.sqrt(rand()) * 44) * FGROW;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
     if (!ok(x, z, 1)) continue;
     if (FOREST.trees.some(([tx, tz]) => Math.hypot(tx - x, tz - z) < 10)) continue;
     FOREST.trees.push([x, z, 1.5 + rand() * 0.6, 0]);
   }
-  for (let k = 0; k < 900 && FOREST.logs.length < 8; k++) {
+  for (let k = 0; k < 4000 && FOREST.logs.length < 26; k++) {
     const a = rand() * Math.PI * 2;
-    const d = (8 + Math.sqrt(rand()) * 42) * GROW;
+    const d = (8 + Math.sqrt(rand()) * 42) * FGROW;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
     const ang = rand() * Math.PI;
@@ -231,7 +246,7 @@ export const CANDLE_POINTS: [number, number][] = [
   {
     const rr = frand(97);
     const blockedT = (x: number, z: number, pad: number) => FOREST.trees.some(([tx, tz, r]) => Math.hypot(x - tx, z - tz) < r + pad);
-    for (let k = 0; k < 2000 && FOREST.rocks.length < 90; k++) {
+    for (let k = 0; k < 9000 && FOREST.rocks.length < 260; k++) {
       const a = rr() * Math.PI * 2;
       const d = 6 + rr() * (FOREST.radius + 4);
       const x = Math.cos(a) * d;
@@ -635,7 +650,7 @@ MAPS.forest = {
   icon: '🌲',
   sizeClass: '50Q',
   mechanics: [
-    '50Q 大地图：面积是普通地图的五倍多，开局两人隔河相望',
+    '50Q 大地图：方圆两百米，面积是演武场的四十倍，开局两人隔河相望',
     '大河横穿中间：深水区要游泳（游得慢、不能出招，只能翻滚潜游），西边有浅滩可以蹚过去，东边有一座木桥',
     '七棵古树上搭着猎人瞭望台：朝树跑过去按跳跃，施展「梯云纵」三步蹬上树顶（耗体力，途中被打会掉下来），站在台上居高临下；走到台边再跳就下来',
     '古树挡路也挡暗器，被击飞撞上树干会额外受伤并眩晕；倒木和河边的石头可以站上去',
@@ -651,8 +666,8 @@ MAPS.forest = {
   available: true,
   terrain: true,
   radius: FOREST.radius,
-  spawnPlayer: [0, g1(30)],
-  spawnEnemy: [0, g1(-28)],
+  spawnPlayer: [0, FOREST.spawnZ[0]],
+  spawnEnemy: [0, FOREST.spawnZ[1]],
   background: '#9fae8c',
   fog: [30, 170],
   hemi: ['#d9e8c0', '#2c3a22', 0.75],
