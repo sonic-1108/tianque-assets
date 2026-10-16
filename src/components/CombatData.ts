@@ -228,6 +228,9 @@ export const SHADOW_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPh
   ultimate: { totalDuration: 2.2, startup: 0.3, active: 1.6, recovery: 0.3, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: false, cancelableBySkill: false, cancelableByJump: false, allowAirCast: true },
 };
 
+/** every fighter's HP is its class hp times this (rounds were about 25 s, now about twice that). Hero damage is not scaled; map hazards are, so they stay the same share of a health bar. */
+export const HP_SCALE = 2;
+
 export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
   Berserker: {
     id: 'Berserker',

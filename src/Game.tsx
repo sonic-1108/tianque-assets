@@ -15,7 +15,7 @@ import { gameAudio } from './utils/helper';
 import { EmpMove, CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
 import { FX, muteable } from './fxMute';
 import { GameInputSnapshot, InputKeyAction } from './input';
-import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS } from './components/CombatData';
+import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS, HP_SCALE } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
@@ -4195,7 +4195,7 @@ function GameImpl({
       });
       for (const c of fighters) {
         const cc = CLASS_CONFIGS[c.classId];
-        c.maxHp = isBossFighter(c) ? 6500 : cc.hp; // 长安 boss (was 5200)
+        c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
         c.maxMp = cc.mp;
         c.name = cc.name;
         c.characterName = cc.defaultCharacter;
@@ -5552,6 +5552,7 @@ function GameImpl({
       const c = fighters[i];
       if (c.hp <= 0) return;
       if (launch > 0 && c.dodgeIframeTimer > 0) return;
+      dmg = Math.round(dmg * HP_SCALE);
       c.hp = Math.max(0, c.hp - dmg);
       c.whiteFlashTimer = 0.06;
       if (c.treeClimb !== undefined) {
@@ -5732,7 +5733,7 @@ function GameImpl({
       c.stateTimer = 0;
       c.stateDuration = 0.9;
       if (!aiOn) {
-        c.hp = Math.max(1, c.hp - 200);
+        c.hp = Math.max(1, c.hp - 200 * HP_SCALE);
         if (fighters.indexOf(c) !== ME) c.hp = c.maxHp;
       }
     }
@@ -7483,7 +7484,7 @@ function GameImpl({
           if (c.pos[1] > fy(c.pos[0], c.pos[2], c.pos[1]) + 1.6) return; // jumped over it
           A.hit[i] = true;
           if (c.dodgeIframeTimer > 0) return;
-          c.hp = Math.max(0, c.hp - 110);
+          c.hp = Math.max(0, c.hp - 110 * HP_SCALE);
           c.vel[0] = (Math.random() - 0.5) * 3;
           c.vel[2] = 11;
           c.vel[1] = 5.5;
