@@ -15,12 +15,13 @@ import { gameAudio } from './utils/helper';
 import { EmpMove, CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
 import { FX, muteable } from './fxMute';
 import { GameInputSnapshot, InputKeyAction } from './input';
+import { bank } from './wallet';
 import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS, HP_SCALE } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, LA, LOOT, laHeight, laWater, lakeE, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -388,6 +389,8 @@ function GameImpl({
   const bgNight = useMemo(() => new THREE.Color('#05070c'), []);
   /** weather clock and lightning timer (host / offline) */
   const weatherRef = useRef({ t: 12, phase: '', strike: 6, warn: 0 });
+  /** 洛城午后: this round's haul has been banked */
+  const laBankedRef = useRef(false);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
@@ -1100,6 +1103,28 @@ function GameImpl({
           aiReflex(i, c, foes[i], it);
           if (map.id === 'forest') aiForestErrands(i, c, foes[i], it);
           if (map.id === 'wending') aiWarErrands(i, c, foes[i], it);
+          if (map.id === 'losangeles') {
+            const dF = Math.hypot(foes[i].pos[0] - c.pos[0], foes[i].pos[2] - c.pos[2]);
+            if (dF > 9) {
+              let best: { x: number; z: number } | null = null;
+              let bd = 30;
+              for (const l of mapRuntime.la.loot) {
+                const d = Math.hypot(l.x - c.pos[0], l.z - c.pos[2]) * (l.kind.startsWith('cash') ? 1 : 0.5);
+                if (d < bd) {
+                  bd = d;
+                  best = l;
+                }
+              }
+              if (best) {
+                const dx = best.x - c.pos[0];
+                const dz = best.z - c.pos[2];
+                const L2 = Math.hypot(dx, dz) || 1;
+                it.move.set(dx / L2, 0, dz / L2);
+                it.faceYaw = Math.atan2(-dx, -dz);
+                it.request = null;
+              }
+            }
+          }
         }
       } else if (!aiOn) {
         it.faceYaw = c.targetRotY;
@@ -1580,7 +1605,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, war: { ...mapRuntime.war, shots: mapRuntime.war.shots.map((x) => ({ ...x })), boulders: mapRuntime.war.boulders.map((b) => ({ ...b, hit: [...b.hit] })), leverCd: [...mapRuntime.war.leverCd], towerCd: [...mapRuntime.war.towerCd] }, shrine: { own: [...mapRuntime.shrine.own], prog: [...mapRuntime.shrine.prog], busy: [...mapRuntime.shrine.busy], score: [...mapRuntime.shrine.score], on: mapRuntime.shrine.on }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, la: { loot: mapRuntime.la.loot.map((x) => ({ ...x })), next: mapRuntime.la.next }, war: { ...mapRuntime.war, shots: mapRuntime.war.shots.map((x) => ({ ...x })), boulders: mapRuntime.war.boulders.map((b) => ({ ...b, hit: [...b.hit] })), leverCd: [...mapRuntime.war.leverCd], towerCd: [...mapRuntime.war.towerCd] }, shrine: { own: [...mapRuntime.shrine.own], prog: [...mapRuntime.shrine.prog], busy: [...mapRuntime.shrine.busy], score: [...mapRuntime.shrine.score], on: mapRuntime.shrine.on }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -2251,6 +2276,7 @@ function GameImpl({
           if (inZen(c)) mult *= 0.5;
           if (c.swimming) mult *= 0.55;
           else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= inSwamp(c.pos[0], c.pos[2]) ? 0.5 : 0.65; // wading (the bog's mud drags worse)
+          else if (map.id === 'losangeles' && laWater(c.pos[0], c.pos[2]) > 0.2 && c.pos[1] < LA.lake.water) mult *= 0.6; // wading the lake
           const spd = speedOf(c) * mult * Math.min(1, vA.length());
           vA.normalize();
           const accel = c.isGrounded ? 18 : 6;
@@ -4419,6 +4445,7 @@ function GameImpl({
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
         c.zipW = undefined;
+        c.haul = [];
         c.warT = 0;
         c.respawnT = 0;
         c.trapT = 0;
@@ -4541,6 +4568,8 @@ function GameImpl({
       {
         // 青冥古林: six herbs growing somewhere, eight of the hunters' traps set in the grass
         const pickSome = (list: [number, number][], n: number) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
+        mapRuntime.la = { loot: [], next: 2 };
+        laBankedRef.current = false;
         mapRuntime.war = { drumT: WAR.drum.first, drumBy: -1, drumHold: 0, shots: [], boulders: [], leverCd: [0, 0], towerCd: [0, 0] };
         mapRuntime.shrine = { own: [-1, -1, -1], prog: [0, 0, 0], busy: [0, 0, 0], score: [0, 0], on: false };
         mapRuntime.wood = {
@@ -5161,6 +5190,55 @@ function GameImpl({
       c.stateTimer = 0;
       c.stateDuration = 0.9;
       vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '松手了！', true, '#fca5a5');
+    }
+    /** 洛城午后: cash and watches turn up about the map; walk over one to pick it up; at the end of a round
+     * whatever you're still carrying is banked (身家) */
+    function updateLoot() {
+      const L = mapRuntime.la;
+      if (!round.over) {
+        L.next -= dt;
+        if (L.next <= 0 && L.loot.length < LOOT.max) {
+          L.next = LOOT.every * (0.6 + Math.random() * 0.8);
+          // a weighted pick, then a spot on open ground (not the lake, not in a house)
+          const total = LOOT.kinds.reduce((a, k) => a + k.weight, 0);
+          let r = Math.random() * total;
+          const kind = LOOT.kinds.find((k) => (r -= k.weight) < 0)?.id ?? 'cash';
+          for (let t = 0; t < 30; t++) {
+            const a = Math.random() * Math.PI * 2;
+            const d = Math.sqrt(Math.random()) * (map.radius - 6);
+            const x = Math.cos(a) * d;
+            const z = Math.sin(a) * d;
+            if (lakeE(x, z) < 1.05) continue;
+            if (map.pillars?.some((pl) => Math.hypot(pl.x - x, pl.z - z) < pl.r + 0.8)) continue;
+            L.loot.push({ kind, x, y: laHeight(x, z), z });
+            break;
+          }
+        }
+      }
+      // picking up
+      for (let i = 0; i < N; i++) {
+        const c = fighters[i];
+        if (c.hp <= 0 || round.over) continue;
+        for (let k = L.loot.length - 1; k >= 0; k--) {
+          const it = L.loot[k];
+          if (Math.hypot(c.pos[0] - it.x, c.pos[2] - it.z) > 1.3 || Math.abs(c.pos[1] - it.y) > 1.6) continue;
+          L.loot.splice(k, 1);
+          (c.haul ??= []).push(it.kind);
+          const info = LOOT.kinds.find((x) => x.id === it.kind);
+          vfx.sparkBurst(vB.set(it.x, it.y + 0.8, it.z), it.kind.startsWith('cash') ? 10 : 24, it.kind.startsWith('cash') ? '#9be37a' : '#ffd36a', 3, 0.06, UP, 0.7);
+          gameAudio.playCrispClick();
+          if (i === ME) onRoundEvent?.({ type: 'toast', text: `捡到${info?.name ?? ''} · +${info?.value ?? 0}` });
+        }
+      }
+      // banking at the end of the round: what you still carry is yours
+      if (round.over && !laBankedRef.current) {
+        laBankedRef.current = true;
+        if (p1.hp > 0 && p1.haul?.length && aiOn) {
+          const w = bank(p1.haul);
+          const sum = p1.haul.reduce((a, id) => a + (LOOT.kinds.find((x) => x.id === id)?.value ?? 0), 0);
+          onRoundEvent?.({ type: 'toast', text: `这回合带走 ${sum} · 身家现在 ${w.cash} 现金` });
+        }
+      }
     }
     /** 问鼎原: the drum, the springs, the towers, the boulders */
     function updateWar() {
@@ -5961,6 +6039,17 @@ function GameImpl({
       vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       if (def.ballista !== undefined) leaveBallista(defSlot, def);
+      if (map.id === 'losangeles' && def.haul?.length) {
+        // everything they picked up spills on the ground round them
+        def.haul.forEach((kind, k) => {
+          const a = (k / def.haul!.length) * Math.PI * 2;
+          const x = def.pos[0] + Math.cos(a) * (1 + (k % 3) * 0.6);
+          const z = def.pos[2] + Math.sin(a) * (1 + (k % 3) * 0.6);
+          mapRuntime.la.loot.push({ kind, x, y: laHeight(x, z), z });
+        });
+        if (defSlot === ME) onRoundEvent?.({ type: 'toast', text: '你倒下了，身上的钱和表全掉在地上' });
+        def.haul = [];
+      }
       if (map.id === 'forest') {
         // 祖坛: down is not out. Back at your camp in a few seconds; the side that cut you down gets a little score
         def.respawnT = SHRINE.respawn;
@@ -7414,6 +7503,7 @@ function GameImpl({
         updateShrines();
       }
       if (map.id === 'wending') updateWar();
+      if (map.id === 'losangeles') updateLoot();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;

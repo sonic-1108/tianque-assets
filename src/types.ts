@@ -256,6 +256,7 @@ export interface CombatantState {
   mantraTgt?: number; // 六字真言: who the words are hunting (-1 nobody in reach)
   zip?: { t: number; dir: 1 | -1 }; // 悬空栈道: sliding along the iron chain (t 0..1 from the step to the peak)
   zipW?: { k: number; t: number; dir: 1 | -1 }; // 青冥古林: riding zip line k (t 0..1 from end a to end b)
+  haul?: string[]; // 洛城午后: cash and watches picked up this round (LOOT ids)
   warT?: number; // 问鼎原 战意: seconds left of the drum's buff
   respawnT?: number; // 青冥古林 祖坛: seconds until you're back at your camp after being cut down
   trapT?: number; // 青冥古林: seconds left caught in a trap (can't move, can still fight)

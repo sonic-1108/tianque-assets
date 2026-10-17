@@ -1212,7 +1212,7 @@ MAPS.desert = {
 };
 
 
-export const MAP_ORDER: MapId[] = ['temple', 'wending', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
+export const MAP_ORDER: MapId[] = ['losangeles', 'temple', 'wending', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {

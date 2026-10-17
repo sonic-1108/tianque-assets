@@ -82,7 +82,7 @@ function landMaterial() {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWP; varying vec3 vWN;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);');
-    const streets = LA.streets.map((z) => `min(abs(p.y - (${z.toFixed(1)})), 99.0)`).join(', ');
+    const streets = LA.streets.reduce((acc, z) => `min(${acc}, abs(p.y - (${z.toFixed(1)})))`, '99.0');
     sh.fragmentShader = sh.fragmentShader
       .replace(
         '#include <common>',
@@ -115,7 +115,7 @@ function landMaterial() {
           col = mix(col, mix(vec3(0.47, 0.45, 0.42), vec3(0.55, 0.53, 0.5), n3), path);
           gHard = max(rim, path);
           // the hillside streets, with sidewalks and kerbs
-          float sd = min(min(${streets}), 99.0);
+          float sd = ${streets};
           float inTown = step(-84.0, p.x) * step(p.x, 134.0);
           float road = (1.0 - smoothstep(4.0, 4.2, sd)) * inTown;
           float walk = smoothstep(4.2, 4.3, sd) * (1.0 - smoothstep(6.0, 6.1, sd)) * inTown;

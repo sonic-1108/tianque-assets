@@ -19,6 +19,7 @@ import { defaultRoom, lineupOf, roomReady, seatGuests, padRoom, SEAT_SIDE, SIDE_
 import { UnitFrame, UnitStats } from './components/UnitFrame';
 import { Minimap } from './components/Minimap';
 import { ShrineHud } from './components/ShrineHud';
+import { LootHud } from './components/LootHud';
 import {
   GameState,
   CombatantState,
@@ -1098,7 +1099,8 @@ export default function App() {
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
-        {(mapId === 'forest' || mapId === 'desert' || mapId === 'wending') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}
+        {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <LootHud />}
+        {(mapId === 'forest' || mapId === 'desert' || mapId === 'wending' || mapId === 'losangeles') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}
         {!dummyScreenPos.visible && !dummyScreenPos.hidden && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
           <div
             className="absolute pointer-events-none z-20 flex flex-col items-center"
