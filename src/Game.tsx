@@ -21,7 +21,8 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, LA, LOOT, laHeight, laWater, lakeE, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, LA, LOOT, laHeight, laWater, lakeE, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R, DT, FIRMS, FIRM_IN, laFloorAt, laCeilAt, laPushOut, laClamp, laInside, laBlocked, liftCar, inLift, firmAt, firmLevel, IB_SPOTS, marketPx, marketT } from './maps';
+import { getIb, ibAdvance, ibSet, payCash, IB_STEPS, IB_NOTIONAL, ibTitle } from './banker';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -1022,7 +1023,7 @@ function GameImpl({
     };
     /** 青冥古林: hurt and not pressed, go and pick a 血参; step round any trap it can see */
     const aiForestErrands = (i: number, c: CombatantState, foe: CombatantState, it: Intent) => {
-      if ((c.trapT ?? 0) > 0 || c.zipW || c.treeClimb !== undefined) return;
+      if ((c.trapT ?? 0) > 0 || c.zipW || c.lift || c.treeClimb !== undefined) return;
       const W = mapRuntime.wood;
       const dFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
       const hurt = c.hp < c.maxHp * (mapRuntime.shrine.on ? 0.4 : 0.55);
@@ -1223,9 +1224,9 @@ function GameImpl({
         const y0 = c.pos[1];
         c.vel[1] -= gravity * cdt;
         c.pos[1] += c.vel[1] * cdt;
-        if ((map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop') && c.vel[1] > 0) {
+        if ((map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop' || map.id === 'losangeles') && c.vel[1] > 0) {
           // a cabin's (or barracks', or a bridge's) ceiling stops a jump
-          const ceil = map.id === 'sea' ? shipCeilAt(c.pos[0], c.pos[2], y0) : map.id === 'rooftop' ? roofCeilAt(c.pos[0], c.pos[2], y0) : desertIndoor(c.pos[0], c.pos[2], y0) ? desertCeil(c.pos[0], c.pos[2]) : 999;
+          const ceil = map.id === 'sea' ? shipCeilAt(c.pos[0], c.pos[2], y0) : map.id === 'rooftop' ? roofCeilAt(c.pos[0], c.pos[2], y0) : map.id === 'losangeles' ? laCeilAt(c.pos[0], c.pos[2], y0) : desertIndoor(c.pos[0], c.pos[2], y0) ? desertCeil(c.pos[0], c.pos[2]) : 999;
           if (c.pos[1] + 1.85 > ceil) {
             c.pos[1] = Math.max(y0, ceil - 1.85);
             c.vel[1] = 0;
@@ -1295,6 +1296,7 @@ function GameImpl({
       if (map.id === 'desert') updateDesertItems(i, c, intents[i]);
       if (map.id === 'plankway') updatePlankItems(i, c, intents[i]);
       if (map.id === 'wending') updateWarItems(i, c, intents[i]);
+      if (map.id === 'losangeles') updateTowerItems(i, c, intents[i]);
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
@@ -1431,6 +1433,19 @@ function GameImpl({
         controller.groundAt = (x: number, z: number) => roofFloorAt(x, z, view.pos[1] + 0.8);
         controller.ceilAt = null;
         controller.solidAt = (x: number, y: number, z: number) => roofCamSolid(x, y, z);
+      } else if (map.id === 'losangeles') {
+        // downtown: indoors the camera keeps to the room the player is in (under its ceiling, inside its walls)
+        const vy = view.pos[1];
+        const k = firmAt(view.pos[0], view.pos[2]);
+        const lv = k >= 0 ? firmLevel(view.pos[0], view.pos[2], vy) : -1;
+        controller.groundAt = (x: number, z: number) => Math.max(laFloorAt(x, z, vy + 0.8), vy - 2.5);
+        controller.ceilAt = k >= 0 ? () => laCeilAt(view.pos[0], view.pos[2], vy) : null;
+        controller.solidAt =
+          k >= 0 && lv > 0
+            ? (x: number, y: number, z: number) => firmAt(x, z, -0.45) !== k || laBlocked(x, z, y - 0.9, 0.12)
+            : k >= 0
+              ? (x: number, y: number, z: number) => laBlocked(x, z, y - 0.9, 0.12) && firmAt(x, z, -0.45) === k
+              : null;
       } else {
         controller.groundAt = map.terrain ? (x: number, z: number) => Math.max(terrainHeight(map.id, x, z), view.pos[1] - 2.5) : null;
         controller.ceilAt = map.id === 'desert' && desertIndoor(view.pos[0], view.pos[2], view.pos[1]) ? (x: number, z: number) => Math.min(desertCeil(x, z), desertCeil(view.pos[0], view.pos[2])) : null;
@@ -1475,6 +1490,7 @@ function GameImpl({
     }
     mapRuntime.viewSide = sideOf(p1);
     mapRuntime.viewX = p1.pos[0];
+    mapRuntime.viewY = p1.pos[1];
     mapRuntime.viewZ = p1.pos[2];
     mapRuntime.camYaw = controller ? controller.yaw : 0;
     if (map.id === 'desert') {
@@ -1901,6 +1917,7 @@ function GameImpl({
       };
       if (c.zip) return report('出招', '铁索上滑行中'), false;
       if (c.zipW) return report('出招', '滑索上滑行中'), false;
+      if (c.lift) return report('出招', '电梯里'), false;
       if (c.treeClimb !== undefined) {
         if (c.climbMode !== 'ladder' || req !== 'jump') return report('出招', c.climbMode === 'ladder' ? '在梯子上，按空格跳下来' : '梯云纵上树中'), false;
         // jump off the ladder, away from the trunk
@@ -4445,6 +4462,8 @@ function GameImpl({
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
         c.zipW = undefined;
+        c.lift = undefined;
+        c.ibWork = 0;
         c.haul = [];
         c.warT = 0;
         c.respawnT = 0;
@@ -4634,6 +4653,7 @@ function GameImpl({
     function fy(x: number, z: number, y = 0.2) {
       if (map.id === 'sea') return shipFloorAt(x, z, y + 0.3);
       if (map.id === 'rooftop') return roofFloorAt(x, z, y + 0.3);
+      if (map.id === 'losangeles') return laFloorAt(x, z, y + 0.3);
       return map.terrain ? terrainHeight(map.id, x, z) : 0;
     }
 
@@ -4644,7 +4664,7 @@ function GameImpl({
 
     /** What a fighter at height y would stand on at (x, z): terrain (or the swimming level in deep water) and pillar tops */
     function groundAt(x: number, z: number, y: number, base?: number) {
-      let g = base ?? (map.id === 'sea' ? shipFloorAt(x, z, y) : map.id === 'rooftop' ? roofFloorAt(x, z, y) : map.terrain ? terrainHeight(map.id, x, z) : 0);
+      let g = base ?? (map.id === 'sea' ? shipFloorAt(x, z, y) : map.id === 'rooftop' ? roofFloorAt(x, z, y) : map.id === 'losangeles' ? laFloorAt(x, z, y) : map.terrain ? terrainHeight(map.id, x, z) : 0);
       if (map.id === 'forest') g = Math.max(g, FOREST.swimY); // deep water: you float
       if (map.id === 'forest' && y > FOREST_X.cave.floor + FOREST_X.cave.roof - 0.45) {
         const roof = caveRoofAt(x, z); // walking over the cave, on the bluff
@@ -4843,7 +4863,7 @@ function GameImpl({
       if (!map.terrain || !c.isGrounded || map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop') return; // on the ship (and off the beacon, ramps and walls in the desert) you may step off
       const s = c.actionState;
       // 悬空栈道: a roll doesn't take you over the edge either (only being knocked does)
-      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || (s === 'dodge' && map.id !== 'plankway') || c.hp <= 0 || c.zip || c.zipW) return;
+      if (s === 'hitstun' || s === 'launched' || s === 'knockdown' || (s === 'dodge' && map.id !== 'plankway') || c.hp <= 0 || c.zip || c.zipW || c.lift) return;
       const drop = (x: number, z: number) => groundAt(x, z, c.pos[1]) < c.pos[1] - 1.5;
       if (!drop(c.pos[0], c.pos[2])) return;
       if (!drop(c.pos[0], pz0)) {
@@ -5340,6 +5360,131 @@ function GameImpl({
       W.leverCd = W.leverCd.map((v) => Math.max(0, v - dt));
     }
     /** 问鼎原: F at a lever */
+    /** 洛城午后 towers: the lifts (anyone may ride: F in the alcove), and the 投行家 career (the local player) */
+    function updateTowerItems(i: number, c: CombatantState, intent: Intent | null) {
+      const pressed = !!intent?.interact && !c.intPrev;
+      c.intPrev = !!intent?.interact;
+      c.interactHint = '';
+      const say = (text: string) => i === ME && onRoundEvent?.({ type: 'toast', text });
+      if (c.lift) {
+        const Lf = c.lift;
+        Lf.t += dt / 2.8;
+        const u = Math.min(1, Lf.t);
+        const e = u * u * (3 - 2 * u);
+        const y0 = DT.levels[Lf.from];
+        const y1 = DT.levels[Lf.to];
+        c.pos = [Lf.x, y0 + (y1 - y0) * e, Lf.z];
+        c.vel = [0, 0, 0];
+        c.isGrounded = true;
+        if (c.hp > 0) c.actionState = 'idle';
+        c.interactHint = `电梯${y1 > y0 ? '上行' : '下行'}中 · ${FIRMS[Lf.k].floors[Lf.to]}`;
+        if (u >= 1) {
+          c.lift = undefined;
+          c.pos[1] = y1;
+          gameAudio.playCrispClick();
+          say(`叮 · ${FIRMS[Lf.k].name} ${FIRMS[Lf.k].floors[Lf.to]}`);
+        }
+        return;
+      }
+      if (c.hp <= 0) return;
+      const ib = getIb();
+      const moving = !!intent && (intent.move.lengthSq() > 0.01 || !!intent.request);
+      // working on the model: sit still at the desk
+      if (i === ME && (c.ibWork ?? 0) > 0) {
+        const [sx, sy, sz] = IB_SPOTS.desk;
+        if (moving || c.actionState !== 'idle' || Math.hypot(c.pos[0] - sx, c.pos[2] - sz) > 1.2 || Math.abs(c.pos[1] - sy) > 1) {
+          c.ibWork = 0;
+          say('被打断了，模型白改了 · 回工位重新按 F');
+        } else {
+          c.ibWork = (c.ibWork ?? 0) - dt;
+          c.vel[0] = c.vel[2] = 0;
+          c.interactHint = `熬夜改模型中 · 还剩 ${Math.ceil(c.ibWork)} 秒 · 动一下就前功尽弃`;
+          if (Math.random() < dt * 2) vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.3, c.pos[2]), 2, '#9fd3ff', 0.4, 0.03, UP, 0.5);
+          if (c.ibWork <= 0) {
+            c.ibWork = 0;
+            finish(ib.step);
+          }
+          return;
+        }
+      }
+      if (!c.isGrounded) return;
+      // the lifts
+      const k = firmAt(c.pos[0], c.pos[2]);
+      if (k >= 0 && inLift(FIRMS[k], c.pos[0], c.pos[2])) {
+        const F = FIRMS[k];
+        const lv = firmLevel(c.pos[0], c.pos[2], c.pos[1]);
+        const up = c.pos[0] < F.x;
+        const to = up ? lv + 1 : lv - 1;
+        if (to < 0 || to >= DT.levels.length) c.interactHint = up ? '上行电梯 · 这已经是顶层了，旁边那部下楼' : '下行电梯 · 这已经是大堂了，旁边那部上楼';
+        else {
+          c.interactHint = `按 F 坐电梯${up ? '上' : '下'}楼 · 去${F.floors[to]}`;
+          if (pressed) {
+            const [x, z] = liftCar(F, up);
+            c.lift = { k, from: lv, to, t: 0, x, z };
+            c.isBlocking = false;
+            c.rotY = c.targetRotY = yawTo([x, 0, z], [x, 0, z + F.s]);
+            gameAudio.playCrispClick();
+          }
+        }
+        return;
+      }
+      if (i !== ME) return;
+      const near = (p: [number, number, number], r = 1.7) => Math.hypot(c.pos[0] - p[0], c.pos[2] - p[2]) < r && Math.abs(c.pos[1] - p[1]) < 1.3;
+      // the Citadel desk: the task, then a desk you may keep trading at
+      if (near(IB_SPOTS.trade, 1.5) && ib.step >= 4) {
+        const S = 3;
+        const px = marketPx(S, marketT(), 116);
+        if (!ib.entry) {
+          c.interactHint = `按 F 买入 MSFT @ ${px.toFixed(2)} · 盯着墙上的行情，涨了再卖`;
+          if (pressed) {
+            ibSet({ entry: px });
+            gameAudio.playCrispClick();
+            say(`买入 MSFT @ ${px.toFixed(2)} · 仓位 $${(IB_NOTIONAL / 1000).toFixed(0)}k`);
+          }
+        } else {
+          const pnl = px / ib.entry - 1;
+          c.interactHint = `持仓 MSFT · 买入 ${ib.entry.toFixed(2)} → 现在 ${px.toFixed(2)} · ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(2)}% · 按 F 卖出`;
+          if (pressed) {
+            const cash = Math.round(pnl * IB_NOTIONAL);
+            payCash(cash);
+            ibSet({ entry: 0 });
+            gameAudio.playCrispClick();
+            if (ib.step === 4 && pnl >= 0.02) finish(4, cash);
+            else say(`卖出 · ${cash >= 0 ? '赚了' : '亏了'} ${Math.abs(cash).toLocaleString()}${ib.step === 4 ? ' · 要一笔赚到 2% 才算过关' : ''}`);
+          }
+        }
+        return;
+      }
+      const st = IB_STEPS[ib.step];
+      if (!st || st.spot === 'trade' || !near(IB_SPOTS[st.spot])) return;
+      if (st.spot === 'desk') {
+        c.interactHint = '按 F 坐下改模型 · 20 秒别动';
+        if (pressed) {
+          c.ibWork = 20;
+          c.vel[0] = c.vel[2] = 0;
+          say('开始改模型 · 别动，别挨打');
+        }
+        return;
+      }
+      const verb: Record<string, string> = { reception: '报到', printer: '拿 pitchbook', client: '把 pitchbook 交给客户', board: '签 term sheet' };
+      c.interactHint = `按 F ${verb[st.spot] ?? ''}`;
+      if (pressed) finish(ib.step);
+    }
+    /** 投行家: a step done: pay, promote, tell the player */
+    function finish(step: number, extra = 0) {
+      const st = IB_STEPS[step];
+      if (!st || getIb().step !== step) return;
+      if (st.pay || st.watch) payCash(st.pay, st.watch);
+      ibAdvance();
+      gameAudio.playGong();
+      const p = p1.pos;
+      vfx.sparkBurst(vB.set(p[0], p[1] + 1.2, p[2]), 30, '#ffd36a', 3, 0.06, UP, 0.9);
+      const pay = st.pay + extra;
+      onRoundEvent?.({ type: 'toast', text: `${st.done}${pay ? ` · +${pay.toLocaleString()}` : ''}${st.watch ? ' · 一块百达翡丽' : ''}` });
+      const nxt = IB_STEPS[step + 1];
+      if (nxt) window.setTimeout(() => onRoundEvent?.({ type: 'toast', text: `下一步：${nxt.task}` }), 2600);
+      else window.setTimeout(() => onRoundEvent?.({ type: 'toast', text: `你现在是 ${ibTitle()} · Citadel 的交易台随时能来做单` }), 2600);
+    }
     function updateWarItems(i: number, c: CombatantState, intent: Intent | null) {
       const pressed = !!intent?.interact && !c.intPrev;
       c.intPrev = !!intent?.interact;
@@ -6182,6 +6327,19 @@ function GameImpl({
           c.pos[2] *= (map.radius - 0.3) / d;
         }
         if (c.pos[1] < -6.5) ringOut(i);
+        pillarPush(i, c, speed);
+        return;
+      }
+      if (map.id === 'losangeles') {
+        // the park, the footbridge and the plaza; inside the towers, the walls, desks and people
+        if (!laInside(c.pos[0], c.pos[2])) {
+          const [nx, nz] = laClamp(c.pos[0], c.pos[2]);
+          c.pos[0] = nx;
+          c.pos[2] = nz;
+          c.vel[0] *= 0.3;
+          c.vel[2] *= 0.3;
+        }
+        if (!c.lift && laPushOut(c.pos) && knocked && speed > 4) wallSplat(i, c, speed, c.pos[0] + (c.vel[0] / speed) * 0.5, c.pos[2] + (c.vel[2] / speed) * 0.5);
         pillarPush(i, c, speed);
         return;
       }

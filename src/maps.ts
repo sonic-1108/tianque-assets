@@ -1989,12 +1989,374 @@ function laBase(x: number, z: number) {
   const F = LA.farm;
   const inFarm = ssL(F.x0 - 10, F.x0 + 6, x) * (1 - ssL(F.x1 - 6, F.x1 + 10, x)) * ssL(F.z0 - 10, F.z0 + 6, z) * (1 - ssL(F.z1 - 6, F.z1 + 10, z));
   h = h * (1 - inFarm) + 0.1 * inFarm;
-  // east: down the planted slope to the freeway
+  // east: down the planted slope to the freeway, which runs in a trench; downtown is up on its hill beyond it
   const W = LA.fwy;
   h = h + (W.y - h) * ssL(150, W.x0 - 2, x);
   if (x > W.x0 - 2) h = W.y;
+  if (x > DT.wallX) h = DT.y;
   return h;
 }
+
+// ----------------------------------------------------------------------
+// 洛城午后 downtown: a footbridge over the freeway to a plaza, and the four finance houses along an avenue.
+// Each has a glass lobby and two floors up by lift: a trading floor (40) and the banking floor (80).
+// Fighters stand on floors, desks and the like through laFloorAt (which knows the height you're at), and
+// walls, desks and people are boxes pushed against in laWalls.
+// ----------------------------------------------------------------------
+export const DT = {
+  y: 0,
+  /** the trench wall on the freeway's east side: the plaza starts here */
+  wallX: 221.5,
+  bridge: { z: 0, half: 3.2, x0: 140, x1: 224 },
+  rect: { x0: 222, x1: 336, z0: -56, z1: 56 },
+  /** floor levels inside the towers: the lobby, the trading floor, the banking floor */
+  levels: [0, 40, 80] as number[],
+  lobbyH: 8,
+  floorH: 5.5,
+  fountain: [284, 0] as [number, number],
+};
+export interface Firm {
+  id: string;
+  name: string;
+  cn: string;
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  h: number;
+  /** which way the door faces: +1 = the +z face, -1 = the -z face (both open on the avenue at z = 0) */
+  s: number;
+  glass: string;
+  frame: string;
+  accent: string;
+  /** what's on its floors (names for the HUD and the lift) */
+  floors: string[];
+}
+export const FIRMS: Firm[] = [
+  { id: 'gs', name: 'GOLDMAN SACHS', cn: '高盛', x: 258, z: -32, w: 36, d: 36, h: 250, s: 1, glass: '#3e5a72', frame: '#c9c4b8', accent: '#7399c6', floors: ['大堂', '40 层 交易大厅', '80 层 投行部'] },
+  { id: 'ms', name: 'MORGAN STANLEY', cn: '摩根士丹利', x: 258, z: 32, w: 36, d: 36, h: 215, s: -1, glass: '#22303c', frame: '#7c2f2a', accent: '#3a6fb8', floors: ['大堂', '40 层 交易大厅', '80 层 投行部 · 董事会议室'] },
+  { id: 'citadel', name: 'CITADEL', cn: 'Citadel', x: 308, z: -31, w: 32, d: 34, h: 235, s: 1, glass: '#5b7f93', frame: '#d6d3cc', accent: '#2f6db5', floors: ['大堂', '40 层 交易大厅', '80 层 投研部'] },
+  { id: 'imc', name: 'IMC TRADING', cn: 'IMC', x: 308, z: 30, w: 30, d: 32, h: 165, s: -1, glass: '#2f4f5e', frame: '#adb3b5', accent: '#d8402f', floors: ['大堂', '40 层 交易大厅', '80 层 量化研究'] },
+];
+/** a solid box: walls (y1 far up), desks and tables (top: you can stand on it), people */
+export interface LBox {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  y0: number;
+  y1: number;
+  top?: boolean;
+}
+/** firm-local (u along x, v toward the avenue) to world */
+export const firmXZ = (F: Firm, u: number, v: number): [number, number] => [F.x + u, F.z + F.s * v];
+const CORE = { hu: 5, hv: 4, alcove: 1.6, deep: 2.6 };
+/** the lift alcove in the core's face toward the door: the up car (u < 0) and the down car (u > 0) */
+export function liftCar(F: Firm, up: boolean): [number, number] {
+  return firmXZ(F, up ? -0.8 : 0.8, CORE.hv - CORE.deep / 2);
+}
+export function inLift(F: Firm, x: number, z: number) {
+  const u = x - F.x;
+  const v = (z - F.z) * F.s;
+  return Math.abs(u) < CORE.alcove - 0.1 && v > CORE.hv - CORE.deep && v < CORE.hv + 0.3;
+}
+export type NpcPose = 0 | 1 | 2; // 0 standing on the phone, 1 seated at the screens, 2 standing, shouting and waving
+export interface Npc {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pose: NpcPose;
+  suit: number;
+}
+export interface Desk {
+  x: number;
+  y: number;
+  z: number;
+  len: number;
+  /** trading desks carry a bank of four screens a seat; banking desks two */
+  kind: 0 | 1;
+}
+/** everything inside the towers, per firm: boxes, desks, people, and the quest's spots */
+export const FIRM_IN: { boxes: LBox[]; desks: Desk[]; npcs: Npc[]; tables: { x: number; y: number; z: number; w: number; d: number }[]; glass: LBox[] }[] = [];
+/** the 投行家 quest's spots */
+export const IB_SPOTS = {} as Record<'reception' | 'printer' | 'desk' | 'trade' | 'board' | 'client', [number, number, number]>;
+{
+  const rnd = (() => {
+    let s = 4242;
+    return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  })();
+  const BIG = 1e4;
+  FIRMS.forEach((F, fi) => {
+    const boxes: LBox[] = [];
+    const desks: Desk[] = [];
+    const npcs: Npc[] = [];
+    const tables: { x: number; y: number; z: number; w: number; d: number }[] = [];
+    const glass: LBox[] = [];
+    // a box from firm-local corners
+    const box = (u0: number, u1: number, v0: number, v1: number, y0: number, y1: number, top = false) => {
+      const [ax, az] = firmXZ(F, u0, v0);
+      const [bx, bz] = firmXZ(F, u1, v1);
+      const b: LBox = { x0: Math.min(ax, bx), x1: Math.max(ax, bx), z0: Math.min(az, bz), z1: Math.max(az, bz), y0, y1, top };
+      boxes.push(b);
+      return b;
+    };
+    const hw = F.w / 2;
+    const hd = F.d / 2;
+    const T = 0.4;
+    // the outer walls: the lobby's (glass, with the door in the avenue face) and the floors above (no way out)
+    const door = 3.2;
+    box(-hw, hw, -hd, -hd + T, -2, DT.lobbyH);
+    box(-hw, -hw + T, -hd, hd, -2, DT.lobbyH);
+    box(hw - T, hw, -hd, hd, -2, DT.lobbyH);
+    box(-hw, -door, hd - T, hd, -2, DT.lobbyH);
+    box(door, hw, hd - T, hd, -2, DT.lobbyH);
+    box(-hw, hw, -hd, -hd + T, DT.lobbyH, BIG);
+    box(-hw, -hw + T, -hd, hd, DT.lobbyH, BIG);
+    box(hw - T, hw, -hd, hd, DT.lobbyH, BIG);
+    box(-hw, hw, hd - T, hd, DT.lobbyH, BIG);
+    // the core, with the lift alcove facing the door
+    const C = CORE;
+    box(-C.hu, -C.alcove, -C.hv, C.hv, -2, BIG);
+    box(C.alcove, C.hu, -C.hv, C.hv, -2, BIG);
+    box(-C.alcove, C.alcove, -C.hv, C.hv - C.deep, -2, BIG);
+    // lobby: the front desk between the lift and the door
+    const L0 = 0;
+    box(-3.2, 3.2, C.hv + 3.0, C.hv + 4.2, L0, L0 + 1.1, true);
+    npcs.push({ ...xyz(F, 0, C.hv + 2.4, L0), yaw: F.s > 0 ? 0 : Math.PI, pose: 0, suit: 3 });
+    if (fi === 0) {
+      const [x, z] = firmXZ(F, 0, C.hv + 5.4);
+      IB_SPOTS.reception = [x, L0, z];
+    }
+    // turnstiles either side of the walk from the door to the lift
+    for (const su of [-1, 1]) for (let k = 0; k < 3; k++) box(su * (2 + k * 1.3), su * (2 + k * 1.3) + su * 0.25, C.hv + 7, C.hv + 8.4, L0, L0 + 1.0);
+    // a few people waiting in the lobby
+    for (let k = 0; k < 6; k++) {
+      const u = (rnd() - 0.5) * (F.w - 6);
+      const v = -hd + 3 + rnd() * (hd - 3 - C.hv - 1);
+      if (Math.abs(u) < C.hu + 1.5 && v > -C.hv - 1.5) continue;
+      npcs.push({ ...xyz(F, u, v, L0), yaw: rnd() * 6.28, pose: 0, suit: Math.floor(rnd() * 5) });
+    }
+    // the floors above
+    const deskRow = (L: number, kind: 0 | 1, avoid: (u: number, v: number) => boolean) => {
+      const len = kind === 0 ? 6 : 4.8;
+      const dep = kind === 0 ? 1.6 : 1.4;
+      for (let u = -hw + 2 + len / 2; u <= hw - 2 - len / 2 + 0.01; u += len + 2.2)
+        for (let v = -hd + 2.6; v <= hd - 2.6; v += dep + 2.4) {
+          if (Math.abs(u) < C.hu + 2.2 + len / 2 && Math.abs(v) < C.hv + 2.6) continue; // round the core
+          if (Math.abs(u) < 2.2 + len / 2 && v > 0) continue; // the walk from the lift to the windows
+          if (avoid(u, v)) continue;
+          const [x, z] = firmXZ(F, u, v);
+          const b = box(u - len / 2, u + len / 2, v - dep / 2, v + dep / 2, L, L + 0.78, true);
+          desks.push({ x, y: L, z, len, kind });
+          // seats along both sides
+          const per = kind === 0 ? 3 : 2;
+          for (const side of [-1, 1])
+            for (let k = 0; k < per; k++) {
+              if (rnd() < (kind === 0 ? 0.18 : 0.35)) continue;
+              const su = u + (k - (per - 1) / 2) * (len / per);
+              const sv = v + side * (dep / 2 + 0.55);
+              const stand = rnd() < (kind === 0 ? 0.42 : 0.15);
+              const pose: NpcPose = stand ? (kind === 0 && rnd() < 0.45 ? 2 : 0) : 1;
+              const yaw = Math.atan2(0, -side * F.s) ; // facing the desk
+              npcs.push({ ...xyz(F, su, sv + (stand ? side * 0.15 : 0), L), yaw, pose, suit: Math.floor(rnd() * 5) });
+              const [px, pz] = firmXZ(F, su, sv);
+              boxes.push({ x0: px - 0.3, x1: px + 0.3, z0: pz - 0.3, z1: pz + 0.3, y0: L, y1: L + (stand ? 1.8 : 1.3) });
+            }
+          void b;
+        }
+    };
+    // 40: the trading floor, desks everywhere
+    const L1 = DT.levels[1];
+    deskRow(L1, 0, () => false);
+    // 80: the banking floor: a glass boardroom at the back, desks in front, a printer by the core
+    const L2 = DT.levels[2];
+    const bv = -hd + 6;
+    deskRow(L2, 1, (u, v) => Math.abs(u) < 9.5 && v < bv + 5);
+    for (const [u0, u1, v0, v1] of [
+      [-8, 8, bv - 4.2, bv - 4.0],
+      [-8, -7.8, bv - 4.2, bv + 4.2],
+      [7.8, 8, bv - 4.2, bv + 4.2],
+      [-8, -1.5, bv + 4.0, bv + 4.2],
+      [1.5, 8, bv + 4.0, bv + 4.2],
+    ]) {
+      const b = box(u0, u1, v0, v1, L2, L2 + 3.2);
+      glass.push(b);
+    }
+    box(-4.5, 4.5, bv - 1.2, bv + 1.2, L2, L2 + 0.78, true);
+    tables.push({ ...xyz(F, 0, bv, L2), w: 9, d: 2.4 });
+    for (const su of [-3.6, -1.2, 1.2, 3.6]) {
+      npcs.push({ ...xyz(F, su, bv - 1.75, L2), yaw: Math.atan2(0, F.s), pose: 1, suit: Math.floor(rnd() * 5) });
+      if (fi !== 1) npcs.push({ ...xyz(F, su, bv + 1.75, L2), yaw: Math.atan2(0, -F.s), pose: 1, suit: Math.floor(rnd() * 5) });
+    }
+    box(C.hu + 0.6, C.hu + 1.8, -0.5, 0.5, L2, L2 + 1.2, true); // the printer
+    if (fi === 0) {
+      const [px, pz] = firmXZ(F, C.hu + 2.6, 0);
+      IB_SPOTS.printer = [px, L2, pz];
+      // the analyst's seat: the empty seat of the nearest banking desk to the lift
+      const d = desks.filter((k) => k.y === L2).sort((a, b) => Math.hypot(a.x - F.x, a.z - (F.z + F.s * 8)) - Math.hypot(b.x - F.x, b.z - (F.z + F.s * 8)))[0];
+      const [dx, dz] = [d.x, d.z + F.s * (1.4 / 2 + 0.55)];
+      // clear any NPC sitting there
+      for (let k = npcs.length - 1; k >= 0; k--) if (Math.hypot(npcs[k].x - dx, npcs[k].z - dz) < 1.3 && npcs[k].y === L2) npcs.splice(k, 1);
+      for (let k = boxes.length - 1; k >= 0; k--) {
+        const b = boxes[k];
+        if (!b.top && b.y0 === L2 && b.x1 - b.x0 < 0.7 && Math.hypot((b.x0 + b.x1) / 2 - dx, (b.z0 + b.z1) / 2 - dz) < 1.3) boxes.splice(k, 1);
+      }
+      IB_SPOTS.desk = [dx, L2, dz];
+    }
+    if (fi === 1) {
+      const [x, z] = firmXZ(F, 0, bv + 2.2);
+      IB_SPOTS.board = [x, L2, z];
+    }
+    if (fi === 2) {
+      // the trading seat: likewise, the nearest trading desk to the lift
+      const d = desks.filter((k) => k.y === L1).sort((a, b) => Math.hypot(a.x - F.x, a.z - (F.z + F.s * 8)) - Math.hypot(b.x - F.x, b.z - (F.z + F.s * 8)))[0];
+      const [dx, dz] = [d.x, d.z + F.s * (1.6 / 2 + 0.55)];
+      for (let k = npcs.length - 1; k >= 0; k--) if (Math.hypot(npcs[k].x - dx, npcs[k].z - dz) < 1.3 && npcs[k].y === L1) npcs.splice(k, 1);
+      for (let k = boxes.length - 1; k >= 0; k--) {
+        const b = boxes[k];
+        if (!b.top && b.y0 === L1 && b.x1 - b.x0 < 0.7 && Math.hypot((b.x0 + b.x1) / 2 - dx, (b.z0 + b.z1) / 2 - dz) < 1.3) boxes.splice(k, 1);
+      }
+      IB_SPOTS.trade = [dx, L1, dz];
+    }
+    FIRM_IN.push({ boxes, desks, npcs, tables, glass });
+  });
+  IB_SPOTS.client = [37, 0, -6];
+  function xyz(F: Firm, u: number, v: number, y: number) {
+    const [x, z] = firmXZ(F, u, v);
+    return { x, y, z };
+  }
+}
+/** which tower (x, z) is in (its walls included), -1 outside them all */
+export function firmAt(x: number, z: number, m = 0) {
+  for (let k = 0; k < FIRMS.length; k++) {
+    const F = FIRMS[k];
+    if (Math.abs(x - F.x) < F.w / 2 + m && Math.abs(z - F.z) < F.d / 2 + m) return k;
+  }
+  return -1;
+}
+/** the floor level a fighter at height y inside a tower is on (0 lobby, 1, 2); -1 outside */
+export function firmLevel(x: number, z: number, y: number) {
+  if (firmAt(x, z) < 0) return -1;
+  let lv = 0;
+  DT.levels.forEach((L, k) => {
+    if (y >= L - 0.6) lv = k;
+  });
+  return lv;
+}
+const inBox = (b: LBox, x: number, z: number, m = 0) => x > b.x0 - m && x < b.x1 + m && z > b.z0 - m && z < b.z1 + m;
+/** 洛城午后 floor at (x, z) for something at height y: the ground, the bridge, a tower floor, a desk top */
+export function laFloorAt(x: number, z: number, y: number) {
+  let g = laHeight(x, z);
+  const k = firmAt(x, z);
+  if (k < 0) return g;
+  for (const L of DT.levels) if (L > 0 && y >= L - 0.6) g = Math.max(g, L);
+  for (const b of FIRM_IN[k].boxes) if (b.top && b.y1 <= y + 0.6 && b.y1 > g && inBox(b, x, z)) g = b.y1;
+  return g;
+}
+/** the ceiling over someone at height y (999 out in the open) */
+export function laCeilAt(x: number, z: number, y: number) {
+  if (firmAt(x, z) < 0) return 999;
+  if (y < DT.lobbyH - 0.4) return DT.lobbyH;
+  for (const L of DT.levels) if (L > 0 && y >= L - 0.6 && y < L + DT.floorH) return L + DT.floorH;
+  return 999;
+}
+/** is a body of radius r with feet at y inside a wall, desk or person here? Low tops (a step) don't count */
+export function laBlocked(x: number, z: number, y: number, r = 0.38) {
+  const k = firmAt(x, z, r + 0.5);
+  if (k < 0) return false;
+  for (const b of FIRM_IN[k].boxes) if (b.y1 > y + 0.55 && b.y0 < y + 1.75 && inBox(b, x, z, r)) return true;
+  return false;
+}
+/** push a body out of the boxes it overlaps (the nearest way out); returns true if it moved */
+export function laPushOut(p: number[], r = 0.38) {
+  const k = firmAt(p[0], p[2], r + 0.5);
+  if (k < 0) return false;
+  let moved = false;
+  for (const b of FIRM_IN[k].boxes) {
+    if (!(b.y1 > p[1] + 0.55 && b.y0 < p[1] + 1.75)) continue;
+    const cx = Math.max(b.x0, Math.min(b.x1, p[0]));
+    const cz = Math.max(b.z0, Math.min(b.z1, p[2]));
+    const dx = p[0] - cx;
+    const dz = p[2] - cz;
+    const d = Math.hypot(dx, dz);
+    if (d >= r) continue;
+    if (d > 1e-4) {
+      p[0] = cx + (dx / d) * r;
+      p[2] = cz + (dz / d) * r;
+    } else {
+      // the centre is inside: out by the shortest way
+      const opts = [p[0] - b.x0, b.x1 - p[0], p[2] - b.z0, b.z1 - p[2]];
+      const m = opts.indexOf(Math.min(...opts));
+      if (m === 0) p[0] = b.x0 - r;
+      else if (m === 1) p[0] = b.x1 + r;
+      else if (m === 2) p[2] = b.z0 - r;
+      else p[2] = b.z1 + r;
+    }
+    moved = true;
+  }
+  return moved;
+}
+/** where you may walk: the park's circle, the footbridge, the plaza (towers are inside the plaza) */
+export function laInside(x: number, z: number) {
+  if (Math.hypot(x, z) <= LA.radius) return true;
+  const B = DT.bridge;
+  if (x >= B.x0 && x <= B.x1 && Math.abs(z - B.z) <= B.half) return true;
+  const R = DT.rect;
+  return x >= R.x0 && x <= R.x1 && z >= R.z0 && z <= R.z1;
+}
+/** the nearest walkable point to (x, z) */
+export function laClamp(x: number, z: number): [number, number] {
+  if (laInside(x, z)) return [x, z];
+  const c: [number, number][] = [];
+  const d = Math.hypot(x, z) || 1;
+  c.push([(x * (LA.radius - 0.05)) / d, (z * (LA.radius - 0.05)) / d]);
+  const B = DT.bridge;
+  c.push([Math.max(B.x0, Math.min(B.x1, x)), Math.max(B.z - B.half + 0.02, Math.min(B.z + B.half - 0.02, z))]);
+  const R = DT.rect;
+  c.push([Math.max(R.x0 + 0.02, Math.min(R.x1 - 0.02, x)), Math.max(R.z0 + 0.02, Math.min(R.z1 - 0.02, z))]);
+  let best = c[0];
+  let bd = Infinity;
+  for (const p of c) {
+    const dd = Math.hypot(p[0] - x, p[1] - z);
+    if (dd < bd && laInside(p[0], p[1])) {
+      bd = dd;
+      best = p;
+    }
+  }
+  return best;
+}
+/** a market: one price path per symbol, the same for the wall screens and the trading desk (t in seconds) */
+const mHash = (n: number) => {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
+};
+const mNoise = (t: number, seed: number) => {
+  const i = Math.floor(t);
+  const f = t - i;
+  const u = f * f * (3 - 2 * f);
+  return mHash(i + seed * 101.3) * (1 - u) + mHash(i + 1 + seed * 101.3) * u - 0.5;
+};
+export function marketPx(sym: number, t: number, base = 100) {
+  const a = mNoise(t / 22, sym) * 0.11 + mNoise(t / 7, sym + 7) * 0.045 + mNoise(t / 2.1, sym + 13) * 0.016 + mNoise(t * 1.3, sym + 19) * 0.005;
+  return base * Math.exp(a);
+}
+export const MARKET_SYMS = [
+  { s: 'NASDAQ', base: 4963 },
+  { s: 'DOW', base: 11497 },
+  { s: 'S&P 500', base: 1469 },
+  { s: 'MSFT', base: 116 },
+  { s: 'CSCO', base: 77 },
+  { s: 'INTC', base: 66 },
+  { s: 'ORCL', base: 39 },
+  { s: 'YHOO', base: 179 },
+  { s: 'AOL', base: 57 },
+  { s: 'QCOM', base: 89 },
+  { s: 'SUNW', base: 97 },
+  { s: 'AMZN', base: 76 },
+];
+/** the clock the market runs on (shared by the screens and the desk) */
+export const marketT = () => performance.now() / 1000;
 {
   // houses: lots along the hillside streets, each on its own flat pad
   const rnd = (() => {
@@ -2036,7 +2398,8 @@ function laBase(x: number, z: number) {
     LA.beds.push([x, z, 1.8 + rnd() * 1.6]);
   }
 }
-export function laHeight(x: number, z: number) {
+/** the ground as it is drawn (no footbridge: that's its own mesh, over the freeway) */
+export function laTerrain(x: number, z: number) {
   let h = laBase(x, z);
   // the lake: a shallow bowl
   const e = lakeE(x, z);
@@ -2053,6 +2416,13 @@ export function laHeight(x: number, z: number) {
     const out = Math.max(dx, dz);
     if (out < 4) h = h + (H.y - h) * (1 - ssL(0.5, 4, out));
   }
+  return h;
+}
+export function laHeight(x: number, z: number) {
+  let h = laTerrain(x, z);
+  // the footbridge: level with the plaza, easing into the park at its west end
+  const B = DT.bridge;
+  if (x > B.x0 && x < B.x1 + 1 && Math.abs(z - B.z) < B.half + 0.3) h = h + (DT.y - h) * ssL(B.x0, B.x0 + 10, x);
   return h;
 }
 /** shallow lake water at (x, z): depth, 0 on dry land */
@@ -2091,6 +2461,8 @@ MAPS.losangeles = {
     '超大地图：中间一个湖（水浅，能蹚过去但走得慢），北坡是住宅区，西边是橙子农场，东边坡下是车流不断的高速公路，再往东是市中心的金融大楼',
     '地图上会不停冒出钞票，偶尔还有 Rolex、IWC、百达翡丽的表，走过去就捡起来',
     '被打倒时身上捡的东西会掉一地，谁都能抢；回合结束时你身上的东西会存进「身家」（大厅里能看到）',
+    '公园东边有座天桥跨过高速，通到市中心广场：Goldman Sachs、Morgan Stanley、Citadel、IMC Trading 四栋楼都能走进去，大堂中间坐电梯（左边上楼、右边下楼）去 40 层交易大厅和 80 层投行部',
+    '投行家任务线：从实习生做起，报到、送 pitchbook、熬夜改模型、在 Citadel 交易台做单、签收购协议，一路升到 MD，奖励直接进身家（左上角有任务提示，金色光柱指路）',
     '一打一或组队都能玩，把对面打倒就赢',
   ],
   homeClass: 'Shadowblade',
@@ -2119,6 +2491,8 @@ MAPS.losangeles = {
     ...boxCircles(LA.barn[0], LA.barn[1], 14, 20, 0),
     { x: LA.mill[0], z: LA.mill[1], r: 1.2 },
     ...LA.parked.map((c) => ({ x: c.x, z: c.z, r: 1.1, h: 1.4 })),
+    // the plaza's fountain (you can stand on its rim)
+    { x: DT.fountain[0], z: DT.fountain[1], r: 4.2, h: 0.7 },
   ],
 } as MapDef;
 

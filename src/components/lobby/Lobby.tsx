@@ -1,5 +1,6 @@
 import { SIDE_SEATS } from '../../room';
 import { getWallet, netWorth, WATCH_NAMES } from '../../wallet';
+import { getIb, ibTitle } from '../../banker';
 import { useSettings, setSettings, AI_LEVELS, type AiLevel } from '../../settings';
 import type { RoomSeat } from '../../net';
 import React, { useState } from 'react';
@@ -88,6 +89,11 @@ export function Lobby(p: LobbyProps) {
             <span className="tq-chip" title={(() => { const w = getWallet(); return `现金 ${w.cash.toLocaleString()} · ` + Object.entries(w.watches).map(([k, n]) => `${WATCH_NAMES[k] ?? k} ×${n}`).join(' · '); })()}>
               身家 {netWorth(getWallet()).toLocaleString()}
             </span>
+            {getIb().step > 0 && (
+              <span className="tq-chip" title="投行家 · 在洛城午后的市中心升职">
+                {ibTitle()}
+              </span>
+            )}
             <button className={`tq-chip ${showStats ? 'on' : ''}`} onClick={() => setShowStats(true)} title="我的战绩 · 排行榜 · 英雄胜率">
               战绩
             </button>

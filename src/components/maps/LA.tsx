@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Sky as SkyObject } from 'three/addons/objects/Sky.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { LA, MAPS, laHeight, lakeE } from '../../maps';
+import { LA, MAPS, laTerrain, lakeE, DT } from '../../maps';
 import { seeded, GLSL_NOISE } from '../Scenery';
 import { useTex, mergeGeos, branchGeo, bladeGeo, Clusters, Cluster, timeU, Clock } from './Coast';
 import { LACity } from './LACity';
@@ -18,7 +18,7 @@ import { LACity } from './LACity';
 const BASE = (import.meta as any).env?.BASE_URL ?? '/';
 const asset = (p: string) => `${BASE}${p}`.replace(/\/\/+/g, '/');
 const SUN = new THREE.Vector3(...(MAPS.losangeles.sunDir as [number, number, number])).normalize();
-const H = laHeight;
+const H = laTerrain;
 
 function Environment() {
   const { gl, scene } = useThree();
@@ -144,6 +144,15 @@ function landMaterial() {
           conc = mix(conc, vec3(0.92, 0.92, 0.9), lines * inF);
           col = mix(col, conc, fw);
           gHard = max(gHard, fw);
+          // downtown's plaza: big granite pavers, a darker band down the avenue
+          float plaza = step(${DT.wallX.toFixed(1)}, p.x);
+          vec2 tile = fract(p / 1.5);
+          float joint = step(tile.x, 0.03) + step(tile.y, 0.03);
+          float th = noise(floor(p / 1.5) * 0.73);
+          vec3 pave = mix(vec3(0.66, 0.63, 0.58), vec3(0.74, 0.71, 0.66), th);
+          pave = mix(pave, vec3(0.45, 0.43, 0.41), (1.0 - smoothstep(9.5, 10.0, abs(p.y))) * 0.55);
+          pave = mix(pave, pave * 0.62, clamp(joint, 0.0, 1.0));
+          col = mix(col, pave, plaza);
           // dirt where it's steep
           col = mix(col, vec3(0.38, 0.32, 0.24), smoothstep(0.35, 0.6, 1.0 - n.y) * (1.0 - gHard));
           diffuseColor.rgb = col;

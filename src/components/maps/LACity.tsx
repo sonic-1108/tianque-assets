@@ -1,7 +1,8 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { LA, laHeight, mapRuntime } from '../../maps';
+import { LA, laHeight, mapRuntime, DT, FIRMS } from '../../maps';
+import { LADowntown } from './LADowntown';
 import { seeded, GLSL_NOISE } from '../Scenery';
 import { mergeGeos } from './Coast';
 
@@ -280,10 +281,13 @@ function Freeway() {
     const wallW = new THREE.BoxGeometry(0.5, 2.4, L).translate(F.x0 - 0.6, F.y + 1.2, 0);
     const wallE = new THREE.BoxGeometry(0.5, 2.4, L).translate(F.x1 + 0.6, F.y + 1.2, 0);
     // the overpass deck and parapets
-    const span = F.x1 - F.x0 + 60;
-    const deck = new THREE.BoxGeometry(span, 1.3, O.half * 2).translate((F.x0 + F.x1) / 2, O.y - 0.65, O.z);
-    const parA = new THREE.BoxGeometry(span, 1.1, 0.35).translate((F.x0 + F.x1) / 2, O.y + 0.55, O.z - O.half + 0.2);
-    const parB = new THREE.BoxGeometry(span, 1.1, 0.35).translate((F.x0 + F.x1) / 2, O.y + 0.55, O.z + O.half - 0.2);
+    const span = DT.wallX - (F.x0 - 30);
+    const ox = (DT.wallX + F.x0 - 30) / 2;
+    const deck = new THREE.BoxGeometry(span, 1.3, O.half * 2).translate(ox, O.y - 0.65, O.z);
+    const parA = new THREE.BoxGeometry(span, 1.1, 0.35).translate(ox, O.y + 0.55, O.z - O.half + 0.2);
+    const parB = new THREE.BoxGeometry(span, 1.1, 0.35).translate(ox, O.y + 0.55, O.z + O.half - 0.2);
+    // downtown's retaining wall along the trench, with a parapet on the plaza side
+    const trench = new THREE.BoxGeometry(1.2, DT.y - F.y + 0.05, L).translate(DT.wallX + 0.1, (DT.y + F.y) / 2, 0);
     // T piers: on each shoulder and in the median
     const piers: THREE.BufferGeometry[] = [];
     for (const x of [F.x0 - 3, mid, F.x1 + 3]) {
@@ -291,7 +295,7 @@ function Freeway() {
       piers.push(new THREE.BoxGeometry(2.4, 1.0, O.half * 2 - 1).translate(x, O.y - 1.8, O.z));
     }
     // approach embankment west: the deck runs on into the hillside
-    const conc = mergeGeos([barrier, wallW, wallE, deck, parA, parB, ...piers]);
+    const conc = mergeGeos([barrier, wallW, wallE, deck, parA, parB, trench, ...piers]);
     // sign gantries spanning the lanes
     const steel: THREE.BufferGeometry[] = [];
     for (const z of [-200, 40, 260]) {
@@ -338,7 +342,7 @@ function Freeway() {
 // ---------------------------------------------------------------
 // downtown: towers of glass and stone, a few landmarks, the finance houses' names on top
 // ---------------------------------------------------------------
-type Tower = { x: number; z: number; w: number; d: number; h: number; round?: boolean; glass: string; frame: string; floors?: number; crown?: string; stepped?: boolean };
+type Tower = { x: number; z: number; w: number; d: number; h: number; round?: boolean; glass: string; frame: string; floors?: number; crown?: string; stepped?: boolean; y0?: number; door?: number };
 /** one material for every tower: glass and frame colours, and a drum's centre and radius, ride on the vertices */
 function towerMat() {
   const m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.25, metalness: 0.45, envMapIntensity: 1.4 });
@@ -394,26 +398,26 @@ function crownTexture(name: string, color: string) {
 function Downtown() {
   const towers = useMemo<Tower[]>(() => {
     const T: Tower[] = [
-      // the finance houses, their names on the crowns (plain lettering)
-      { x: 300, z: -30, w: 40, d: 40, h: 250, glass: '#3e5a72', frame: '#c9c4b8', crown: 'GOLDMAN SACHS', stepped: true },
-      { x: 270, z: 70, w: 36, d: 44, h: 215, glass: '#22303c', frame: '#7c2f2a', crown: 'MORGAN STANLEY' },
-      { x: 335, z: 110, w: 34, d: 34, h: 235, glass: '#5b7f93', frame: '#d6d3cc', crown: 'CITADEL' },
-      { x: 245, z: -120, w: 30, d: 38, h: 165, glass: '#2f4f5e', frame: '#adb3b5', crown: 'IMC TRADING' },
-      // the round tower with a crown, tallest on the skyline
-      { x: 360, z: 20, w: 48, d: 48, h: 300, round: true, glass: '#6c7a80', frame: '#d8d2c4', stepped: true },
+      // the finance houses along the avenue from the footbridge: you can walk in (their lobbies are glass, see LADowntown)
+      ...FIRMS.map((F) => ({ x: F.x, z: F.z, w: F.w, d: F.d, h: F.h, glass: F.glass, frame: F.frame, crown: F.name, y0: DT.lobbyH, door: F.s })),
+      // the round tower with a crown, tallest on the skyline, closing the avenue
+      { x: 385, z: 0, w: 48, d: 48, h: 300, round: true, glass: '#6c7a80', frame: '#d8d2c4', stepped: true },
       // the five round glass hotel towers
-      { x: 230, z: 10, w: 22, d: 22, h: 110, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
-      { x: 214, z: -6, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
-      { x: 246, z: -6, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
-      { x: 214, z: 26, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
-      { x: 246, z: 26, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
+      { x: 372, z: -96, w: 22, d: 22, h: 110, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
+      { x: 356, z: -112, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
+      { x: 388, z: -112, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
+      { x: 356, z: -80, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
+      { x: 388, z: -80, w: 16, d: 16, h: 96, round: true, glass: '#8aa2b2', frame: '#8aa2b2' },
     ];
+    // nothing else on the plaza or the avenue (or in the way of the view down it)
+    const free = (x: number, z: number, w: number, d: number) => !(x + w / 2 > DT.rect.x0 - 4 && x - w / 2 < DT.rect.x1 + 14 && z + d / 2 > DT.rect.z0 - 8 && z - d / 2 < DT.rect.z1 + 8) && !(Math.abs(z) < 20 + d / 2 && x > 330 && x < 520);
     const rand = seeded(97);
     // the rest of downtown, and lower blocks toward the freeway
     for (let k = 0; k < 60; k++) {
       const x = 225 + rand() * 260;
       const z = -260 + rand() * 520;
       if (T.some((t) => Math.abs(t.x - x) < (t.w + 26) / 2 && Math.abs(t.z - z) < (t.d + 26) / 2)) continue;
+      if (!free(x, z, 36, 36)) continue;
       const near = x < 270 ? 0.4 : 1;
       const h = (35 + Math.pow(rand(), 2) * 170) * near;
       const pal = [
@@ -426,20 +430,21 @@ function Downtown() {
       T.push({ x, z, w: 18 + rand() * 18, d: 18 + rand() * 18, h, glass: pal[0], frame: pal[1], round: rand() < 0.12, stepped: rand() < 0.3 });
     }
     for (let k = 0; k < 90; k++) {
-      const x = 224 + rand() * 40;
+      const x = 226 + rand() * 40;
       const z = -300 + rand() * 600;
+      if (!free(x, z, 26, 26)) continue;
       T.push({ x, z, w: 12 + rand() * 14, d: 12 + rand() * 14, h: 8 + rand() * 22, glass: '#4a5560', frame: ['#cbb89a', '#b8aa98', '#d8cdb8', '#a39a8c'][k % 4] });
     }
     return T;
   }, []);
   const merged = useMemo(() => {
-    const y0 = LA.fwy.y;
     const geos: THREE.BufferGeometry[] = [];
     const cG = new THREE.Color();
     const cF = new THREE.Color();
     for (const t of towers) {
       const tiers = t.stepped ? [[1, 0.62], [0.82, 0.86], [0.66, 1]] : [[1, 1]];
-      let prev = 0;
+      let prev = t.y0 ?? 0;
+      const y0 = DT.y;
       cG.set(t.glass);
       cF.set(t.frame);
       for (const [s, top] of tiers) {
@@ -490,21 +495,27 @@ function Downtown() {
               const half = (nx ? t.w : t.d) / 2 * sc + 0.2;
               const w = (nx ? t.d : t.w) * sc * 0.92;
               return (
-                <mesh key={side} position={[t.x + nx * half, LA.fwy.y + t.h - 7, t.z + nz * half]} rotation={[0, Math.atan2(nx, nz), 0]}>
+                <mesh key={side} position={[t.x + nx * half, DT.y + t.h - 7, t.z + nz * half]} rotation={[0, Math.atan2(nx, nz), 0]}>
                   <planeGeometry args={[w, w * 0.16]} />
                   <meshBasicMaterial map={crownTex(t.crown!)} transparent toneMapped={false} />
                 </mesh>
               );
             })}
-          {t.crown && (
-            // a big sign on the face toward the park (west), about a third of the way up
-            <mesh position={[t.x - t.w / 2 - 0.3, LA.fwy.y + Math.min(60, t.h * 0.3), t.z]} rotation={[0, -Math.PI / 2, 0]}>
-              <planeGeometry args={[t.d * 0.95, t.d * 0.95 * 0.16]} />
-              <meshBasicMaterial map={crownTex(t.crown!)} transparent toneMapped={false} />
-            </mesh>
+          {t.crown && t.door && (
+            // big lettering over the door, on the avenue face, and on the face toward the park
+            <>
+              <mesh position={[t.x, DT.y + DT.lobbyH + 9, t.z + t.door * (t.d / 2 + 0.3)]} rotation={[0, t.door > 0 ? 0 : Math.PI, 0]}>
+                <planeGeometry args={[t.w * 0.9, t.w * 0.9 * 0.16]} />
+                <meshBasicMaterial map={crownTex(t.crown!)} transparent toneMapped={false} />
+              </mesh>
+              <mesh position={[t.x - t.w / 2 - 0.3, DT.y + 34 + (t.x > 290 ? 30 : 0), t.z]} rotation={[0, -Math.PI / 2, 0]}>
+                <planeGeometry args={[t.d * 0.95, t.d * 0.95 * 0.16]} />
+                <meshBasicMaterial map={crownTex(t.crown!)} transparent toneMapped={false} />
+              </mesh>
+            </>
           )}
           {t.round && t.stepped && (
-            <mesh position={[t.x, LA.fwy.y + t.h + 6, t.z]}>
+            <mesh position={[t.x, DT.y + t.h + 6, t.z]}>
               <cylinderGeometry args={[t.w * 0.28, t.w * 0.33, 12, 48, 1, true]} />
               <meshStandardMaterial color="#d8d2c4" roughness={0.6} side={THREE.DoubleSide} />
             </mesh>
@@ -631,6 +642,7 @@ export function LACity() {
       <Traffic />
       <Freeway />
       <Downtown />
+      <LADowntown />
       <Mountains />
       <Loot />
     </group>
