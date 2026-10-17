@@ -153,12 +153,12 @@ function CarFleet({ poses, live }: { poses: CarPose[]; live?: (t: number, out: C
     const g = carGeos();
     const mk = (geo: THREE.BufferGeometry, mat: THREE.Material) => {
       const im = new THREE.InstancedMesh(geo, mat, poses.length);
-      im.castShadow = true;
-      im.receiveShadow = true;
+      im.castShadow = !live;
+      im.receiveShadow = !live;
       im.frustumCulled = false;
       return im;
     };
-    const body = mk(g.body, new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.3, metalness: 0.4, clearcoat: 1, clearcoatRoughness: 0.08 }));
+    const body = mk(g.body, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.22, metalness: 0.5 }));
     const glass = mk(g.glass, new THREE.MeshStandardMaterial({ color: '#141a20', roughness: 0.05, metalness: 0.6 }));
     const wheels = mk(g.wheels, new THREE.MeshStandardMaterial({ color: '#151515', roughness: 0.8 }));
     const c = new THREE.Color();
@@ -216,7 +216,7 @@ function Traffic() {
       let z = -600 + rand() * 20;
       while (z < 600) {
         out.push({ x: l.x, y: F.y, z, yaw: l.dir > 0 ? 0 : Math.PI, c: Math.floor(rand() * 8) + li });
-        z += 9 + rand() * 22;
+        z += 28 + rand() * 45;
       }
     });
     return out;
@@ -339,35 +339,33 @@ function Freeway() {
 // downtown: towers of glass and stone, a few landmarks, the finance houses' names on top
 // ---------------------------------------------------------------
 type Tower = { x: number; z: number; w: number; d: number; h: number; round?: boolean; glass: string; frame: string; floors?: number; crown?: string; stepped?: boolean };
-function towerMat(t: Tower) {
+/** one material for every tower: glass and frame colours, and a drum's centre and radius, ride on the vertices */
+function towerMat() {
   const m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.25, metalness: 0.45, envMapIntensity: 1.4 });
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uGlass = { value: new THREE.Color(t.glass) };
-    sh.uniforms.uFrame = { value: new THREE.Color(t.frame) };
-    sh.uniforms.uC = { value: new THREE.Vector2(t.x, t.z) };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTP; varying vec3 vTN;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvTP = (modelMatrix * vec4(transformed, 1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aGlass; attribute vec3 aFrame; attribute vec3 aDrum; varying vec3 vGlass; varying vec3 vFrame; varying vec3 vDrum; varying vec3 vTP; varying vec3 vTN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlass = aGlass; vFrame = aFrame; vDrum = aDrum; vTP = (modelMatrix * vec4(transformed, 1.0)).xyz; vTN = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform vec3 uGlass; uniform vec3 uFrame; uniform vec2 uC; varying vec3 vTP; varying vec3 vTN; float gWin;\nfloat h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
+      .replace('#include <common>', `#include <common>\nvarying vec3 vGlass; varying vec3 vFrame; varying vec3 vDrum; varying vec3 vTP; varying vec3 vTN; float gWin;\nfloat h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
           vec3 n = normalize(vTN);
-          // across the face: x or z on a flat face, round the axis on a drum
           float u = abs(n.x) > abs(n.z) ? vTP.z : vTP.x;
-          ${t.round ? 'u = atan(vTP.z - uC.y, vTP.x - uC.x) * ' + (t.w / 2).toFixed(2) + ';' : ''}
+          if (vDrum.z > 0.0) u = atan(vTP.z - vDrum.y, vTP.x - vDrum.x) * vDrum.z;
           float fl = vTP.y / 3.9;
           vec2 cell = vec2(floor(u / 1.55), floor(fl));
           vec2 f = vec2(fract(u / 1.55), fract(fl));
           float mull = step(f.x, 0.07) + step(0.93, f.x);
           float spandrel = step(f.y, 0.24);
           float rnd = h21(cell);
-          vec3 glass = uGlass * (0.85 + 0.3 * rnd);
-          // a few lit or blind-drawn windows
+          vec3 glass = vGlass * (0.85 + 0.3 * rnd);
           glass = mix(glass, glass * 1.6 + 0.04, step(0.93, rnd));
           gWin = (1.0 - clamp(mull + spandrel, 0.0, 1.0)) * step(abs(n.y), 0.5);
-          diffuseColor.rgb = mix(uFrame, glass, gWin);
-          if (abs(n.y) > 0.5) diffuseColor.rgb = uFrame * 0.7; // roofs
+          diffuseColor.rgb = mix(vFrame, glass, gWin);
+          if (abs(n.y) > 0.5) diffuseColor.rgb = vFrame * 0.7;
         }`
       )
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.7, 0.06, gWin);')
@@ -434,27 +432,58 @@ function Downtown() {
     }
     return T;
   }, []);
-  const parts = useMemo(() => {
+  const merged = useMemo(() => {
     const y0 = LA.fwy.y;
-    return towers.map((t) => {
-      const geos: THREE.BufferGeometry[] = [];
+    const geos: THREE.BufferGeometry[] = [];
+    const cG = new THREE.Color();
+    const cF = new THREE.Color();
+    for (const t of towers) {
       const tiers = t.stepped ? [[1, 0.62], [0.82, 0.86], [0.66, 1]] : [[1, 1]];
       let prev = 0;
+      cG.set(t.glass);
+      cF.set(t.frame);
       for (const [s, top] of tiers) {
         const h = t.h * top - prev;
-        const g = t.round ? new THREE.CylinderGeometry((t.w / 2) * s, (t.w / 2) * s, h, 48) : new THREE.BoxGeometry(t.w * s, h, t.d * s);
+        let g: THREE.BufferGeometry = t.round ? new THREE.CylinderGeometry((t.w / 2) * s, (t.w / 2) * s, h, 40) : new THREE.BoxGeometry(t.w * s, h, t.d * s);
         g.translate(t.x, y0 + prev + h / 2, t.z);
-        geos.push(g.index ? g.toNonIndexed() : g);
+        g = g.index ? g.toNonIndexed() : g;
+        const n = g.attributes.position.count;
+        const ag = new Float32Array(n * 3);
+        const af = new Float32Array(n * 3);
+        const ad = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          ag.set([cG.r, cG.g, cG.b], i * 3);
+          af.set([cF.r, cF.g, cF.b], i * 3);
+          ad.set([t.x, t.z, t.round ? (t.w / 2) * s : 0], i * 3);
+        }
+        g.setAttribute('aGlass', new THREE.BufferAttribute(ag, 3));
+        g.setAttribute('aFrame', new THREE.BufferAttribute(af, 3));
+        g.setAttribute('aDrum', new THREE.BufferAttribute(ad, 3));
+        geos.push(g);
         prev = t.h * top;
       }
-      return { t, geo: mergeGeos(geos), mat: towerMat(t) };
-    });
+    }
+    // merge, carrying the extra attributes
+    const base = mergeGeos(geos);
+    for (const name of ['aGlass', 'aFrame', 'aDrum']) {
+      let total = 0;
+      for (const g of geos) total += g.attributes.position.count;
+      const arr = new Float32Array(total * 3);
+      let o = 0;
+      for (const g of geos) {
+        arr.set(g.attributes[name].array as Float32Array, o * 3);
+        o += g.attributes.position.count;
+      }
+      base.setAttribute(name, new THREE.BufferAttribute(arr, 3));
+    }
+    return { geo: base, mat: towerMat() };
   }, [towers]);
+  const parts = towers.map((t) => ({ t }));
   return (
     <group>
-      {parts.map(({ t, geo, mat }, k) => (
+      <mesh geometry={merged.geo} material={merged.mat} />
+      {parts.map(({ t }, k) => (
         <group key={k}>
-          <mesh geometry={geo} material={mat} castShadow receiveShadow />
           {t.crown &&
             [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([nx, nz], side) => {
               const sc = t.stepped ? 0.66 : 1;
@@ -467,6 +496,13 @@ function Downtown() {
                 </mesh>
               );
             })}
+          {t.crown && (
+            // a big sign on the face toward the park (west), about a third of the way up
+            <mesh position={[t.x - t.w / 2 - 0.3, LA.fwy.y + Math.min(60, t.h * 0.3), t.z]} rotation={[0, -Math.PI / 2, 0]}>
+              <planeGeometry args={[t.d * 0.95, t.d * 0.95 * 0.16]} />
+              <meshBasicMaterial map={crownTex(t.crown!)} transparent toneMapped={false} />
+            </mesh>
+          )}
           {t.round && t.stepped && (
             <mesh position={[t.x, LA.fwy.y + t.h + 6, t.z]}>
               <cylinderGeometry args={[t.w * 0.28, t.w * 0.33, 12, 48, 1, true]} />
@@ -563,14 +599,14 @@ function Loot() {
           <group ref={(el) => (cash.current[k] = el)}>
             <mesh castShadow>
               <boxGeometry args={[0.6, 0.18, 0.3]} />
-              <meshStandardMaterial map={note} roughness={0.8} />
+              <meshStandardMaterial map={note} roughness={0.8} emissive="#2e4a22" emissiveIntensity={0.6} />
             </mesh>
           </group>
           <group ref={(el) => (watch.current[k] = el)} rotation={[Math.PI / 2.4, 0, 0]}>
             {/* a gold case, a dial, a bracelet loop */}
             <mesh>
               <cylinderGeometry args={[0.2, 0.2, 0.07, 32]} />
-              <meshStandardMaterial color="#d9b25a" metalness={1} roughness={0.18} />
+              <meshStandardMaterial color="#d9b25a" metalness={1} roughness={0.18} emissive="#6b4a10" emissiveIntensity={0.8} />
             </mesh>
             <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
               <circleGeometry args={[0.165, 32]} />
@@ -581,7 +617,6 @@ function Loot() {
               <meshStandardMaterial color="#cfa94e" metalness={1} roughness={0.25} />
             </mesh>
           </group>
-          <pointLight color="#ffe6a0" intensity={0.6} distance={3} />
         </group>
       ))}
     </group>

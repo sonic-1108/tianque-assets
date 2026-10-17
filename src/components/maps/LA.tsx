@@ -526,41 +526,58 @@ function lawnBladeMat() {
   return m;
 }
 function Lawn() {
-  const mesh = useMemo(() => {
+  const chunks = useMemo(() => {
     const rand = seeded(41);
-    const N = 240000;
-    const im = new THREE.InstancedMesh(bladeGeo(), lawnBladeMat(), N);
-    const m = new THREE.Matrix4();
+    const N = 170000;
+    const C = 30; // chunk size (m)
+    const buckets = new Map<string, { x: number; z: number; list: [THREE.Matrix4, THREE.Color][] }>();
     const q = new THREE.Quaternion();
-    const col = new THREE.Color();
     const e = new THREE.Euler();
-    let i = 0;
     const F = LA.farm;
+    let i = 0;
     for (let k = 0; k < N * 3 && i < N; k++) {
       const r = Math.pow(rand(), 0.55) * 150;
       const a = rand() * Math.PI * 2;
       const x = 10 + Math.cos(a) * r;
       const z = -5 + Math.sin(a) * r;
-      if (lakeE(x, z) < 1.28 && lakeE(x, z) > 1.0) continue; // paths and the rim
-      if (lakeE(x, z) <= 1.0) continue;
-      if (x > 150 || z < -84) continue; // the slope and the hillside town
+      if (lakeE(x, z) <= 1.28) continue;
+      if (x > 150 || z < -84) continue;
       if (x > F.x0 && x < F.x1 && z > F.z0 && z < F.z1) continue;
       const h = 0.12 + rand() * 0.14;
       e.set((rand() - 0.5) * 0.6, rand() * 6.28, (rand() - 0.5) * 0.6);
       q.setFromEuler(e);
-      m.compose(new THREE.Vector3(x, H(x, z) - 0.02, z), q, new THREE.Vector3(1.2 + rand(), h, 1));
-      im.setMatrixAt(i, m);
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, H(x, z) - 0.02, z), q, new THREE.Vector3(0.35 + rand() * 0.3, h, 1));
       const dry = Math.max(0, Math.sin(x * 0.05 + 0.3) * Math.cos(z * 0.04 - 0.5));
-      col.setHSL(0.24 - dry * 0.1 + rand() * 0.03, 0.45 - dry * 0.15, 0.3 + rand() * 0.12 + dry * 0.1);
-      im.setColorAt(i, col);
+      const col = new THREE.Color().setHSL(0.24 - dry * 0.1 + rand() * 0.03, 0.45 - dry * 0.15, 0.3 + rand() * 0.12 + dry * 0.1);
+      const key = `${Math.floor(x / C)},${Math.floor(z / C)}`;
+      if (!buckets.has(key)) buckets.set(key, { x: (Math.floor(x / C) + 0.5) * C, z: (Math.floor(z / C) + 0.5) * C, list: [] });
+      buckets.get(key)!.list.push([m, col]);
       i++;
     }
-    im.count = i;
-    im.receiveShadow = true;
-    im.computeBoundingSphere();
-    return im;
+    const geo = bladeGeo();
+    const mat = lawnBladeMat();
+    return [...buckets.values()].map((b) => {
+      const im = new THREE.InstancedMesh(geo, mat, b.list.length);
+      b.list.forEach(([m, c], k) => {
+        im.setMatrixAt(k, m);
+        im.setColorAt(k, c);
+      });
+      im.receiveShadow = true;
+      im.computeBoundingSphere();
+      return { im, x: b.x, z: b.z };
+    });
   }, []);
-  return <primitive object={mesh} />;
+  // only the chunks near the camera are drawn: beyond that the lawn's colour on the ground carries it
+  useFrame(({ camera }) => {
+    for (const c of chunks) c.im.visible = Math.hypot(c.x - camera.position.x, c.z - camera.position.z) < 75;
+  });
+  return (
+    <group>
+      {chunks.map((c, k) => (
+        <primitive key={k} object={c.im} />
+      ))}
+    </group>
+  );
 }
 /** broad glossy leaves, now and then a blossom (oleander pink, bougainvillea magenta), as a clump card */
 function shrubCard(blossom: string | null, seed: number) {
@@ -663,7 +680,7 @@ function ClustersTex({ clusters, tex, tint, size }: { clusters: Cluster[]; tex: 
         im.setColorAt(i, col);
         i++;
       }
-    im.castShadow = true;
+    im.castShadow = false;
     im.receiveShadow = true;
     im.computeBoundingSphere();
     return im;
