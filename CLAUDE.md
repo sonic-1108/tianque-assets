@@ -58,6 +58,15 @@ short, no dashes in prose, deploy quickly when asked, and say plainly what was n
   test runs break it through HMR: test against a separate build.
 - The container's proxy blocks `*.workers.dev`, so the live stats API can't be checked from there.
 
+## 洛城午后 downtown + 投行家 (latest)
+
+- Footbridge (z = 0) over the freeway to a plaza (`DT` in maps.ts). Four enterable towers `FIRMS` (GS, MS, Citadel, IMC):
+  lobby 0, trading floor 40, banking floor 80 (`DT.levels`). Physics: `laFloorAt` / `laCeilAt` (height aware),
+  `laPushOut` boxes (`FIRM_IN`), `laClamp` bounds. Lifts: F in the core's alcove (`inLift`, `c.lift`), Game
+  `updateTowerItems`. Scenery in `src/components/maps/LADowntown.tsx` (people are instanced, shader animated).
+- Quest `src/banker.ts` (`IB_STEPS`, localStorage `tq_ib`), HUD `QuestHud.tsx`. The market is `marketPx(sym, t)`.
+- The AI does not use lifts.
+
 ## Open threads
 
 - Code split of `Game.tsx` (never started).
