@@ -17,5 +17,5 @@ export default defineConfig({
     __ADMIN__: JSON.stringify(process.env.ADMIN_SEED ? { iter: ITER, days: hashTable(process.env.ADMIN_SEED) } : null),
   },
   // two pages: the game, and admin.html (who's online right now)
-  build: { rollupOptions: { input: { main: 'index.html', admin: 'admin.html' } } },
+  build: { rollupOptions: { input: { main: 'index.html', admin: 'admin.html', preview: 'preview.html' } } },
 });

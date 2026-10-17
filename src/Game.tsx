@@ -20,7 +20,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -1417,7 +1417,12 @@ function GameImpl({
     if (keyLightRef.current) {
       // the shadow frustum follows the player, height included (the glacier summit is 19 m up)
       const ly = map.terrain ? view.pos[1] : 0;
-      keyLightRef.current.position.set(view.pos[0] + 8, ly + 14, view.pos[2] + 6);
+      if (map.sunDir) {
+        // the map's own sun (落日海岸: low in the west)
+        const [sx, sy, sz] = map.sunDir;
+        const L = Math.hypot(sx, sy, sz) || 1;
+        keyLightRef.current.position.set(view.pos[0] + (sx / L) * 30, ly + Math.max(4, (sy / L) * 30), view.pos[2] + (sz / L) * 30);
+      } else keyLightRef.current.position.set(view.pos[0] + 8, ly + 14, view.pos[2] + 6);
       keyLightRef.current.target.position.set(view.pos[0], ly, view.pos[2]);
       keyLightRef.current.target.updateMatrixWorld();
     }
@@ -6081,6 +6086,16 @@ function GameImpl({
         return;
       }
 
+      if (map.id === 'coast') {
+        // the meadow is a circle; the only way out is over the cliff, into the sea
+        if (d > map.radius - 0.3) {
+          c.pos[0] *= (map.radius - 0.3) / d;
+          c.pos[2] *= (map.radius - 0.3) / d;
+        }
+        if (c.pos[1] < -6.5) ringOut(i);
+        pillarPush(i, c, speed);
+        return;
+      }
       if (map.id === 'plankway') {
         // the cliff is a hard wall: nothing (a blink, a shove, a dash) puts anyone inside it or up on top of it
         const lim = PLANK.cliffZ + 0.32;
@@ -6176,7 +6191,7 @@ function GameImpl({
 
     function ringOut(i: number) {
       const c = fighters[i];
-      if (map.id === 'summit' || map.id === 'plankway') vfx.dustPuff(vA.set(c.pos[0], -6, c.pos[2]), 24, 2, 4, 2.2, '#f8fafc');
+      if (map.id === 'summit' || map.id === 'plankway' || map.id === 'coast') vfx.dustPuff(vA.set(c.pos[0], -6, c.pos[2]), 24, 2, 4, 2.2, '#f8fafc');
       else {
         vfx.sparkBurst(vA.set(c.pos[0], -6.5, c.pos[2]), 40, '#ff6a1a', 10, 0.14, new THREE.Vector3(0, 1, 0), 0.6);
         vfx.flash(vA.set(c.pos[0], -5, c.pos[2]), '#ff6a1a', 60, 0.5, 14);
@@ -6184,7 +6199,7 @@ function GameImpl({
       if (aiOn && !round.over && c.hp > 0) {
         c.hp = 0;
         c.revived = 9; // gone over the edge: nobody can help you up from that
-        const where = map.id === 'summit' ? '坠入云海' : map.id === 'plankway' ? '坠下悬崖' : '坠入岩浆';
+        const where = map.id === 'summit' ? '坠入云海' : map.id === 'plankway' ? '坠下悬崖' : map.id === 'coast' ? '坠入大海' : '坠入岩浆';
         onRoundEvent?.({ type: 'toast', text: i === ME ? `你${where}！` : `${fighters[i].tag || '对手'}${where}！` });
         koCheck(i, '#ff6a1a');
       }
@@ -6193,6 +6208,9 @@ function GameImpl({
         const [sx, sz] = (c.side ?? 0) === 0 ? PLANK.spawnW : PLANK.spawnE;
         c.pos = [sx, 3, sz];
         c.zip = undefined;
+      } else if (map.id === 'coast') {
+        const [sx, sz] = COAST.spawns[Math.min(1, c.side ?? 0)];
+        c.pos = [sx, coastHeight(sx, sz) + 3, sz];
       } else c.pos = [0, 4, 0];
       c.vel = [0, 0, 0];
       c.isGrounded = false;

@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast';
 
 export interface Circle {
   x: number;
@@ -53,6 +53,8 @@ export interface MapDef {
   rect?: { hx: number; hz: number };
   /** map size class: 10Q arenas, 50Q open battlefields */
   sizeClass?: '10Q' | '50Q';
+  /** where the sun is (a direction toward it); the key light comes from there instead of the usual high right */
+  sunDir?: [number, number, number];
 }
 
 /** the arenas were made 1.3x roomier (layout spread out; pillars, rails and props keep their size) */
@@ -1837,7 +1839,112 @@ MAPS.wending = {
   pillars: warPillars(),
 } as MapDef;
 
+// ----------------------------------------------------------------------
+// 落日海岸: a headland on the Big Sur coast at golden hour. The fight is on a meadow of dry golden grass
+// and wildflowers on top of the cliffs; the Pacific is to the west (-x), the sun going down over it.
+// Off the cliff is a long way down into the sea (a ring-out). Inland the golden hills roll up with oaks
+// on them, Highway 1 winds along them and crosses a canyon to the north on an arched concrete bridge;
+// a lighthouse stands on the point to the south.
+// ----------------------------------------------------------------------
+export const COAST = {
+  radius: 46,
+  sea: -12,
+  floor: -17,
+  spawns: [[8, 24], [8, -24]] as [number, number][],
+  /** highway: x along z, and the canyon it bridges */
+  road: { x: 64, half: 4.2 },
+  canyon: { z: -98, half: 13 },
+  lighthouse: [-44, 82] as [number, number],
+  /** trees on the meadow (x, z, size, lean) and boulders (x, z, size, kind) */
+  trees: [[-18, 30, 1.1, 0.5], [-24, -14, 1.25, 0.35], [-12, -34, 0.95, 0.6], [26, 8, 1.0, 0.2], [20, -30, 0.9, 0.25], [-8, 6, 0.8, 0.45]] as [number, number, number, number][],
+  rocks: [[4, 4, 1.6, 0], [-14, 18, 1.2, 1], [14, -12, 1.4, 2], [-4, -22, 1.0, 1], [30, 26, 1.8, 0], [-20, -2, 0.9, 2], [24, -4, 1.0, 1]] as [number, number, number, number][],
+};
+/** the cliff edge: land is east of this x (it wanders with z), and the point juts out to the south */
+export function coastX(z: number) {
+  let x = -30 + 5 * Math.sin(z * 0.06 + 0.5) + 2.5 * Math.sin(z * 0.15 + 2);
+  // the lighthouse point juts out to the west
+  const [, lz] = COAST.lighthouse;
+  x -= 17 * Math.exp(-(((z - lz) / 15) ** 2));
+  return x;
+}
+const ssC = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+/** the land before the cliff is cut: meadow, hills, the canyon, the road's bench */
+function coastLand(x: number, z: number) {
+  // the meadow: soft swells, a little higher toward the middle, a dip running down to the cliff
+  let h = 0.7 * Math.sin(x * 0.055 + z * 0.035) * Math.cos(z * 0.05 - 0.4) + 0.35 * Math.sin(x * 0.13 - z * 0.11 + 1.1);
+  // inland: the golden hills
+  const hill = ssC(30, 150, x) * (30 + 16 * Math.sin(z * 0.017 + 1.3) * Math.cos(x * 0.012)) + ssC(70, 260, x) * 40 * (0.6 + 0.4 * Math.sin(z * 0.009 - 0.7));
+  h += hill + ssC(40, 120, x) * (2.2 * Math.sin(x * 0.07 + z * 0.05) + 1.4 * Math.sin(z * 0.11 - x * 0.03));
+  // the highway's bench, cut along the hillside
+  const R = COAST.road;
+  const rx = roadX(z);
+  const dr = Math.abs(x - rx);
+  const roadY = roadHeight(z);
+  if (dr < R.half + 10) h = h + (roadY - h) * (1 - ssC(R.half, R.half + 10, dr));
+  // the canyon to the north, running down to the sea
+  const C = COAST.canyon;
+  const dc = Math.abs(z - C.z + Math.sin(x * 0.03) * 4);
+  const cut = 1 - ssC(C.half * 0.25, C.half, dc);
+  if (cut > 0) h = h + (Math.min(h, COAST.floor + 4 + Math.max(0, x) * 0.12) - h) * cut;
+  return h;
+}
+export function roadX(z: number) {
+  return COAST.road.x + 7 * Math.sin(z * 0.012 + 0.8) + 3 * Math.sin(z * 0.031);
+}
+export function roadHeight(z: number) {
+  return 9 + 3 * Math.sin(z * 0.01 + 0.4);
+}
+/** the walkable ground (and the sea floor off the cliff) */
+export function coastHeight(x: number, z: number) {
+  const land = coastLand(x, z);
+  const t = x - coastX(z); // metres inland of the edge
+  if (t >= 0) return land + ssC(2.5, 0, t) * 0.25; // a slight lip at the edge
+  // the cliff: almost sheer, down to the boulders at its foot and the sea floor
+  const edge = coastLand(coastX(z), z);
+  const k = ssC(0, 4.5, -t);
+  return edge + (COAST.floor - edge) * k;
+}
+
+MAPS.coast = {
+  id: 'coast',
+  name: '落日海岸',
+  subtitle: '加州一号公路边的海岬，金色草坡、海风柏树，太平洋上的落日',
+  icon: '🌅',
+  mechanics: [
+    '海岬上的金色草坡，西边是几十米高的悬崖，下面就是太平洋：被打下悬崖就坠海出局',
+    '走路不会掉下去，只有被打飞、翻滚、冲撞才会越过崖边',
+    '草坡上有几棵被海风吹歪的柏树和大石头，可以绕着躲',
+    '一打一或组队都能玩，把对面打倒就赢',
+  ],
+  homeClass: 'Ranger',
+  homeClassName: '暗器',
+  homeBonus: '伤害 +10%',
+  available: true,
+  terrain: true,
+  radius: COAST.radius,
+  spawnPlayer: COAST.spawns[0],
+  spawnEnemy: COAST.spawns[1],
+  background: '#e9c49a',
+  fog: [80, 900],
+  hemi: ['#ffd9b0', '#5a4a38', 0.75],
+  keyColor: '#ffb070',
+  keyIntensity: 3.4,
+  exposure: 0.92,
+  bloom: 0.85,
+  env: 0.55,
+  sunDir: [-0.93, 0.16, 0.33],
+  cardGradient: 'from-orange-400/50 via-rose-700/50 to-zinc-950/90',
+  pillars: [
+    ...COAST.trees.map(([x, z, s]) => ({ x, z, r: 0.55 * s })),
+    ...COAST.rocks.map(([x, z, s]) => ({ x, z, r: 1.15 * s })),
+  ],
+} as MapDef;
+
 export function terrainHeight(id: MapId, x: number, z: number) {
+  if (id === 'coast') return coastHeight(x, z);
   if (id === 'wending') return warHeight(x, z);
   if (id === 'sea') return shipFloorAt(x, z, 99);
   if (id === 'glacier') return glacierHeight(x, z);
@@ -1850,6 +1957,11 @@ export function terrainHeight(id: MapId, x: number, z: number) {
 /** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */
 export function terrainGradient(id: MapId, x: number, z: number): [number, number] {
   if (id === 'glacier') return glacierGradient(x, z);
+  if (id === 'coast') {
+    const e = 0.25;
+    const g = (a: number, b: number) => (coastX(b) > a ? coastHeight(coastX(b) + 0.01, b) : coastHeight(a, b)); // the cliff face is not a slope
+    return [(g(x + e, z) - g(x - e, z)) / (2 * e), (g(x, z + e) - g(x, z - e)) / (2 * e)];
+  }
   if (id === 'wending') {
     const e = 0.25;
     return [(warHeight(x + e, z) - warHeight(x - e, z)) / (2 * e), (warHeight(x, z + e) - warHeight(x, z - e)) / (2 * e)];
