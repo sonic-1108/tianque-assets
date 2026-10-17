@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast' | 'losangeles';
 
 export interface Circle {
   x: number;
@@ -1280,6 +1280,8 @@ export const mapRuntime = {
   shrine: { own: [-1, -1, -1] as number[], prog: [0, 0, 0] as number[], busy: [0, 0, 0] as number[], score: [0, 0] as number[], on: false },
   /** 问鼎原: drum (seconds until it sounds; ready when <= 0; who's taking it and how far), towers' shots, boulders, lever cooldowns */
   war: { drumT: 20, drumBy: -1, drumHold: 0, shots: [] as { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number }[], boulders: [] as { x: number; z: number; dir: number; y: number; spin: number; by: number; hit: number[] }[], leverCd: [0, 0] as number[], towerCd: [0, 0] as number[] },
+  /** 洛城午后: cash and watches lying about (kind is a LOOT id) */
+  la: { loot: [] as { kind: string; x: number; y: number; z: number }[], next: 3 },
   /** per fighter: can the local player see them right now (night, the bog's mist, stealth); the minimap uses it */
   seen: [] as boolean[],
   /** the camera's yaw (the minimap turns with it) */
@@ -1943,7 +1945,185 @@ MAPS.coast = {
   ],
 } as MapDef;
 
+// ----------------------------------------------------------------------
+// 洛城午后: Los Angeles around 2000, a late-summer afternoon, one big map:
+//   the middle: an Echo Park-style lake (shallow: you wade it), palms all round, a fountain, lotus, paddle boats
+//   north: a hillside of Spanish houses with red tile roofs on terraced streets, cars parked along them
+//   west: a farm, rows of orange trees, a red barn and a windmill
+//   east: the slope down to the Harbor Freeway, solid with traffic, and downtown's towers beyond it
+// Cash and watches turn up around the map (see LOOT): pick them up, drop them when you're cut down.
+// ----------------------------------------------------------------------
+export const LA = {
+  radius: 165,
+  lake: { x: -8, z: 12, rx: 46, rz: 28, water: -0.15, bed: -0.95 },
+  fwy: { x0: 186, x1: 220, y: -10 },
+  overpass: { z: -70, y: -0.6, half: 7 },
+  /** the hillside streets (z) and the house lots along them */
+  streets: [-92, -116, -140] as number[],
+  houses: [] as { x: number; z: number; w: number; d: number; yaw: number; y: number; kind: number }[],
+  /** the farm: fields and the grove (a box), the barn and the windmill */
+  farm: { x0: -158, x1: -82, z0: -40, z1: 120 },
+  barn: [-120, 92] as [number, number],
+  mill: [-140, 64] as [number, number],
+  palms: [] as [number, number, number, number][],
+  grove: [] as [number, number][],
+  beds: [] as [number, number, number][],
+  parked: [] as { x: number; z: number; yaw: number; c: number }[],
+  spawns: [[60, 70], [60, -50]] as [number, number][],
+};
+const ssL = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+/** how far inside the lake's oval (< 1 inside) */
+export function lakeE(x: number, z: number) {
+  const L = LA.lake;
+  return Math.hypot((x - L.x) / L.rx, (z - L.z) / L.rz);
+}
+/** the land before the house pads and streets are cut in */
+function laBase(x: number, z: number) {
+  let h = 0.35 * Math.sin(x * 0.045 + 0.4) * Math.cos(z * 0.04) + 0.2 * Math.sin(x * 0.11 - z * 0.07);
+  // the hill to the north
+  h += ssL(-75, -170, z) * 22 * (0.85 + 0.15 * Math.sin(x * 0.02));
+  // the farm is flat
+  const F = LA.farm;
+  const inFarm = ssL(F.x0 - 10, F.x0 + 6, x) * (1 - ssL(F.x1 - 6, F.x1 + 10, x)) * ssL(F.z0 - 10, F.z0 + 6, z) * (1 - ssL(F.z1 - 6, F.z1 + 10, z));
+  h = h * (1 - inFarm) + 0.1 * inFarm;
+  // east: down the planted slope to the freeway
+  const W = LA.fwy;
+  h = h + (W.y - h) * ssL(150, W.x0 - 2, x);
+  if (x > W.x0 - 2) h = W.y;
+  return h;
+}
+{
+  // houses: lots along the hillside streets, each on its own flat pad
+  const rnd = (() => {
+    let s = 777;
+    return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  })();
+  for (const sz of LA.streets)
+    for (const side of [-1, 1]) {
+      for (let x = -70; x <= 120; x += 17 + rnd() * 5) {
+        const w = 10 + rnd() * 4;
+        const d = 8 + rnd() * 3;
+        const z = sz + side * (4 + 2 + d / 2 + 1.5);
+        LA.houses.push({ x, z, w, d, yaw: side > 0 ? Math.PI : 0, y: laBase(x, z), kind: Math.floor(rnd() * 3) });
+        // a car at the kerb outside most of them
+        if (rnd() < 0.75) LA.parked.push({ x: x + (rnd() - 0.5) * 6, z: sz + side * 2.6, yaw: Math.PI / 2 + (rnd() < 0.5 ? 0 : Math.PI), c: Math.floor(rnd() * 8) });
+      }
+    }
+  // palms: a ring round the lake, an avenue down to it, others about the park
+  const L = LA.lake;
+  for (let k = 0; k < 26; k++) {
+    const a = (k / 26) * Math.PI * 2 + rnd() * 0.08;
+    LA.palms.push([L.x + Math.cos(a) * (L.rx + 7), L.z + Math.sin(a) * (L.rz + 7), 18 + rnd() * 9, k % 3 === 0 ? 1 : 0]);
+  }
+  for (let z = -60; z <= 90; z += 15) LA.palms.push([90, z, 20 + rnd() * 6, 0], [104, z + 7, 20 + rnd() * 6, 0]);
+  for (let k = 0; k < 18; k++) {
+    const x = -70 + rnd() * 200;
+    const z = -70 + rnd() * 150;
+    if (lakeE(x, z) < 1.35 || Math.abs(x - 97) < 12) continue;
+    LA.palms.push([x, z, 10 + rnd() * 14, rnd() < 0.5 ? 1 : 0]);
+  }
+  // the orange grove
+  const F = LA.farm;
+  for (let x = F.x0 + 6; x < F.x1 - 30; x += 5.5) for (let z = F.z0 + 6; z < F.z1 - 40; z += 5) LA.grove.push([x + (rnd() - 0.5) * 0.6, z + (rnd() - 0.5) * 0.6]);
+  // flower beds in the park
+  for (let k = 0; k < 14; k++) {
+    const x = -60 + rnd() * 170;
+    const z = -60 + rnd() * 140;
+    if (lakeE(x, z) < 1.3) continue;
+    LA.beds.push([x, z, 1.8 + rnd() * 1.6]);
+  }
+}
+export function laHeight(x: number, z: number) {
+  let h = laBase(x, z);
+  // the lake: a shallow bowl
+  const e = lakeE(x, z);
+  if (e < 1.12) h = h + (LA.lake.bed - h) * (1 - ssL(0.82, 1.12, e));
+  // the streets: cut level along the hill
+  for (const sz of LA.streets) {
+    const dz = Math.abs(z - sz);
+    if (dz < 9 && x > -82 && x < 132) h = h + (laBase(x, sz) - h) * (1 - ssL(4.5, 9, dz));
+  }
+  // house pads
+  for (const H of LA.houses) {
+    const dx = Math.abs(x - H.x) - H.w / 2;
+    const dz = Math.abs(z - H.z) - H.d / 2;
+    const out = Math.max(dx, dz);
+    if (out < 4) h = h + (H.y - h) * (1 - ssL(0.5, 4, out));
+  }
+  return h;
+}
+/** shallow lake water at (x, z): depth, 0 on dry land */
+export function laWater(x: number, z: number) {
+  return Math.max(0, LA.lake.water - laHeight(x, z));
+}
+/** solid footprints as rows of circles (houses, barn) */
+function boxCircles(x: number, z: number, w: number, d: number, yaw: number): Circle[] {
+  const out: Circle[] = [];
+  const r = Math.min(w, d) / 4;
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  for (let u = -w / 2 + r; u <= w / 2 - r + 0.01; u += r * 1.2)
+    for (let v = -d / 2 + r; v <= d / 2 - r + 0.01; v += r * 1.2) out.push({ x: x + u * c + v * s, z: z - u * s + v * c, r });
+  return out;
+}
+/** cash and watches: what turns up, what it's worth (in 两 of silver, the game's money) */
+export const LOOT = {
+  kinds: [
+    { id: 'cash', name: '一沓钞票', value: 100, weight: 70 },
+    { id: 'cashBig', name: '一捆钞票', value: 500, weight: 20 },
+    { id: 'rolex', name: 'Rolex 腕表', value: 8000, weight: 5 },
+    { id: 'iwc', name: 'IWC 腕表', value: 6000, weight: 4 },
+    { id: 'patek', name: 'Patek Philippe 腕表', value: 30000, weight: 1 },
+  ],
+  max: 26,
+  every: 4,
+};
+
+MAPS.losangeles = {
+  id: 'losangeles',
+  name: '洛城午后',
+  subtitle: '千禧年的洛杉矶：湖边棕榈公园、山坡住宅、橙子农场、高速公路和市中心金融区',
+  icon: '🌴',
+  mechanics: [
+    '超大地图：中间一个湖（水浅，能蹚过去但走得慢），北坡是住宅区，西边是橙子农场，东边坡下是车流不断的高速公路，再往东是市中心的金融大楼',
+    '地图上会不停冒出钞票，偶尔还有 Rolex、IWC、百达翡丽的表，走过去就捡起来',
+    '被打倒时身上捡的东西会掉一地，谁都能抢；回合结束时你身上的东西会存进「身家」（大厅里能看到）',
+    '一打一或组队都能玩，把对面打倒就赢',
+  ],
+  homeClass: 'Shadowblade',
+  homeClassName: '影刃',
+  homeBonus: '伤害 +10%',
+  available: true,
+  terrain: true,
+  radius: LA.radius,
+  spawnPlayer: LA.spawns[0],
+  spawnEnemy: LA.spawns[1],
+  background: '#c9c4b4',
+  fog: [260, 2600],
+  hemi: ['#cfe3ff', '#6b6a4a', 0.7],
+  keyColor: '#fff0d8',
+  keyIntensity: 3.1,
+  exposure: 0.72,
+  bloom: 0.55,
+  env: 0.7,
+  sunDir: [-0.55, 0.62, 0.56],
+  cardGradient: 'from-sky-500/50 via-amber-600/40 to-zinc-950/90',
+  pillars: [
+    ...LA.palms.map(([x, z, , k]) => ({ x, z, r: k ? 0.35 : 0.42 })),
+    ...LA.beds.map(([x, z, r]) => ({ x, z, r, h: 0.55 })),
+    ...LA.grove.map(([x, z]) => ({ x, z, r: 0.35 })),
+    ...LA.houses.flatMap((h) => boxCircles(h.x, h.z, h.w, h.d, h.yaw)),
+    ...boxCircles(LA.barn[0], LA.barn[1], 14, 20, 0),
+    { x: LA.mill[0], z: LA.mill[1], r: 1.2 },
+    ...LA.parked.map((c) => ({ x: c.x, z: c.z, r: 1.1, h: 1.4 })),
+  ],
+} as MapDef;
+
 export function terrainHeight(id: MapId, x: number, z: number) {
+  if (id === 'losangeles') return laHeight(x, z);
   if (id === 'coast') return coastHeight(x, z);
   if (id === 'wending') return warHeight(x, z);
   if (id === 'sea') return shipFloorAt(x, z, 99);
@@ -1957,6 +2137,10 @@ export function terrainHeight(id: MapId, x: number, z: number) {
 /** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */
 export function terrainGradient(id: MapId, x: number, z: number): [number, number] {
   if (id === 'glacier') return glacierGradient(x, z);
+  if (id === 'losangeles') {
+    const e = 0.25;
+    return [(laHeight(x + e, z) - laHeight(x - e, z)) / (2 * e), (laHeight(x, z + e) - laHeight(x, z - e)) / (2 * e)];
+  }
   if (id === 'coast') {
     const e = 0.25;
     const g = (a: number, b: number) => (coastX(b) > a ? coastHeight(coastX(b) + 0.01, b) : coastHeight(a, b)); // the cliff face is not a slope

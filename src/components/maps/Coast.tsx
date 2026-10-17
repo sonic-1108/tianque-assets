@@ -133,7 +133,7 @@ function SkyDome() {
 // ---------------------------------------------------------------
 // the land: golden grass, green in the hollows, rock on the cliffs, the road
 // ---------------------------------------------------------------
-function useTex(path: string, srgb = true, rep = 1) {
+export function useTex(path: string, srgb = true, rep = 1) {
   return useMemo(() => {
     const t = new THREE.TextureLoader().load(asset(path));
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -287,7 +287,8 @@ function Ocean() {
           vec3 skyCol(vec3 d){
             // a sunset sky to reflect: gold low down toward the sun, blue overhead
             float up = clamp(d.y, 0.0, 1.0);
-            float toSun = max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0);
+            vec2 dh = d.xz / max(length(d.xz), 1e-4); vec2 sh = uSun.xz / max(length(uSun.xz), 1e-4);
+            float toSun = max(dot(dh, sh), 0.0);
             vec3 horizon = mix(vec3(0.95, 0.66, 0.45), vec3(1.0, 0.62, 0.30), pow(toSun, 3.0));
             vec3 zenith = vec3(0.26, 0.42, 0.66);
             return mix(horizon, zenith, pow(up, 0.55));
@@ -452,7 +453,7 @@ function Scans() {
 // ---------------------------------------------------------------
 let leafCardP: THREE.Texture | null = null;
 /** a clump of cypress foliage: thousands of tiny overlapping scale-leaf sprays, ragged at the edge */
-function leafCard() {
+export function leafCard() {
   if (leafCardP) return leafCardP;
   const c = document.createElement('canvas');
   c.width = c.height = 512;
@@ -492,7 +493,7 @@ function leafCard() {
   return t;
 }
 /** foliage material: alpha cards that sway, and glow when the low sun is behind them */
-function foliageMat(tint: string, sway = 0.06) {
+export function foliageMat(tint: string, sway = 0.06) {
   const m = new THREE.MeshStandardMaterial({ map: leafCard(), color: tint, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.85 });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = timeU;
@@ -533,10 +534,10 @@ function foliageMat(tint: string, sway = 0.06) {
   };
   return m;
 }
-const timeU = { value: 0 };
+export const timeU = { value: 0 };
 
-type Cluster = { c: THREE.Vector3; r: THREE.Vector3; n: number; flat: number };
-function Clusters({ clusters, tint, size }: { clusters: Cluster[]; tint: string; size: number }) {
+export type Cluster = { c: THREE.Vector3; r: THREE.Vector3; n: number; flat: number };
+export function Clusters({ clusters, tint, size }: { clusters: Cluster[]; tint: string; size: number }) {
   const mesh = useMemo(() => {
     const rand = seeded(clusters.length * 7 + 3);
     let total = 0;
@@ -576,7 +577,7 @@ function Clusters({ clusters, tint, size }: { clusters: Cluster[]; tint: string;
 }
 
 /** a branch: a tapering tube along a curve */
-function branchGeo(pts: THREE.Vector3[], r0: number, r1: number, seg = 10, radial = 7) {
+export function branchGeo(pts: THREE.Vector3[], r0: number, r1: number, seg = 10, radial = 7) {
   const curve = new THREE.CatmullRomCurve3(pts);
   const g = new THREE.TubeGeometry(curve, seg, 1, radial, false);
   const p = g.attributes.position as THREE.BufferAttribute;
@@ -595,7 +596,7 @@ function branchGeo(pts: THREE.Vector3[], r0: number, r1: number, seg = 10, radia
   g.computeVertexNormals();
   return g;
 }
-function mergeGeos(geos: THREE.BufferGeometry[]) {
+export function mergeGeos(geos: THREE.BufferGeometry[]) {
   const non = geos.map((g) => (g.index ? g.toNonIndexed() : g));
   let n = 0;
   for (const g of non) n += g.attributes.position.count;
@@ -702,7 +703,7 @@ function Oaks() {
 // ---------------------------------------------------------------
 // the meadow: wild oats lit from behind by the low sun, poppies and lupine
 // ---------------------------------------------------------------
-function oatsTexture() {
+export function oatsTexture() {
   const c = document.createElement('canvas');
   c.width = 256;
   c.height = 256;
@@ -770,7 +771,7 @@ function flowerTexture(kind: 'poppy' | 'lupine') {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-function grassMat(tex: THREE.Texture, sway: number) {
+export function grassMat(tex: THREE.Texture, sway: number) {
   const m = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.9 });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = timeU;
@@ -813,14 +814,14 @@ function grassMat(tex: THREE.Texture, sway: number) {
   };
   return m;
 }
-function crossCard() {
+export function crossCard() {
   const a = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
   const b = a.clone().rotateY(Math.PI / 2);
   const c = a.clone().rotateY(Math.PI / 4);
   return mergeGeos([a, b, c]);
 }
 /** one grass blade: a tapered, curved strip, 1 m tall before scaling */
-function bladeGeo() {
+export function bladeGeo() {
   const seg = 5;
   const pos: number[] = [];
   const nor: number[] = [];
@@ -1188,7 +1189,7 @@ function Gulls() {
   );
 }
 
-function Clock() {
+export function Clock() {
   useFrame((st) => {
     timeU.value = st.clock.elapsedTime;
   });

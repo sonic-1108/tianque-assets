@@ -1,5 +1,6 @@
 import { WendingMap } from './maps/Wending';
 import { CoastMap } from './maps/Coast';
+import { LAMap } from './maps/LA';
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
@@ -1297,6 +1298,7 @@ export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'plankway') return <PlankwayMap />;
   if (mapId === 'wending') return <WendingMap />;
   if (mapId === 'coast') return <CoastMap />;
+  if (mapId === 'losangeles') return <LAMap />;
   if (mapId === 'forest') return <ForestMap />;
   if (mapId === 'desert') return <DesertMap />;
   return <TempleMap />;
