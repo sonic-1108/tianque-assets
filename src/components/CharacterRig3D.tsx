@@ -1026,7 +1026,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         grip.visible = off && !!hand;
         if (!grip.visible) continue;
         const a = pose.worldToLocal(hand!.getWorldPosition(glideGrip.a));
-        const b = glideGrip.b.set(k === 0 ? -0.65 : 0.65, 0, 0).applyMatrix4(vest.canopy.matrix);
+        const b = glideGrip.b.set(k === 0 ? -0.42 : 0.42, 0, 0).applyMatrix4(vest.canopy.matrix);
         const dir = glideGrip.dir.copy(b).sub(a);
         grip.position.copy(a).add(b).multiplyScalar(0.5);
         grip.scale.set(1, dir.length(), 1);
