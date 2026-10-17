@@ -5,7 +5,7 @@ import { TR, TRADER } from '../trader';
 import { CombatantState } from '../types';
 
 // 交易员's things in the world: Rolexes in flight, cash on the ground, the red candles of 黑色星期一 coming down,
-// the SHORT arrow over whoever he shorted, and the Patagonia vest he glides under.
+// the SHORT arrow over whoever he shorted. The character rig animates his actual Patagonia vest.
 
 function watchGeo() {
   const bezel = new THREE.TorusGeometry(0.16, 0.035, 10, 28);
@@ -110,35 +110,6 @@ function billTex() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-/** the vest held overhead: a quilted orange shell with navy trim, puffed like a little canopy */
-function vestGeo() {
-  const g = new THREE.SphereGeometry(1.1, 24, 8, 0, Math.PI * 2, 0, Math.PI * 0.32);
-  g.scale(1.25, 0.55, 0.75);
-  return g;
-}
-function vestMat() {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 128;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#e8641e';
-  g.fillRect(0, 0, 256, 128);
-  g.strokeStyle = 'rgba(80,30,5,0.45)';
-  g.lineWidth = 3;
-  for (let y = 10; y < 128; y += 18) {
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(256, y);
-    g.stroke();
-  }
-  g.fillStyle = '#1d2a4a';
-  g.fillRect(0, 112, 256, 16);
-  g.fillRect(122, 0, 12, 128);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.MeshStandardMaterial({ map: t, roughness: 0.7, side: THREE.DoubleSide });
-}
-
 const MAXR = 8;
 const MAXB = 6 * TRADER.cash.bills;
 const MAXC = 20;
@@ -152,8 +123,6 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
       candle: new THREE.MeshStandardMaterial({ color: '#d4181c', emissive: '#7a0000', emissiveIntensity: 0.8, roughness: 0.4 }),
       wick: new THREE.MeshStandardMaterial({ color: '#ff3b3b', emissive: '#ff0000', emissiveIntensity: 1 }),
       ring: new THREE.MeshBasicMaterial({ color: '#ff2020', transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide }),
-      vest: vestMat(),
-      line: new THREE.MeshBasicMaterial({ color: '#222' }),
     }),
     []
   );
@@ -172,7 +141,6 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
       candle: im(new THREE.BoxGeometry(1, 1, 1), mats.candle, MAXC),
       wick: im(new THREE.BoxGeometry(1, 1, 1), mats.wick, MAXC),
       ring: im(new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2), mats.ring, MAXC),
-      vest: im(vestGeo(), mats.vest, 9),
       dreams: Array.from({ length: 9 }, () => {
         const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dreamTex(), depthTest: false, transparent: true }));
         s.scale.set(1.0, 0.8, 1);
@@ -265,8 +233,7 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
     meshes.candle.count = meshes.wick.count = c;
     meshes.ring.count = rc;
     meshes.candle.instanceMatrix.needsUpdate = meshes.wick.instanceMatrix.needsUpdate = meshes.ring.instanceMatrix.needsUpdate = true;
-    // over the fighters: the SHORT arrow, the vest canopy
-    let v = 0;
+    // Over the fighters: SHORT and daydream markers. The rig owns the removable vest.
     fighters.current.forEach((f, i) => {
       const dr = meshes.dreams[i];
       if (dr) {
@@ -278,16 +245,7 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
         sp.visible = (f.shortT ?? 0) > 0 && f.hp > 0;
         if (sp.visible) sp.position.set(f.pos[0], f.pos[1] + 2.55 + Math.sin(t * 4) * 0.08, f.pos[2]);
       }
-      if ((f.glide ?? 0) > 0 && v < 9) {
-        o.position.set(f.pos[0], f.pos[1] + 2.45, f.pos[2]);
-        o.rotation.set(Math.sin(t * 5) * 0.06, f.rotY, Math.sin(t * 3.3) * 0.08);
-        o.scale.setScalar(1);
-        o.updateMatrix();
-        meshes.vest.setMatrixAt(v++, o.matrix);
-      }
     });
-    meshes.vest.count = v;
-    meshes.vest.instanceMatrix.needsUpdate = true;
   });
   return (
     <group ref={g}>

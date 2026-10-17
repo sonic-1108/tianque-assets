@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
-import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose } from './climbPose';
+import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose } from './climbPose';
+import { splitTraderVest, disposeTraderVest, TraderVest } from './traderVest';
+import { TRADER } from '../trader';
 import { useFrame } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils, MeshoptDecoder } from 'three-stdlib';
 
@@ -630,6 +632,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const spearRef = useRef<THREE.Group | null>(null);
   const faceLight = useRef<THREE.PointLight>(null);
   const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife>; left?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife> }>({});
+  const traderVestRef = useRef<TraderVest | null>(null);
+  const glideBlendRef = useRef(0);
+  const glideGrip = useMemo(() => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), dir: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) }), []);
 
   useEffect(() => {
     let alive = true;
@@ -728,6 +733,13 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     actionsRef.current = actions;
     limbsRef.current = collectLimbs(model);
+    if (classId === 'Trader' && !asset.fallback) {
+      model.traverse((o) => {
+        if (!(o as THREE.SkinnedMesh).isSkinnedMesh || traderVestRef.current) return;
+        traderVestRef.current = splitTraderVest(o as THREE.SkinnedMesh);
+      });
+      if (traderVestRef.current) poseRootRef.current?.add(traderVestRef.current.canopy, ...traderVestRef.current.grips);
+    }
     currentKeyRef.current = '';
     if (actions.idle) {
       actions.idle.play();
@@ -831,6 +843,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     return () => {
       mixer.stopAllAction();
+      if (traderVestRef.current) disposeTraderVest(traderVestRef.current);
+      traderVestRef.current = null;
+      glideBlendRef.current = 0;
       right.group.removeFromParent();
       left.group.removeFromParent();
       crown?.removeFromParent();
@@ -916,6 +931,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
 
     const st = c.actionState;
+    const gliding = classId === 'Trader' && (c.glide ?? 0) > 0 && c.hp > 0 && !c.isGrounded;
+    glideBlendRef.current = THREE.MathUtils.damp(glideBlendRef.current, gliding ? 1 : 0, 12, rawDelta);
+    const glideBlend = glideBlendRef.current;
     const speed = Math.hypot(c.vel[0], c.vel[2]);
     const restarted = st !== lastStateRef.current || c.stateTimer < lastTimerRef.current - 0.001;
     if (lastStateRef.current === 'knockdown' && (st === 'idle' || st === 'run') && c.hp > 0) getupRef.current = 0.45;
@@ -927,7 +945,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     let key = 'idle';
     const lm = c.localMove || [0, 0];
     let backward = false;
-    if (c.treeClimb !== undefined && c.climbMode === 'ladder') {
+    if (gliding) {
+      key = 'idle'; // arms and hanging legs are posed below, rather than playing the running jump
+    } else if (c.treeClimb !== undefined && c.climbMode === 'ladder') {
       key = 'idle'; // hand over hand: the climbing pose is layered on below
     } else if (c.treeClimb !== undefined) {
       // 梯云纵: running straight up the bark, body leaning out from the trunk; the last kick turns into a flip
@@ -985,6 +1005,34 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (cur && currentKeyRef.current === 'swim') cur.setEffectiveTimeScale(speed > 0.6 ? THREE.MathUtils.clamp(speed / 3.5, 0.7, 1.4) : 0.45);
 
     mixer.update(delta);
+    if (limbsRef.current && glideBlend > 0.001) {
+      const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.55);
+      applyGlidePose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), lift, glideBlend);
+    }
+    const vest = traderVestRef.current;
+    if (vest) {
+      const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.55);
+      const off = glideBlend > 0.15 && c.hp > 0;
+      vest.body.geometry = off ? vest.undressed : vest.dressed;
+      vest.shirt.visible = off;
+      vest.canopy.visible = off;
+      vest.canopy.position.set(0, THREE.MathUtils.lerp(1.2, 2.12, lift) - HIP_PIVOT, -0.05);
+      vest.canopy.scale.setScalar(THREE.MathUtils.lerp(0.35, 1, lift) * glideBlend);
+      vest.canopy.rotation.set((1 - lift) * Math.PI / 2 + Math.sin(performance.now() * 0.004) * 0.035 * lift, 0, Math.sin(performance.now() * 0.003) * 0.045 * lift);
+      vest.canopy.updateMatrix();
+      for (let k = 0; k < vest.grips.length; k++) {
+        const grip = vest.grips[k];
+        const hand = limbsRef.current?.bones[k === 0 ? 'lefthand' : 'righthand'];
+        grip.visible = off && !!hand;
+        if (!grip.visible) continue;
+        const a = pose.worldToLocal(hand!.getWorldPosition(glideGrip.a));
+        const b = glideGrip.b.set(k === 0 ? -0.65 : 0.65, 0, 0).applyMatrix4(vest.canopy.matrix);
+        const dir = glideGrip.dir.copy(b).sub(a);
+        grip.position.copy(a).add(b).multiplyScalar(0.5);
+        grip.scale.set(1, dir.length(), 1);
+        grip.quaternion.setFromUnitVectors(glideGrip.up, dir.normalize());
+      }
+    }
 
     const climbingNow = c.treeClimb !== undefined;
     if (!climbingNow) climbKickRef.current = -1;
@@ -1032,7 +1080,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     // no weapons in hand while swimming, climbing or sitting
     // (and once 飞虫沙暴 has eaten them past the hands)
-    const handsBusy = climbingNow || !!c.swimming || sitBlendRef.current > 0.5 || drinkBlendRef.current > 0.3 || (c.devoured ?? 0) >= 0.45;
+    const handsBusy = climbingNow || glideBlend > 0.15 || !!c.swimming || sitBlendRef.current > 0.5 || drinkBlendRef.current > 0.3 || (c.devoured ?? 0) >= 0.45;
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy;

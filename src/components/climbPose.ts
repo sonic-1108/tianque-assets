@@ -56,6 +56,23 @@ const d = new THREE.Vector3();
 const up = new THREE.Vector3(0, 1, 0);
 const right = new THREE.Vector3();
 
+/** Pull the vest off at chest level, then hold its two edges overhead with both hands. */
+export function applyGlidePose(l: Limbs, fwd: THREE.Vector3, lift: number, w: number) {
+  right.set(-fwd.z, 0, fwd.x);
+  const B = l.bones;
+  for (const side of [-1, 1]) {
+    const p = side < 0 ? 'left' : 'right';
+    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(-0.15, 0.8, lift)).addScaledVector(fwd, 0.28).addScaledVector(right, side * 0.5).normalize();
+    aim(B[p + 'arm'], B[p + 'forearm'], d, w);
+    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(0.25, 0.9, lift)).addScaledVector(fwd, 0.12).addScaledVector(right, -side * 0.2).normalize();
+    aim(B[p + 'forearm'], B[p + 'hand'], d, w);
+    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, 0.2).addScaledVector(right, side * 0.12).normalize();
+    aim(B[p + 'upleg'], B[p + 'leg'], d, w);
+    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, -0.25).normalize();
+    aim(B[p + 'leg'], B[p + 'foot'], d, w);
+  }
+}
+
 /**
  * fwd: world direction the climber faces (into the trunk). phase advances as they climb.
  * Arms reach up alternately, the opposite leg steps up with each reach.
