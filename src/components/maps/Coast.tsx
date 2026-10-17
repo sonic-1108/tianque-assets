@@ -173,14 +173,14 @@ function landMaterial(rock: THREE.Texture, rockN: THREE.Texture) {
           float slope = 1.0 - n.y;
           float n1 = fbm4(p.xz * 0.035); float n2 = fbm4(p.xz * 0.22 + 7.0); float n3 = noise(p.xz * 1.7);
           // dry wild-oat gold, straw in the light patches, olive where it holds water
-          vec3 straw = mix(vec3(0.42, 0.32, 0.15), vec3(0.58, 0.45, 0.22), n2);
-          straw = mix(straw, vec3(0.70, 0.56, 0.30), n3 * 0.35);
-          vec3 olive = mix(vec3(0.33, 0.33, 0.14), vec3(0.42, 0.40, 0.18), n2);
+          vec3 straw = mix(vec3(0.26, 0.19, 0.09), vec3(0.36, 0.27, 0.13), n2);
+          straw = mix(straw, vec3(0.40, 0.31, 0.17), n3 * 0.35);
+          vec3 olive = mix(vec3(0.18, 0.19, 0.08), vec3(0.24, 0.24, 0.10), n2);
           float wet = smoothstep(0.58, 0.75, n1) * (1.0 - smoothstep(0.25, 0.5, slope));
           vec3 col = mix(straw, olive, wet * 0.75);
           // trodden paths across the meadow
           float path = 1.0 - smoothstep(0.0, 0.035, abs(fbm4(p.xz * 0.02 + 3.0) - 0.5));
-          col = mix(col, mix(vec3(0.52, 0.42, 0.30), vec3(0.62, 0.52, 0.38), n3), path * 0.7 * step(p.x, 45.0));
+          col = mix(col, mix(vec3(0.30, 0.24, 0.17), vec3(0.38, 0.31, 0.22), n3), path * 0.7 * step(p.x, 45.0));
           // rock wherever it's steep, darker and wet at the bottom
           vec3 rk = triRock(p, n) * vec3(1.05, 0.95, 0.85) * 1.15;
           gRock = smoothstep(0.32, 0.55, slope + (n2 - 0.5) * 0.25);
@@ -451,32 +451,43 @@ function Scans() {
 // foliage: a dense sprig card made from the leaf atlas, tinted per tree
 // ---------------------------------------------------------------
 let leafCardP: THREE.Texture | null = null;
+/** a clump of cypress foliage: thousands of tiny overlapping scale-leaf sprays, ragged at the edge */
 function leafCard() {
   if (leafCardP) return leafCardP;
   const c = document.createElement('canvas');
   c.width = c.height = 512;
   const g = c.getContext('2d')!;
+  const rand = seeded(17);
+  g.clearRect(0, 0, 512, 512);
+  // little sprays radiating from a few twig points, denser in the middle
+  for (let k = 0; k < 2600; k++) {
+    const a = rand() * Math.PI * 2;
+    const r = Math.pow(rand(), 0.7) * 230;
+    const x = 256 + Math.cos(a) * r;
+    const y = 256 + Math.sin(a) * r * 0.75;
+    const l = 22 + rand() * 26 + (1 - r / 230) * 6;
+    g.fillStyle = `hsl(${88 + rand() * 30}, ${28 + rand() * 22}%, ${l}%)`;
+    g.save();
+    g.translate(x, y);
+    g.rotate(rand() * Math.PI);
+    g.beginPath();
+    g.ellipse(0, 0, 3 + rand() * 6, 1.6 + rand() * 2.2, 0, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+  // a few dark gaps so it doesn't read as a disc
+  g.globalCompositeOperation = 'destination-out';
+  for (let k = 0; k < 40; k++) {
+    const a = rand() * Math.PI * 2;
+    const r = 150 + rand() * 110;
+    g.beginPath();
+    g.arc(256 + Math.cos(a) * r, 256 + Math.sin(a) * r * 0.75, 12 + rand() * 30, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
-  const img = new Image();
-  img.onload = () => {
-    const rand = seeded(17);
-    // stamp the bushy sprig many times, rotated, from the edges in, so the card reads as a clump
-    for (let k = 0; k < 26; k++) {
-      const a = rand() * Math.PI * 2;
-      const r = Math.sqrt(rand()) * 150;
-      const s = 0.22 + rand() * 0.16;
-      g.save();
-      g.translate(256 + Math.cos(a) * r, 256 + Math.sin(a) * r);
-      g.rotate(rand() * Math.PI * 2);
-      g.globalAlpha = 1;
-      g.drawImage(img, 61, 1226, 900, 684, -450 * s, -342 * s, 900 * s, 684 * s);
-      g.restore();
-    }
-    t.needsUpdate = true;
-  };
-  img.src = asset('coast/leaves.webp');
   leafCardP = t;
   return t;
 }
@@ -516,7 +527,7 @@ function foliageMat(tint: string, sway = 0.06) {
           vec3 V = normalize(cameraPosition - vFW);
           float back = pow(max(dot(-V, uSun), 0.0), 4.0);
           reflectedLight.directDiffuse += diffuseColor.rgb * vec3(1.0, 0.7, 0.35) * back * 1.6;
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.08;
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.22;
         }`
       );
   };
@@ -649,7 +660,7 @@ function Cypresses() {
   return (
     <group>
       <mesh geometry={wood} material={mat} castShadow receiveShadow />
-      <Clusters clusters={pads} tint="#3d4a2c" size={1.55} />
+      <Clusters clusters={pads} tint="#8a9a6a" size={1.7} />
     </group>
   );
 }
@@ -683,7 +694,7 @@ function Oaks() {
       <mesh geometry={wood}>
         <meshStandardMaterial color="#4a3b2c" roughness={0.95} />
       </mesh>
-      <Clusters clusters={crowns} tint="#4d5730" size={2.6} />
+      <Clusters clusters={crowns} tint="#9aa070" size={2.8} />
     </group>
   );
 }
@@ -698,9 +709,9 @@ function oatsTexture() {
   const g = c.getContext('2d')!;
   const rand = seeded(91);
   g.clearRect(0, 0, 256, 256);
-  for (let i = 0; i < 70; i++) {
-    const x = 12 + rand() * 232;
-    const hgt = 120 + rand() * 130;
+  for (let i = 0; i < 16; i++) {
+    const x = 40 + rand() * 176;
+    const hgt = 90 + rand() * 160;
     const bend = (rand() - 0.5) * 50;
     const tx = x + bend;
     const ty = 256 - hgt;
@@ -808,62 +819,158 @@ function crossCard() {
   const c = a.clone().rotateY(Math.PI / 4);
   return mergeGeos([a, b, c]);
 }
+/** one grass blade: a tapered, curved strip, 1 m tall before scaling */
+function bladeGeo() {
+  const seg = 5;
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= seg; i++) {
+    const t = i / seg;
+    const w = 0.032 * (1 - t * 0.92);
+    const bend = t * t * 0.28; // leans forward toward the tip
+    for (const s of [-1, 1]) {
+      pos.push(s * w, t, bend);
+      // rounded normal so the light rolls across the blade
+      nor.push(s * 0.45, 0.2, 1);
+      uv.push(s > 0 ? 1 : 0, t);
+    }
+  }
+  for (let i = 0; i < seg; i++) {
+    const a = i * 2;
+    idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+function bladeMat() {
+  const m = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.75, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = timeU;
+    sh.uniforms.uSun = { value: SUN };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime; varying vec3 vFW; varying float vTip;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        {
+          vec3 ip = vec3(0.0);
+          #ifdef USE_INSTANCING
+            ip = instanceMatrix[3].xyz;
+          #endif
+          float k = position.y * position.y; vTip = position.y;
+          // gusts roll in from the sea, a quick flutter on top
+          float gust = sin(ip.x * 0.09 - uTime * 1.5 + sin(ip.z * 0.04) * 2.0) * 0.5 + 0.5;
+          float flutter = sin(uTime * 3.1 + ip.x * 1.7 + ip.z * 1.3) * 0.08;
+          transformed.z += (gust * 0.35 + flutter) * k;
+          transformed.y -= (gust * 0.12) * k;
+          vec4 w = modelMatrix * vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            w = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
+          #endif
+          vFW = w.xyz;
+        }`
+      );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uSun; varying vec3 vFW; varying float vTip;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix(0.35, 1.15, vTip);')
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        {
+          // the low sun through the blades: their tips glow
+          vec3 V = normalize(cameraPosition - vFW);
+          float back = pow(max(dot(-V, uSun), 0.0), 3.0);
+          reflectedLight.directDiffuse += diffuseColor.rgb * vec3(1.0, 0.7, 0.35) * back * vTip * 2.2;
+        }`
+      );
+  };
+  return m;
+}
 function Meadow() {
-  const { oats, poppies, lupine } = useMemo(() => {
+  const { blades, oats, poppies, lupine } = useMemo(() => {
     const rand = seeded(101);
-    const card = crossCard();
-    const spots: [number, number, number][] = [];
     const blocked = (x: number, z: number) =>
-      x < coastX(z) + 0.6 || Math.abs(x - roadX(z)) < COAST.road.half + 0.5 || COAST.rocks.some(([rx, rz, s]) => Math.hypot(x - rx, z - rz) < 1.2 * s) || COAST.trees.some(([tx, tz]) => Math.hypot(x - tx, z - tz) < 0.8);
-    for (let k = 0; k < 200000 && spots.length < 42000; k++) {
-      const r = Math.sqrt(rand()) * 95;
+      x < coastX(z) + 0.4 || Math.abs(x - roadX(z)) < COAST.road.half + 0.5 || COAST.rocks.some(([rx, rz, s]) => Math.hypot(x - rx, z - rz) < 1.1 * s) || COAST.trees.some(([tx, tz]) => Math.hypot(x - tx, z - tz) < 0.6);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const col = new THREE.Color();
+    // blades: dense where people fight, thinning out toward the hills
+    const N = 170000;
+    const blades = new THREE.InstancedMesh(bladeGeo(), bladeMat(), N);
+    let i = 0;
+    for (let k = 0; k < N * 3 && i < N; k++) {
+      const r = Math.pow(rand(), 0.62) * 85;
       const a = rand() * Math.PI * 2;
       const x = 6 + Math.cos(a) * r;
       const z = Math.sin(a) * r;
       if (blocked(x, z)) continue;
-      // thinner on the trodden paths
-      // shorter, patchy: knee-high mostly, a few tall clumps
       const patch = Math.sin(x * 0.21 + z * 0.13) * Math.cos(z * 0.17 - x * 0.07);
-      if (patch < -0.35 && rand() < 0.6) continue;
-      const s = 0.3 + rand() * 0.3 + Math.max(0, patch) * 0.25;
-      spots.push([x, z, s]);
+      if (patch < -0.45 && rand() < 0.7) continue;
+      const h = (0.28 + rand() * 0.35 + Math.max(0, patch) * 0.3) * (rand() < 0.04 ? 1.8 : 1);
+      // the wind has laid them mostly eastward
+      e.set((rand() - 0.5) * 0.5, -Math.PI / 2 + (rand() - 0.5) * 1.6, (rand() - 0.5) * 0.4);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(x, H(x, z) - 0.03, z), q, new THREE.Vector3(1 + rand() * 0.8, h, 1));
+      blades.setMatrixAt(i, m);
+      const dry = 0.5 + 0.5 * Math.sin(x * 0.05 + z * 0.08) * Math.sin(z * 0.03);
+      col.setHSL(0.1 + rand() * 0.035 - dry * 0.02, 0.42 + rand() * 0.2, 0.36 + rand() * 0.2 + dry * 0.08);
+      blades.setColorAt(i, col);
+      i++;
     }
-    const oats = new THREE.InstancedMesh(card, grassMat(oatsTexture(), 0.09), spots.length);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const col = new THREE.Color();
-    spots.forEach(([x, z, s], i) => {
-      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI);
-      m.compose(new THREE.Vector3(x, H(x, z) - 0.05, z), q, new THREE.Vector3(s * (1 + rand() * 0.6), s, s * (1 + rand() * 0.6)));
-      oats.setMatrixAt(i, m);
-      col.setHSL(0.09 + rand() * 0.04, 0.3 + rand() * 0.2, 0.45 + rand() * 0.2);
-      oats.setColorAt(i, col);
-    });
-    oats.receiveShadow = true;
-    const flowers = (kind: 'poppy' | 'lupine', n: number) => {
+    blades.count = i;
+    blades.receiveShadow = true;
+    blades.computeBoundingSphere();
+    // wild oat stalks standing above the blades
+    const card = crossCard();
+    const oatN = 9000;
+    const oats = new THREE.InstancedMesh(card, grassMat(oatsTexture(), 0.09), oatN);
+    let j = 0;
+    for (let k = 0; k < oatN * 4 && j < oatN; k++) {
+      const r = Math.pow(rand(), 0.7) * 75;
+      const a = rand() * Math.PI * 2;
+      const x = 6 + Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      if (blocked(x, z)) continue;
+      const s = 0.45 + rand() * 0.35;
+      m.compose(new THREE.Vector3(x, H(x, z) - 0.05, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI), new THREE.Vector3(s * 0.6, s, s * 0.6));
+      oats.setMatrixAt(j, m);
+      col.setHSL(0.1 + rand() * 0.03, 0.35, 0.5 + rand() * 0.15);
+      oats.setColorAt(j, col);
+      j++;
+    }
+    oats.count = j;
+    const flowers = (kind: 'poppy' | 'lupine', n: number, every: number) => {
       const im = new THREE.InstancedMesh(crossCard(), grassMat(flowerTexture(kind), 0.05), n);
-      let i = 0;
-      for (let k = 0; k < n * 20 && i < n; k++) {
-        // in drifts
-        const cx = -20 + rand() * 60;
-        const cz = -50 + rand() * 100;
-        if (Math.sin(cx * (kind === 'poppy' ? 0.11 : 0.07) + cz * 0.09) < 0.3) continue;
-        for (let j = 0; j < 6 && i < n; j++) {
-          const x = cx + (rand() - 0.5) * 4;
-          const z = cz + (rand() - 0.5) * 4;
+      let c = 0;
+      for (let k = 0; k < n * 30 && c < n; k++) {
+        // in drifts here and there
+        const cx = -22 + rand() * 64;
+        const cz = -55 + rand() * 110;
+        if (Math.sin(cx * every + cz * 0.09) * Math.cos(cz * every * 0.8 - 1.0) < 0.55) continue;
+        for (let t = 0; t < 8 && c < n; t++) {
+          const x = cx + (rand() - 0.5) * 3;
+          const z = cz + (rand() - 0.5) * 3;
           if (blocked(x, z)) continue;
-          const s = kind === 'poppy' ? 0.35 + rand() * 0.2 : 0.55 + rand() * 0.3;
+          const s = kind === 'poppy' ? 0.32 + rand() * 0.18 : 0.5 + rand() * 0.25;
           m.compose(new THREE.Vector3(x, H(x, z) - 0.02, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * 3), new THREE.Vector3(s, s, s));
-          im.setMatrixAt(i++, m);
+          im.setMatrixAt(c++, m);
         }
       }
-      im.count = i;
+      im.count = c;
       return im;
     };
-    return { oats, poppies: flowers('poppy', 3500), lupine: flowers('lupine', 1800) };
+    return { blades, oats, poppies: flowers('poppy', 2200, 0.11), lupine: flowers('lupine', 500, 0.05) };
   }, []);
   return (
     <group>
+      <primitive object={blades} />
       <primitive object={oats} />
       <primitive object={poppies} />
       <primitive object={lupine} />
