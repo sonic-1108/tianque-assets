@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { DT, FIRMS, FIRM_IN, IB_SPOTS, Firm, Npc, firmXZ, firmAt, liftCar, marketPx, marketT, MARKET_SYMS, LA, mapRuntime, laHeight } from '../../maps';
-import { getIb, IB_STEPS } from '../../banker';
+import { ibTask } from '../../banker';
 
 // 洛城午后 downtown, the part you can walk into: the footbridge over the freeway, the plaza, and inside the four
 // finance houses: glass lobbies, trading floors full of people in suits on the phone, the banking floor with its
@@ -868,12 +868,12 @@ function QuestMarker() {
   const beam = useRef<THREE.Mesh>(null);
   useFrame((st) => {
     if (!g.current) return;
-    const st2 = IB_STEPS[getIb().step];
+    const st2 = ibTask();
     if (!st2) {
       g.current.visible = false;
       return;
     }
-    let [x, y, z] = IB_SPOTS[st2.spot];
+    let [x, y, z] = st2.spot;
     const vx = mapRuntime.viewX;
     const vz = mapRuntime.viewZ;
     const vy = mapRuntime.viewY ?? 0;
@@ -931,10 +931,19 @@ export function LADowntown() {
     </group>
   );
 }
+/** whoever the current task has waiting out in the city (a client in a light suit) */
 function ClientNpc() {
-  const list = useMemo(() => {
-    const [x, , z] = IB_SPOTS.client;
-    return [{ x, y: laHeight(x, z), z, yaw: Math.PI / 2, pose: 0 as const, suit: 4 }];
-  }, []);
-  return <People list={list} />;
+  const [at, setAt] = React.useState<[number, number, number] | null>(null);
+  const key = useRef('');
+  useFrame(() => {
+    const t = ibTask();
+    const p = t?.client ? t.spot : null;
+    const k = p ? p.join(',') : '';
+    if (k !== key.current) {
+      key.current = k;
+      setAt(p);
+    }
+  });
+  const list = useMemo(() => (at ? [{ x: at[0], y: at[1], z: at[2], yaw: Math.atan2(-at[0], -at[2]), pose: 0 as const, suit: 4 }] : []), [at]);
+  return list.length ? <People list={list} /> : null;
 }

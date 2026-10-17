@@ -2081,6 +2081,18 @@ export interface Desk {
 export const FIRM_IN: { boxes: LBox[]; desks: Desk[]; npcs: Npc[]; tables: { x: number; y: number; z: number; w: number; d: number }[]; glass: LBox[] }[] = [];
 /** the 投行家 quest's spots */
 export const IB_SPOTS = {} as Record<'reception' | 'printer' | 'desk' | 'trade' | 'board' | 'client', [number, number, number]>;
+type P3 = [number, number, number];
+/** every tower's working spots: the front desk, the printer and a free desk seat (80), the boardroom's head, a free trading seat (40) */
+export const FIRM_SPOTS: { reception: P3; printer: P3; desk: P3; board: P3; trade: P3 }[] = [];
+/** where clients wait, out in the city (x, z; y from the ground) */
+export const CLIENT_SPOTS: { x: number; z: number; name: string }[] = [
+  { x: 37, z: -6, name: '湖边小路' },
+  { x: -120, z: 79, name: '农场红谷仓门口' },
+  { x: -133, z: 58, name: '风车底下' },
+  { x: 10, z: -92, name: '北坡住宅区的街上' },
+  { x: 286, z: 7, name: '市中心喷泉旁' },
+  { x: 120, z: 40, name: '公园东边的棕榈大道' },
+];
 {
   const rnd = (() => {
     let s = 4242;
@@ -2124,10 +2136,8 @@ export const IB_SPOTS = {} as Record<'reception' | 'printer' | 'desk' | 'trade' 
     const L0 = 0;
     box(-3.2, 3.2, C.hv + 3.0, C.hv + 4.2, L0, L0 + 1.1, true);
     npcs.push({ ...xyz(F, 0, C.hv + 2.4, L0), yaw: F.s > 0 ? 0 : Math.PI, pose: 0, suit: 3 });
-    if (fi === 0) {
-      const [x, z] = firmXZ(F, 0, C.hv + 5.4);
-      IB_SPOTS.reception = [x, L0, z];
-    }
+    const [rx, rz] = firmXZ(F, 0, C.hv + 5.4);
+    const reception: P3 = [rx, L0, rz];
     // turnstiles either side of the walk from the door to the lift
     for (const su of [-1, 1]) for (let k = 0; k < 3; k++) box(su * (2 + k * 1.3), su * (2 + k * 1.3) + su * 0.25, C.hv + 7, C.hv + 8.4, L0, L0 + 1.0);
     // a few people waiting in the lobby
@@ -2187,40 +2197,31 @@ export const IB_SPOTS = {} as Record<'reception' | 'printer' | 'desk' | 'trade' 
     tables.push({ ...xyz(F, 0, bv, L2), w: 9, d: 2.4 });
     for (const su of [-3.6, -1.2, 1.2, 3.6]) {
       npcs.push({ ...xyz(F, su, bv - 1.75, L2), yaw: Math.atan2(0, F.s), pose: 1, suit: Math.floor(rnd() * 5) });
-      if (fi !== 1) npcs.push({ ...xyz(F, su, bv + 1.75, L2), yaw: Math.atan2(0, -F.s), pose: 1, suit: Math.floor(rnd() * 5) });
+      if (Math.abs(su) > 2) npcs.push({ ...xyz(F, su, bv + 1.75, L2), yaw: Math.atan2(0, -F.s), pose: 1, suit: Math.floor(rnd() * 5) });
     }
     box(C.hu + 0.6, C.hu + 1.8, -0.5, 0.5, L2, L2 + 1.2, true); // the printer
-    if (fi === 0) {
-      const [px, pz] = firmXZ(F, C.hu + 2.6, 0);
-      IB_SPOTS.printer = [px, L2, pz];
-      // the analyst's seat: the empty seat of the nearest banking desk to the lift
-      const d = desks.filter((k) => k.y === L2).sort((a, b) => Math.hypot(a.x - F.x, a.z - (F.z + F.s * 8)) - Math.hypot(b.x - F.x, b.z - (F.z + F.s * 8)))[0];
-      const [dx, dz] = [d.x, d.z + F.s * (1.4 / 2 + 0.55)];
-      // clear any NPC sitting there
-      for (let k = npcs.length - 1; k >= 0; k--) if (Math.hypot(npcs[k].x - dx, npcs[k].z - dz) < 1.3 && npcs[k].y === L2) npcs.splice(k, 1);
+    // a free seat at the desk nearest the lift on a floor: whoever sat there gets up
+    const freeSeat = (L: number, dep: number): P3 => {
+      const d = desks.filter((k) => k.y === L).sort((a, b) => Math.hypot(a.x - F.x, a.z - (F.z + F.s * 8)) - Math.hypot(b.x - F.x, b.z - (F.z + F.s * 8)))[0];
+      const dx = d.x;
+      const dz = d.z + F.s * (dep / 2 + 0.55);
+      for (let k = npcs.length - 1; k >= 0; k--) if (Math.hypot(npcs[k].x - dx, npcs[k].z - dz) < 1.3 && npcs[k].y === L) npcs.splice(k, 1);
       for (let k = boxes.length - 1; k >= 0; k--) {
         const b = boxes[k];
-        if (!b.top && b.y0 === L2 && b.x1 - b.x0 < 0.7 && Math.hypot((b.x0 + b.x1) / 2 - dx, (b.z0 + b.z1) / 2 - dz) < 1.3) boxes.splice(k, 1);
+        if (!b.top && b.y0 === L && b.x1 - b.x0 < 0.7 && Math.hypot((b.x0 + b.x1) / 2 - dx, (b.z0 + b.z1) / 2 - dz) < 1.3) boxes.splice(k, 1);
       }
-      IB_SPOTS.desk = [dx, L2, dz];
-    }
-    if (fi === 1) {
-      const [x, z] = firmXZ(F, 0, bv + 2.2);
-      IB_SPOTS.board = [x, L2, z];
-    }
-    if (fi === 2) {
-      // the trading seat: likewise, the nearest trading desk to the lift
-      const d = desks.filter((k) => k.y === L1).sort((a, b) => Math.hypot(a.x - F.x, a.z - (F.z + F.s * 8)) - Math.hypot(b.x - F.x, b.z - (F.z + F.s * 8)))[0];
-      const [dx, dz] = [d.x, d.z + F.s * (1.6 / 2 + 0.55)];
-      for (let k = npcs.length - 1; k >= 0; k--) if (Math.hypot(npcs[k].x - dx, npcs[k].z - dz) < 1.3 && npcs[k].y === L1) npcs.splice(k, 1);
-      for (let k = boxes.length - 1; k >= 0; k--) {
-        const b = boxes[k];
-        if (!b.top && b.y0 === L1 && b.x1 - b.x0 < 0.7 && Math.hypot((b.x0 + b.x1) / 2 - dx, (b.z0 + b.z1) / 2 - dz) < 1.3) boxes.splice(k, 1);
-      }
-      IB_SPOTS.trade = [dx, L1, dz];
-    }
+      return [dx, L, dz];
+    };
+    const [px, pz] = firmXZ(F, C.hu + 2.6, 0);
+    const [bx, bz] = firmXZ(F, 0, bv + 2.2);
+    FIRM_SPOTS.push({ reception, printer: [px, L2, pz], desk: freeSeat(L2, 1.4), board: [bx, L2, bz], trade: freeSeat(L1, 1.6) });
     FIRM_IN.push({ boxes, desks, npcs, tables, glass });
   });
+  IB_SPOTS.reception = FIRM_SPOTS[0].reception;
+  IB_SPOTS.printer = FIRM_SPOTS[0].printer;
+  IB_SPOTS.desk = FIRM_SPOTS[0].desk;
+  IB_SPOTS.board = FIRM_SPOTS[1].board;
+  IB_SPOTS.trade = FIRM_SPOTS[2].trade;
   IB_SPOTS.client = [37, 0, -6];
   function xyz(F: Firm, u: number, v: number, y: number) {
     const [x, z] = firmXZ(F, u, v);

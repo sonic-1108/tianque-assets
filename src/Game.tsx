@@ -21,8 +21,8 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, LA, LOOT, laHeight, laWater, lakeE, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R, DT, FIRMS, FIRM_IN, laFloorAt, laCeilAt, laPushOut, laClamp, laInside, laBlocked, liftCar, inLift, firmAt, firmLevel, IB_SPOTS, marketPx, marketT } from './maps';
-import { getIb, ibAdvance, ibSet, payCash, IB_STEPS, IB_NOTIONAL, ibTitle } from './banker';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, LA, LOOT, laHeight, laWater, lakeE, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R, DT, FIRMS, FIRM_IN, laFloorAt, laCeilAt, laPushOut, laClamp, laInside, laBlocked, liftCar, inLift, firmAt, firmLevel, IB_SPOTS, FIRM_SPOTS, marketPx, marketT } from './maps';
+import { getIb, ibSet, payCash, IB_NOTIONAL, ibTask, ibDone, ibExpire } from './banker';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -5388,21 +5388,27 @@ function GameImpl({
       }
       if (c.hp <= 0) return;
       const ib = getIb();
+      const task = i === ME ? ibTask() : null;
       const moving = !!intent && (intent.move.lengthSq() > 0.01 || !!intent.request);
-      // working on the model: sit still at the desk
+      // an IPO roadshow against the clock
+      if (i === ME) {
+        const lost = ibExpire();
+        if (lost) say(lost);
+      }
+      // working at the desk: sit still
       if (i === ME && (c.ibWork ?? 0) > 0) {
-        const [sx, sy, sz] = IB_SPOTS.desk;
-        if (moving || c.actionState !== 'idle' || Math.hypot(c.pos[0] - sx, c.pos[2] - sz) > 1.2 || Math.abs(c.pos[1] - sy) > 1) {
+        const [sx, sy, sz] = task?.spot ?? IB_SPOTS.desk;
+        if (task?.kind !== 'work' || moving || c.actionState !== 'idle' || Math.hypot(c.pos[0] - sx, c.pos[2] - sz) > 1.2 || Math.abs(c.pos[1] - sy) > 1) {
           c.ibWork = 0;
-          say('被打断了，模型白改了 · 回工位重新按 F');
+          say('被打断了，白干了 · 回工位重新按 F');
         } else {
           c.ibWork = (c.ibWork ?? 0) - dt;
           c.vel[0] = c.vel[2] = 0;
-          c.interactHint = `熬夜改模型中 · 还剩 ${Math.ceil(c.ibWork)} 秒 · 动一下就前功尽弃`;
+          c.interactHint = `熬夜加班中 · 还剩 ${Math.ceil(c.ibWork)} 秒 · 动一下就前功尽弃`;
           if (Math.random() < dt * 2) vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.3, c.pos[2]), 2, '#9fd3ff', 0.4, 0.03, UP, 0.5);
           if (c.ibWork <= 0) {
             c.ibWork = 0;
-            finish(ib.step);
+            finish();
           }
           return;
         }
@@ -5430,14 +5436,15 @@ function GameImpl({
       }
       if (i !== ME) return;
       const near = (p: [number, number, number], r = 1.7) => Math.hypot(c.pos[0] - p[0], c.pos[2] - p[2]) < r && Math.abs(c.pos[1] - p[1]) < 1.3;
-      // the Citadel desk: the task, then a desk you may keep trading at
-      if (near(IB_SPOTS.trade, 1.5) && ib.step >= 4) {
-        const S = 3;
-        const px = marketPx(S, marketT(), 116);
+      // the trading desks: the task's, and (from VP on) any tower's desk for your own account
+      const desk = FIRM_SPOTS.findIndex((S) => near(S.trade, 1.5));
+      const taskDesk = task?.kind === 'trade' && desk === task.firm;
+      if (desk >= 0 && (taskDesk || ib.step > 4)) {
+        const px = marketPx(3, marketT(), 116);
         if (!ib.entry) {
-          c.interactHint = `按 F 买入 MSFT @ ${px.toFixed(2)} · 盯着墙上的行情，涨了再卖`;
+          c.interactHint = `按 F 买入 MSFT @ ${px.toFixed(2)} · 盯着墙上的行情，涨了再卖${taskDesk ? ` · 任务要赚 ${((task!.pct ?? 0.02) * 100).toFixed(1)}%` : ''}`;
           if (pressed) {
-            ibSet({ entry: px });
+            ibSet({ entry: px, entryFirm: desk });
             gameAudio.playCrispClick();
             say(`买入 MSFT @ ${px.toFixed(2)} · 仓位 $${(IB_NOTIONAL / 1000).toFixed(0)}k`);
           }
@@ -5447,43 +5454,36 @@ function GameImpl({
           if (pressed) {
             const cash = Math.round(pnl * IB_NOTIONAL);
             payCash(cash);
-            ibSet({ entry: 0 });
+            ibSet({ entry: 0, entryFirm: -1 });
             gameAudio.playCrispClick();
-            if (ib.step === 4 && pnl >= 0.02) finish(4, cash);
-            else say(`卖出 · ${cash >= 0 ? '赚了' : '亏了'} ${Math.abs(cash).toLocaleString()}${ib.step === 4 ? ' · 要一笔赚到 2% 才算过关' : ''}`);
+            const need = task?.pct ?? 0.02;
+            if (taskDesk && pnl >= need) finish(cash);
+            else say(`卖出 · ${cash >= 0 ? '赚了' : '亏了'} ${Math.abs(cash).toLocaleString()}${taskDesk ? ` · 要一笔赚到 ${(need * 100).toFixed(1)}% 才算` : ''}`);
           }
         }
         return;
       }
-      const st = IB_STEPS[ib.step];
-      if (!st || st.spot === 'trade' || !near(IB_SPOTS[st.spot])) return;
-      if (st.spot === 'desk') {
-        c.interactHint = '按 F 坐下改模型 · 20 秒别动';
+      if (!task || task.kind === 'trade' || !near(task.spot)) return;
+      if (task.kind === 'work') {
+        c.interactHint = `按 F ${task.verb || '坐下加班'} · 20 秒别动`;
         if (pressed) {
           c.ibWork = 20;
           c.vel[0] = c.vel[2] = 0;
-          say('开始改模型 · 别动，别挨打');
+          say('开始加班 · 别动，别挨打');
         }
         return;
       }
-      const verb: Record<string, string> = { reception: '报到', printer: '拿 pitchbook', client: '把 pitchbook 交给客户', board: '签 term sheet' };
-      c.interactHint = `按 F ${verb[st.spot] ?? ''}`;
-      if (pressed) finish(ib.step);
+      c.interactHint = `按 F ${task.verb}`;
+      if (pressed) finish();
     }
-    /** 投行家: a step done: pay, promote, tell the player */
-    function finish(step: number, extra = 0) {
-      const st = IB_STEPS[step];
-      if (!st || getIb().step !== step) return;
-      if (st.pay || st.watch) payCash(st.pay, st.watch);
-      ibAdvance();
+    /** 投行家: a task done: pay, promote, tell the player */
+    function finish(extra = 0) {
+      const r = ibDone(extra);
       gameAudio.playGong();
       const p = p1.pos;
-      vfx.sparkBurst(vB.set(p[0], p[1] + 1.2, p[2]), 30, '#ffd36a', 3, 0.06, UP, 0.9);
-      const pay = st.pay + extra;
-      onRoundEvent?.({ type: 'toast', text: `${st.done}${pay ? ` · +${pay.toLocaleString()}` : ''}${st.watch ? ' · 一块百达翡丽' : ''}` });
-      const nxt = IB_STEPS[step + 1];
-      if (nxt) window.setTimeout(() => onRoundEvent?.({ type: 'toast', text: `下一步：${nxt.task}` }), 2600);
-      else window.setTimeout(() => onRoundEvent?.({ type: 'toast', text: `你现在是 ${ibTitle()} · Citadel 的交易台随时能来做单` }), 2600);
+      vfx.sparkBurst(vB.set(p[0], p[1] + 1.2, p[2]), r.big ? 30 : 12, '#ffd36a', 3, 0.06, UP, 0.9);
+      if (r.text) onRoundEvent?.({ type: 'toast', text: r.text });
+      if (r.next) window.setTimeout(() => onRoundEvent?.({ type: 'toast', text: r.next! }), r.big ? 2600 : 900);
     }
     function updateWarItems(i: number, c: CombatantState, intent: Intent | null) {
       const pressed = !!intent?.interact && !c.intPrev;
