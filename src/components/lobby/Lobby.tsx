@@ -1,3 +1,4 @@
+import { SIDE_SEATS } from '../../room';
 import { useSettings, setSettings, AI_LEVELS, type AiLevel } from '../../settings';
 import type { RoomSeat } from '../../net';
 import React, { useState } from 'react';
@@ -138,14 +139,14 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          {/* the lineup: two seats a side; 1v1, 2v1, 2v2 are just which seats are filled */}
+          {/* the lineup: three seats a side; 1v1 up to 3v3 is just which seats are filled */}
           <div className="tq-foe">
             <span className="tq-foe-l">阵容</span>
             {[0, 1].map((side) => (
               <React.Fragment key={side}>
                 {side === 1 && <span className="tq-vs">对</span>}
                 <div className={`tq-side s${side}`}>
-                  {[side * 2, side * 2 + 1].map((k) => {
+                  {SIDE_SEATS[side].map((k) => {
                     const st = p.room[k];
                     const mine = k === p.localSeat;
                     const next = (c: CharacterClassId) => p.heroes[(p.heroes.indexOf(c) + 1) % p.heroes.length];

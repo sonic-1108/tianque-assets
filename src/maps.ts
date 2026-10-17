@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway';
+export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending';
 
 export interface Circle {
   x: number;
@@ -1210,7 +1210,7 @@ MAPS.desert = {
 };
 
 
-export const MAP_ORDER: MapId[] = ['temple', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
+export const MAP_ORDER: MapId[] = ['temple', 'wending', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {
@@ -1276,6 +1276,8 @@ export const mapRuntime = {
    * on the ground (owner side, -1 = the hunters'; sprung: seconds since it snapped, -1 = still set) */
   /** 祖坛: owner side per altar (-1 nobody), how far its capture has got (-1 .. 1: toward side 0 is +), who's on it, the score */
   shrine: { own: [-1, -1, -1] as number[], prog: [0, 0, 0] as number[], busy: [0, 0, 0] as number[], score: [0, 0] as number[], on: false },
+  /** 问鼎原: drum (seconds until it sounds; ready when <= 0; who's taking it and how far), towers' shots, boulders, lever cooldowns */
+  war: { drumT: 20, drumBy: -1, drumHold: 0, shots: [] as { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number }[], boulders: [] as { x: number; z: number; dir: number; y: number; spin: number; by: number; hit: number[] }[], leverCd: [0, 0] as number[], towerCd: [0, 0] as number[] },
   /** per fighter: can the local player see them right now (night, the bog's mist, stealth); the minimap uses it */
   seen: [] as boolean[],
   /** the camera's yaw (the minimap turns with it) */
@@ -1730,7 +1732,113 @@ MAPS.plankway = {
   ],
 } as MapDef;
 
+// ----------------------------------------------------------------------
+// 问鼎原: a team-fight field, mirrored north and south. Each side has a palisaded camp with a watchtower
+// that shoots intruders; between them three lanes split by rocky ridges. In the middle stands the
+// 问鼎台, a raised stone terrace with a war drum: hold it to take 战意 (more damage, a little more speed).
+// Out on the flanks: a 回春泉 spring that heals whoever stands in it alone, and a lever in each side lane
+// that sends a boulder rolling down the lane toward the other camp.
+// Side 0 camps in the south (+z), side 1 in the north (-z).
+// ----------------------------------------------------------------------
+export const WAR = {
+  radius: 50,
+  /** the terrace: flat top radius, foot radius, height */
+  mound: { top: 5.5, foot: 12.5, h: 2.0 },
+  /** 战意: every so often the drum is ready; stand on its stone alone for `hold` s to take it */
+  drum: { r: 2.4, hold: 1.5, every: 40, first: 20, buffT: 20, dmg: 1.2, speed: 1.12 },
+  springs: [[-31, 0], [31, 0]] as [number, number][],
+  springR: 3.4,
+  /** heal per second (share of max HP) while you're in a spring with nobody of the other side in it */
+  springRate: 0.03,
+  /** camps: centre (x, z) for side 0 and side 1; the palisade arc radius; the tower inside it */
+  camps: [[0, 38], [0, -38]] as [number, number][],
+  campR: 10,
+  towers: [[0, 44], [0, -44]] as [number, number][],
+  towerRange: 15,
+  towerEvery: 1.6,
+  towerDmg: 45,
+  /** ridges: rows of rock between the lanes (x, z0, z1) */
+  ridges: [[-14, -17, -6], [-14, 6, 17], [14, -17, -6], [14, 6, 17]] as [number, number, number][],
+  /** levers in the side lanes; the boulder rolls along x = lane toward the puller's foe */
+  levers: [[-23, 0], [23, 0]] as [number, number][],
+  boulder: { r: 1.35, speed: 12, dmg: 110, every: 22 },
+  spawns: [[0, 33], [0, -33]] as [number, number][],
+};
+const smoothW = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+export function warHeight(x: number, z: number) {
+  const M = WAR.mound;
+  const d = Math.hypot(x, z);
+  let h = M.h * (1 - smoothW(M.top, M.foot, d));
+  // gentle swells out in the field, flat inside the camps and by the springs
+  const flat = Math.min(...WAR.camps.map(([cx, cz]) => Math.hypot(x - cx, z - cz))) < WAR.campR + 3 || WAR.springs.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < WAR.springR + 2);
+  if (!flat && d > M.foot) h += (Math.sin(x * 0.17 + 0.6) * Math.cos(z * 0.13 - 0.3) * 0.35 + Math.sin(x * 0.07 - z * 0.05) * 0.2) * smoothW(M.foot, M.foot + 6, d);
+  // the springs sit in shallow stone basins
+  for (const [sx, sz] of WAR.springs) {
+    const sd = Math.hypot(x - sx, z - sz);
+    if (sd < WAR.springR + 1.2) h = Math.min(h, -0.25 * (1 - smoothW(WAR.springR - 0.6, WAR.springR + 1.2, sd)));
+  }
+  // the land rises gently beyond the edge
+  h += smoothW(WAR.radius, WAR.radius + 10, d) * 3;
+  return h;
+}
+function warPillars(): Circle[] {
+  const out: Circle[] = [];
+  // ridges: overlapping rocks you can't pass
+  for (const [x, z0, z1] of WAR.ridges) for (let z = z0; z <= z1 + 0.01; z += 1.6) out.push({ x: x + Math.sin(z * 1.3) * 0.4, z, r: 1.15 });
+  // palisades: an arc round each camp, open toward the middle (a 130 degree mouth)
+  WAR.camps.forEach(([cx, cz], sd) => {
+    const facing = sd === 0 ? -Math.PI / 2 : Math.PI / 2; // toward the middle
+    for (let a = 0; a < Math.PI * 2; a += 0.075) {
+      let da = Math.abs(((a - facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (da < (130 / 2) * (Math.PI / 180)) continue;
+      out.push({ x: cx + Math.cos(a) * WAR.campR, z: cz + Math.sin(a) * WAR.campR, r: 0.4 });
+    }
+  });
+  // the watchtowers' four legs
+  for (const [tx, tz] of WAR.towers) for (const [dx, dz] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]]) out.push({ x: tx + dx, z: tz + dz, r: 0.3 });
+  // the drum stand, a lever post each side
+  out.push({ x: 0, z: 0, r: 0.9, h: WAR.mound.h + 1.0 });
+  for (const [x, z] of WAR.levers) out.push({ x: x + 0.9, z, r: 0.25 });
+  return out;
+}
+
+MAPS.wending = {
+  id: 'wending',
+  name: '问鼎原',
+  subtitle: '两军对垒的团体赛主场：中路高台战鼓，两翼回春泉与滚石机关',
+  icon: '🥁',
+  mechanics: [
+    '团体赛地图：二打二最好玩，一打一也行。两边营寨南北相对，把对面全部打倒就赢，倒下的队友可以扶起来',
+    '中间的问鼎台上有一面战鼓：每 40 秒响一次，独自站上鼓台 1.5 秒就拿到「战意」，20 秒内伤害 +20%、跑得更快',
+    '营寨的箭楼会射进营的敌人，别在对面营门口久留',
+    '两翼各有一眼回春泉：站进去慢慢回血，对面有人也在泉里就停',
+    '两侧小路中间各有一根滚石机关：按 F 放下巨石，顺着小路滚向对面营寨，被砸中会飞出去',
+    '三条路之间隔着乱石岗，只能从两头和中间的缺口绕过去',
+  ],
+  homeClass: 'Berserker',
+  homeClassName: '狂刃',
+  homeBonus: '伤害 +10%',
+  available: true,
+  terrain: true,
+  radius: WAR.radius,
+  spawnPlayer: WAR.spawns[0],
+  spawnEnemy: WAR.spawns[1],
+  background: '#c8d4dc',
+  fog: [60, 220],
+  hemi: ['#e6eef2', '#5b6440', 0.85],
+  keyColor: '#fff0d0',
+  keyIntensity: 2.7,
+  exposure: 0.95,
+  bloom: 0.75,
+  cardGradient: 'from-amber-700/60 via-stone-700/70 to-zinc-950/90',
+  pillars: warPillars(),
+} as MapDef;
+
 export function terrainHeight(id: MapId, x: number, z: number) {
+  if (id === 'wending') return warHeight(x, z);
   if (id === 'sea') return shipFloorAt(x, z, 99);
   if (id === 'glacier') return glacierHeight(x, z);
   if (id === 'forest') return forestHeight(x, z);
@@ -1742,6 +1850,10 @@ export function terrainHeight(id: MapId, x: number, z: number) {
 /** Uphill gradient of the walkable surface. Sheer drops (roof edge to street) are ignored so nobody slides off an edge. */
 export function terrainGradient(id: MapId, x: number, z: number): [number, number] {
   if (id === 'glacier') return glacierGradient(x, z);
+  if (id === 'wending') {
+    const e = 0.25;
+    return [(warHeight(x + e, z) - warHeight(x - e, z)) / (2 * e), (warHeight(x, z + e) - warHeight(x, z - e)) / (2 * e)];
+  }
   if (id === 'forest') {
     const e = 0.25;
     return [(forestHeight(x + e, z) - forestHeight(x - e, z)) / (2 * e), (forestHeight(x, z + e) - forestHeight(x, z - e)) / (2 * e)];

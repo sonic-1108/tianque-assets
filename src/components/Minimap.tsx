@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { MAPS, MapId, terrainHeight, mapRuntime, FOREST, FOREST_X, TEMPLE_YAW, zipLine, riverZ as riverZAt, SHRINES } from '../maps';
+import { MAPS, MapId, terrainHeight, mapRuntime, FOREST, FOREST_X, TEMPLE_YAW, zipLine, riverZ as riverZAt, SHRINES, WAR } from '../maps';
 import type { CombatantState } from '../types';
 
 // 小地图: the whole of a big map in the corner, turning with the camera (up is the way you're looking).
@@ -35,6 +35,12 @@ function bakeBase(id: MapId, R: number, px: number) {
         r = 40 - deep * 20;
         gg = 92 - deep * 30;
         b = 110 - deep * 20;
+      } else if (id === 'wending') {
+        // grass, the terrace paler stone
+        const st = Math.hypot(x, z) < WAR.mound.top ? 1 : 0;
+        r = 92 + h * 6 + st * 70;
+        gg = 112 + h * 5 + st * 55;
+        b = 58 + h * 4 + st * 70;
       } else if (id === 'desert') {
         r = 186 + h * 3;
         gg = 156 + h * 3;
@@ -155,6 +161,11 @@ function bakeBase(id: MapId, R: number, px: number) {
 }
 
 const LABELS: Record<string, [string, () => [number, number]][]> = {
+  wending: [
+    ['问鼎台', () => [0, -8]],
+    ['回春泉', () => [WAR.springs[0][0], WAR.springs[0][1] + 6]],
+    ['回春泉', () => [WAR.springs[1][0], WAR.springs[1][1] + 6]],
+  ],
   forest: [
     ['古寺', () => [FOREST.hill.x, FOREST.hill.z - 14]],
     ['瀑布', () => [FOREST_X.fall.x - 12, FOREST_X.fall.z0 - 6]],
@@ -294,6 +305,45 @@ export function Minimap({ mapId, fighters, me, hidden }: { mapId: MapId; fighter
             g.stroke();
           }
         });
+      // 问鼎原: the camps in their colours, the drum (bright when it's ready), springs, levers
+      if (mapId === 'wending') {
+        const W = mapRuntime.war;
+        WAR.camps.forEach(([cx, cz], sd) => {
+          const [a, b] = at(cx, cz);
+          g.strokeStyle = sd === mapRuntime.viewSide ? 'rgba(74,222,128,0.9)' : 'rgba(248,113,113,0.9)';
+          g.lineWidth = 2;
+          g.beginPath();
+          g.arc(a, b, WAR.campR * s, 0, Math.PI * 2);
+          g.stroke();
+        });
+        for (const [sx, sz] of WAR.springs) {
+          const [a, b] = at(sx, sz);
+          g.fillStyle = '#5eead4';
+          g.beginPath();
+          g.arc(a, b, WAR.springR * s, 0, Math.PI * 2);
+          g.fill();
+        }
+        for (const [lx, lz] of WAR.levers) {
+          const [a, b] = at(lx, lz);
+          g.fillStyle = '#a8a29e';
+          g.fillRect(a - 2, b - 2, 4, 4);
+        }
+        for (const bo of W.boulders) {
+          const [a, b] = at(bo.x, bo.z);
+          g.fillStyle = '#d6d3d1';
+          g.beginPath();
+          g.arc(a, b, 3, 0, Math.PI * 2);
+          g.fill();
+        }
+        const [da, db] = at(0, 0);
+        g.fillStyle = W.drumT <= 0 ? '#fb923c' : '#78350f';
+        g.strokeStyle = '#000';
+        g.lineWidth = 1.2;
+        g.beginPath();
+        g.arc(da, db, big ? 6 : 4.5, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+      }
       // fighters
       const F = fighters.current;
       const mine = F[me];

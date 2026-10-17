@@ -3,10 +3,13 @@ import { CLASS_CONFIGS } from './components/CombatData';
 import type { RoomSeat } from './net';
 
 /**
- * A room has four seats: 0 and 1 are one side, 2 and 3 the other. Seat 0 is always the host (or you, offline).
- * Every other seat holds a joined player, an AI, or nobody. 1v1, 2v1 and 2v2 are just which seats are filled.
+ * A room has six seats: 0, 1 and 4 are one side, 2, 3 and 5 the other (4 and 5 came later, for 3v3).
+ * Seat 0 is always the host (or you, offline). Every other seat holds a joined player, an AI, or nobody.
+ * 1v1, 2v2, 3v3 (and anything uneven) are just which seats are filled.
  */
-export const SEAT_SIDE = [0, 0, 1, 1];
+export const SEAT_SIDE = [0, 0, 1, 1, 0, 1];
+/** the seats of each side, in the order they show in the lobby */
+export const SIDE_SEATS = [[0, 1, 4], [2, 3, 5]];
 export const aiName = (cls: CharacterClassId) => `${CLASS_CONFIGS[cls]?.defaultCharacter ?? ''}影`;
 
 export function defaultRoom(hostCls: CharacterClassId, hostName: string, foeCls: CharacterClassId): RoomSeat[] {
@@ -15,7 +18,16 @@ export function defaultRoom(hostCls: CharacterClassId, hostName: string, foeCls:
     { kind: 'empty', cls: 'Berserker', name: '' },
     { kind: 'ai', cls: foeCls, name: aiName(foeCls) },
     { kind: 'empty', cls: 'Ranger', name: '' },
+    { kind: 'empty', cls: 'BuddhistMage', name: '' },
+    { kind: 'empty', cls: 'Shadowblade', name: '' },
   ];
+}
+
+/** a room from an older version (four seats) gets the two 3v3 seats, empty */
+export function padRoom(room: RoomSeat[]): RoomSeat[] {
+  const out = room.map((s) => ({ ...s }));
+  while (out.length < SEAT_SIDE.length) out.push({ kind: 'empty', cls: 'Berserker', name: '' });
+  return out;
 }
 
 /** both sides need someone */
@@ -68,7 +80,7 @@ export function seatGuests(room: RoomSeat[], guests: { id: string; cls: Characte
   for (const g of guests) {
     let k = out.findIndex((s) => s.kind === 'guest' && s.id === g.id);
     if (k < 0) {
-      k = [2, 3, 1].find((n) => out[n].kind === 'empty') ?? [2, 3, 1].find((n) => out[n].kind === 'ai') ?? -1;
+      k = [2, 3, 5, 1, 4].find((n) => out[n]?.kind === 'empty') ?? [2, 3, 5, 1, 4].find((n) => out[n]?.kind === 'ai') ?? -1;
       if (k < 0) continue;
       out[k] = { kind: 'guest', id: g.id, cls: g.cls ?? out[k].cls, name: g.name || '侠客' };
     }

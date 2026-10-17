@@ -20,7 +20,7 @@ import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } fro
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
 import { TQ_DARK } from './components/characterShading';
-import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
+import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R } from './maps';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -429,7 +429,7 @@ function GameImpl({
   const footTimers = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
   const wasGrounded = useRef([true, true, true, true, true, true, true, true, true]);
   /** team fights: who each AI is after, and which fighters each attack has already hit this move */
-  const aiTargetRef = useRef([-1, -1, -1, -1, -1, -1, -1, -1, -1]);
+  const aiTargetRef = useRef(Array.from({ length: 12 }, () => -1));
   /** 怒海战船: this frame's helm orders per ship (+1 toward the other ship, -1 away, 0 none) */
   const helmHold = useRef([0, 0]);
   const lockStepRef = useRef({ n: 0 });
@@ -438,7 +438,7 @@ function GameImpl({
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
   const newAiMem = (): AIMemory => ({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
-  const aiRefs = useRef<AIMemory[]>([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newAiMem));
+  const aiRefs = useRef<AIMemory[]>(Array.from({ length: 12 }, () => newAiMem()));
   /** 青冥古林 at night: where each AI last saw (or heard) its foe, and where it's poking about now */
   const darkMemRef = useRef<({ x: number; z: number; wx: number; wz: number; hp: number; t: number } | undefined)[]>([]);
 
@@ -602,7 +602,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * ((c.warT ?? 0) > 0 ? WAR.drum.speed : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const fighters = fightersRef.current;
@@ -975,6 +975,48 @@ function GameImpl({
       it.block = false;
       return true;
     };
+    /** 问鼎原: take the drum when it sounds, heal at a spring when hurt, pull a lever on foes in its lane, don't loiter under their tower */
+    const aiWarErrands = (i: number, c: CombatantState, foe: CombatantState, it: Intent) => {
+      const W = mapRuntime.war;
+      const sd = Math.min(1, c.side ?? 0);
+      const dFoe = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
+      const go = (x: number, z: number, stop = 0.6) => {
+        const dx = x - c.pos[0];
+        const dz = z - c.pos[2];
+        const d = Math.hypot(dx, dz);
+        if (d < stop) it.move.set(0, 0, 0);
+        else it.move.set(dx / d, 0, dz / d);
+        if (dFoe > 7) {
+          it.faceYaw = Math.atan2(-dx, -dz);
+          it.request = null;
+        }
+        it.block = false;
+      };
+      // the drum: whoever of this side is nearest goes for it
+      if (W.drumT <= 0) {
+        const mates = fighters.filter((f) => f.hp > 0 && (f.side ?? 0) === sd);
+        const nearest = mates.reduce((a, b) => (Math.hypot(a.pos[0], a.pos[2]) <= Math.hypot(b.pos[0], b.pos[2]) ? a : b), c);
+        if (nearest === c && (dFoe > 5 || Math.hypot(foe.pos[0], foe.pos[2]) < WAR.drum.r + 1)) return go(0, 0, 0.8);
+      }
+      // hurt and nobody on top of you: the nearest spring
+      if (c.hp < c.maxHp * 0.42 && dFoe > 8) {
+        const [sx, sz] = WAR.springs.reduce((a, b) => (Math.hypot(a[0] - c.pos[0], a[1] - c.pos[2]) <= Math.hypot(b[0] - c.pos[0], b[1] - c.pos[2]) ? a : b));
+        return go(sx, sz, 1.2);
+      }
+      // a foe coming up a side lane toward the lever's roll: pull it
+      for (const [k, [lx, lz]] of WAR.levers.entries()) {
+        if (W.leverCd[k] > 0 || Math.hypot(c.pos[0] - lx, c.pos[2] - lz) > 9) continue;
+        const dir = sd === 0 ? -1 : 1;
+        const inLane = fighters.some((f) => f.hp > 0 && (f.side ?? 0) !== sd && (f.side ?? 0) <= 1 && Math.abs(f.pos[0] - lx) < 2.2 && (f.pos[2] - lz) * dir > 3 && (f.pos[2] - lz) * dir < 30);
+        if (!inLane) continue;
+        go(lx, lz, 0.9);
+        if (Math.hypot(c.pos[0] - lx, c.pos[2] - lz) < 1.6) it.interact = !c.intPrev;
+        return;
+      }
+      // their tower: don't hang about inside its reach unless the fight is right there
+      const [tx, tz] = WAR.towers[1 - sd];
+      if (Math.hypot(c.pos[0] - tx, c.pos[2] - tz) < WAR.towerRange + 1 && dFoe > 5) go(c.pos[0] * 0.5, WAR.camps[sd][1] * 0.3, 0.5);
+    };
     /** 青冥古林: hurt and not pressed, go and pick a 血参; step round any trap it can see */
     const aiForestErrands = (i: number, c: CombatantState, foe: CombatantState, it: Intent) => {
       if ((c.trapT ?? 0) > 0 || c.zipW || c.treeClimb !== undefined) return;
@@ -1057,6 +1099,7 @@ function GameImpl({
           aiHitRoyal(i, c, it);
           aiReflex(i, c, foes[i], it);
           if (map.id === 'forest') aiForestErrands(i, c, foes[i], it);
+          if (map.id === 'wending') aiWarErrands(i, c, foes[i], it);
         }
       } else if (!aiOn) {
         it.faceYaw = c.targetRotY;
@@ -1226,6 +1269,7 @@ function GameImpl({
       }
       if (map.id === 'desert') updateDesertItems(i, c, intents[i]);
       if (map.id === 'plankway') updatePlankItems(i, c, intents[i]);
+      if (map.id === 'wending') updateWarItems(i, c, intents[i]);
       if (map.terrain && c.isGrounded && c.actionState !== 'buried' && c.treeClimb === undefined) {
         const gh2 = groundHeight(c);
         if (gh2 > c.pos[1] - 0.6) c.pos[1] = gh2; // follow the slope up and down
@@ -1531,7 +1575,7 @@ function GameImpl({
           colorFor(pr.slot, fighters[pr.slot]),
           pr.pierce ? 'gold' : pr.poison ? 'poison' : 'normal',
         ]),
-        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, shrine: { own: [...mapRuntime.shrine.own], prog: [...mapRuntime.shrine.prog], busy: [...mapRuntime.shrine.busy], score: [...mapRuntime.shrine.score], on: mapRuntime.shrine.on }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
+        m: { ventHeat: mapRuntime.ventHeat, eruption: mapRuntime.eruption, waveSide: mapRuntime.waveSide, waveRise: mapRuntime.waveRise, lightning: mapRuntime.lightning, shipRoll: mapRuntime.shipRoll, shipPitch: mapRuntime.shipPitch, avalancheZ: mapRuntime.avalancheZ, avalancheWarn: mapRuntime.avalancheWarn, ridgeWarn: mapRuntime.ridgeWarn, boltT: mapRuntime.boltT, boltX: mapRuntime.boltX, boltZ: mapRuntime.boltZ, summitStage: mapRuntime.summitStage, summitWarn: mapRuntime.summitWarn, summitFall: mapRuntime.summitFall, gust: mapRuntime.gust, rain: mapRuntime.rain, storm: mapRuntime.storm, strikeWarn: mapRuntime.strikeWarn, boltY: mapRuntime.boltY, night: mapRuntime.night, skyFlash: mapRuntime.skyFlash, shadeSpot: mapRuntime.shadeSpot, items: mapRuntime.items.map((it) => ({ ...it })), ballistae: mapRuntime.ballistae.map((b) => ({ ...b })), shipX: [...mapRuntime.shipX], helm: [...mapRuntime.helm], helmUser: [...mapRuntime.helmUser], seal: { ...mapRuntime.seal }, board: { ...mapRuntime.board }, bolts: mapRuntime.bolts.map((b) => ({ ...b })), branches: mapRuntime.branches.map((b) => ({ ...b })), wood: { herbs: mapRuntime.wood.herbs.map((h) => ({ ...h })), traps: mapRuntime.wood.traps.map((t) => ({ ...t })) }, war: { ...mapRuntime.war, shots: mapRuntime.war.shots.map((x) => ({ ...x })), boulders: mapRuntime.war.boulders.map((b) => ({ ...b, hit: [...b.hit] })), leverCd: [...mapRuntime.war.leverCd], towerCd: [...mapRuntime.war.towerCd] }, shrine: { own: [...mapRuntime.shrine.own], prog: [...mapRuntime.shrine.prog], busy: [...mapRuntime.shrine.busy], score: [...mapRuntime.shrine.score], on: mapRuntime.shrine.on }, desert: { ...mapRuntime.desert, gate: [...mapRuntime.desert.gate], gateTo: [...mapRuntime.desert.gateTo], gateCd: [...mapRuntime.desert.gateCd] } },
         ev: net.events.splice(0),
         ts: nowMs,
       });
@@ -2655,7 +2699,7 @@ function GameImpl({
 
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * aiLevelDmg(att, def) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.6 : 1.4) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * aiLevelDmg(att, def) * ((att.warT ?? 0) > 0 ? WAR.drum.dmg : 1) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.6 : 1.4) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -4370,6 +4414,7 @@ function GameImpl({
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
         c.zipW = undefined;
+        c.warT = 0;
         c.respawnT = 0;
         c.trapT = 0;
         c.trapKit = 0;
@@ -4491,6 +4536,7 @@ function GameImpl({
       {
         // 青冥古林: six herbs growing somewhere, eight of the hunters' traps set in the grass
         const pickSome = (list: [number, number][], n: number) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
+        mapRuntime.war = { drumT: WAR.drum.first, drumBy: -1, drumHold: 0, shots: [], boulders: [], leverCd: [0, 0], towerCd: [0, 0] };
         mapRuntime.shrine = { own: [-1, -1, -1], prog: [0, 0, 0], busy: [0, 0, 0], score: [0, 0], on: false };
         mapRuntime.wood = {
           herbs: pickSome(FOREST_X.herbSpots, 6).map(([x, z]) => ({ x, z, kind: Math.random() < 0.6 ? 0 : 1, t: 0 })),
@@ -5110,6 +5156,124 @@ function GameImpl({
       c.stateTimer = 0;
       c.stateDuration = 0.9;
       vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '松手了！', true, '#fca5a5');
+    }
+    /** 问鼎原: the drum, the springs, the towers, the boulders */
+    function updateWar() {
+      const W = mapRuntime.war;
+      const D = WAR.drum;
+      const live = !round.over;
+      for (const c of fighters) if ((c.warT ?? 0) > 0) {
+        c.warT = (c.warT ?? 0) - dt;
+        if (Math.random() < dt * 6) vfx.embers(vB.set(c.pos[0], c.pos[1] + 1.2, c.pos[2]), 1, '#ff6a2a', 0.4, 1.5, 0.06);
+      }
+      // the drum: counts down, then waits for someone to take it
+      if (live && W.drumT > 0) {
+        W.drumT -= dt;
+        if (W.drumT <= 0) {
+          gameAudio.playGong();
+          onRoundEvent?.({ type: 'toast', text: '问鼎台战鼓擂响！独自站上鼓台拿「战意」' });
+        }
+      } else if (live) {
+        const on = fighters.filter((f) => f.hp > 0 && (f.side ?? 0) <= 1 && Math.hypot(f.pos[0], f.pos[2]) < D.r && f.pos[1] > WAR.mound.h - 0.6);
+        const sides = new Set(on.map((f) => f.side ?? 0));
+        if (sides.size === 1) {
+          const sd = [...sides][0];
+          if (W.drumBy !== sd) W.drumHold = 0;
+          W.drumBy = sd;
+          W.drumHold += dt;
+          if (W.drumHold >= D.hold) {
+            for (const f of on) f.warT = D.buffT;
+            W.drumT = D.every;
+            W.drumHold = 0;
+            W.drumBy = -1;
+            vfx.ring(vB.set(0, WAR.mound.h + 0.1, 0), 4, '#ff6a2a', 0.8, 0.2, 0.7);
+            vfx.sparkBurst(vC.set(0, WAR.mound.h + 2, 0), 40, '#ffb04a', 6, 0.08, UP, 0.7);
+            controller?.addShake(0.25);
+            gameAudio.playBoom();
+            onRoundEvent?.({ type: 'toast', text: sd === (p1.side ?? 0) ? '我方拿到战意！20 秒内伤害 +20%' : '对面拿到了战意，小心' });
+          }
+        } else {
+          W.drumHold = Math.max(0, W.drumHold - dt * 2);
+          if (!sides.size) W.drumBy = -1;
+        }
+      }
+      // the springs heal whoever stands in them alone
+      for (const [sx, sz] of WAR.springs) {
+        const inside = fighters.filter((f) => f.hp > 0 && Math.hypot(f.pos[0] - sx, f.pos[2] - sz) < WAR.springR && f.isGrounded);
+        const sides = new Set(inside.map((f) => f.side ?? 0));
+        if (sides.size !== 1) continue;
+        for (const f of inside) {
+          if (f.hp >= f.maxHp) continue;
+          f.hp = Math.min(f.maxHp, f.hp + f.maxHp * WAR.springRate * dt);
+          if (Math.random() < dt * 5) vfx.sparkBurst(vB.set(f.pos[0], f.pos[1] + 0.4, f.pos[2]), 2, '#86efac', 1, 0.05, UP, 0.8);
+        }
+      }
+      // the watchtowers shoot intruders (only in a real fight)
+      W.shots = W.shots.filter((x) => (x.t += dt) < 0.35);
+      if (live && aiOn)
+        WAR.towers.forEach(([tx, tz], sd) => {
+          W.towerCd[sd] -= dt;
+          if (W.towerCd[sd] > 0) return;
+          let best = -1;
+          let bd = WAR.towerRange;
+          fighters.forEach((f, i) => {
+            if (f.hp <= 0 || (f.side ?? 0) === sd || (f.side ?? 0) > 1) return;
+            const d = Math.hypot(f.pos[0] - tx, f.pos[2] - tz);
+            if (d < bd) {
+              bd = d;
+              best = i;
+            }
+          });
+          if (best < 0) return;
+          W.towerCd[sd] = WAR.towerEvery;
+          const f = fighters[best];
+          W.shots.push({ x0: tx, y0: 6.2, z0: tz, x1: f.pos[0], y1: f.pos[1] + 1.1, z1: f.pos[2], t: 0 });
+          envHit(best, WAR.towerDmg, 0, '箭楼');
+          gameAudio.playCrispClick();
+        });
+      // boulders roll down the side lanes
+      for (let n = W.boulders.length - 1; n >= 0; n--) {
+        const b = W.boulders[n];
+        b.z += b.dir * WAR.boulder.speed * dt;
+        b.spin += (WAR.boulder.speed * dt) / WAR.boulder.r;
+        b.y = warHeight(b.x, b.z) + WAR.boulder.r;
+        if (Math.random() < dt * 12) vfx.dustPuff(vB.set(b.x, b.y - WAR.boulder.r + 0.1, b.z), 2, 0.4, 1.4, 0.5, '#b8a888');
+        fighters.forEach((f, i) => {
+          if (f.hp <= 0 || b.hit.includes(i) || (f.side ?? 0) === b.by) return;
+          if (Math.hypot(f.pos[0] - b.x, f.pos[2] - b.z) > WAR.boulder.r + 0.5 || f.pos[1] > b.y + WAR.boulder.r) return;
+          b.hit.push(i);
+          envHit(i, WAR.boulder.dmg, 9, '滚石');
+          f.vel[0] = (f.pos[0] >= b.x ? 1 : -1) * 6;
+          f.vel[2] = b.dir * 7;
+          controller?.addShake(i === ME ? 0.4 : 0.1);
+          gameAudio.playSlam();
+        });
+        if (Math.abs(b.z) > WAR.radius - 4) {
+          vfx.dustPuff(vB.set(b.x, b.y, b.z), 18, 1.2, 3, 0.9, '#a89878');
+          vfx.rocks(vB, 10, 6, 0.12);
+          W.boulders.splice(n, 1);
+        }
+      }
+      W.leverCd = W.leverCd.map((v) => Math.max(0, v - dt));
+    }
+    /** 问鼎原: F at a lever */
+    function updateWarItems(i: number, c: CombatantState, intent: Intent | null) {
+      const pressed = !!intent?.interact && !c.intPrev;
+      c.intPrev = !!intent?.interact;
+      c.interactHint = '';
+      if (c.hp <= 0 || !c.isGrounded) return;
+      WAR.levers.forEach(([lx, lz], k) => {
+        if (Math.hypot(c.pos[0] - lx, c.pos[2] - lz) > 1.8) return;
+        const cd = mapRuntime.war.leverCd[k];
+        c.interactHint = cd > 0 ? `滚石机关 · ${Math.ceil(cd)} 秒后能再放` : '按 F 放滚石 · 顺着小路砸向对面营寨';
+        if (!pressed || cd > 0 || round.over) return;
+        const sd = Math.min(1, c.side ?? 0);
+        const dir = sd === 0 ? -1 : 1; // toward the other camp
+        mapRuntime.war.boulders.push({ x: lx, z: lz + dir * 2.5, dir, y: warHeight(lx, lz) + WAR.boulder.r, spin: 0, by: sd, hit: [] });
+        mapRuntime.war.leverCd[k] = WAR.boulder.every;
+        gameAudio.playBoom();
+        if (i === ME) onRoundEvent?.({ type: 'toast', text: '滚石放下去了！' });
+      });
     }
     /** 祖坛: someone reached the goal */
     function shrineWinCheck() {
@@ -7231,6 +7395,7 @@ function GameImpl({
         updateWeather();
         updateShrines();
       }
+      if (map.id === 'wending') updateWar();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;

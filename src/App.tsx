@@ -15,7 +15,7 @@ import { useSettings, QUALITY, AI_LEVELS, getSettings } from './settings';
 import { reportRound, rename as renameAccount, getAccount } from './stats';
 import type { CharacterClassId } from './types';
 import { NetSession, makeRoomCode, NetMessage, RoomSeat } from './net';
-import { defaultRoom, lineupOf, roomReady, seatGuests, SEAT_SIDE, aiName } from './room';
+import { defaultRoom, lineupOf, roomReady, seatGuests, padRoom, SEAT_SIDE, SIDE_SEATS, aiName } from './room';
 import { UnitFrame, UnitStats } from './components/UnitFrame';
 import { Minimap } from './components/Minimap';
 import { ShrineHud } from './components/ShrineHud';
@@ -360,11 +360,11 @@ export default function App() {
       };
       n.onMessage = (m: NetMessage) => {
         if (m.t === 'room' && n.role === 'guest') {
-          setRoom(m.seats);
+          setRoom(padRoom(m.seats));
           if (m.map) setMapId(m.map);
         } else if (m.t === 'cfg' && n.role === 'guest') {
           if (m.hostName) n.remoteName = m.hostName.slice(0, 12);
-          if (m.seats) setRoom(m.seats);
+          if (m.seats) setRoom(padRoom(m.seats));
           setMapId(m.map);
           setRoundBanner(null);
           setIsMapSelectOpen(false);
@@ -907,7 +907,7 @@ export default function App() {
               else if (ch.kind === 'empty' && st.kind === 'ai') out[k] = { kind: 'empty', cls: st.cls, name: '' };
               if (ch.cls && out[k].kind === 'ai') out[k] = { ...out[k], cls: ch.cls, name: aiName(ch.cls) };
               if (ch.swap) {
-                const other = SEAT_SIDE[k] === 0 ? [2, 3] : [0, 1];
+                const other = SIDE_SEATS[1 - SEAT_SIDE[k]];
                 const j = other.find((n) => n !== 0 && out[n].kind === 'empty') ?? other.find((n) => n !== 0 && out[n].kind === 'ai') ?? other.find((n) => n !== 0);
                 if (j !== undefined) [out[k], out[j]] = [out[j], out[k]];
               }
@@ -1098,7 +1098,7 @@ export default function App() {
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
-        {(mapId === 'forest' || mapId === 'desert') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}
+        {(mapId === 'forest' || mapId === 'desert' || mapId === 'wending') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}
         {!dummyScreenPos.visible && !dummyScreenPos.hidden && dummyScreenPos.angle !== undefined && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && (
           <div
             className="absolute pointer-events-none z-20 flex flex-col items-center"

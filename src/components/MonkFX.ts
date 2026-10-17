@@ -322,7 +322,7 @@ export class MonkFX {
   private bells: { mesh: THREE.Mesh; mat: THREE.ShaderMaterial; life: number; max: number; hit: number }[] = [];
   private zens: { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; life: number; max: number; radius: number }[] = [];
   private time = 0;
-  private targets = Array.from({ length: 9 }, () => new THREE.Vector3()); // one per fighter slot
+  private targets = Array.from({ length: 12 }, () => new THREE.Vector3()); // one per fighter slot
   private glyphs: { spr: THREE.Sprite; ghosts: THREE.Sprite[]; trail: THREE.Vector3[]; pos: THREE.Vector3; vel: THREE.Vector3; age: number; slot: number; big: boolean; active: boolean; dying: number }[] = [];
   private glyphTex: THREE.Texture[] = [];
   private haloTex: THREE.Texture[] = [];

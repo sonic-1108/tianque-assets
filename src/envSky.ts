@@ -26,6 +26,7 @@ export const SKY_ENV: Record<MapId, SkyEnv> = {
   rooftop: { zenith: '#070a18', horizon: '#4a2216', ground: '#c2541c', sunDir: [-0.45, 0.42, -0.78], sun: '#d6dcff', sunPower: 5, intensity: 0.55 },
   forest: { zenith: '#6f8fa8', horizon: '#c9d6a8', ground: '#3d4a2a', sunDir: [0.47, 0.8, 0.35], sun: '#ffe2a8', sunPower: 6, intensity: 0.55 },
   desert: { zenith: '#5d86b8', horizon: '#f2cf9a', ground: '#c99a62', sunDir: [-0.62, 0.3, 0.5], sun: '#ffd9a0', sunPower: 12, intensity: 0.7 },
+  wending: { zenith: '#5d86b8', horizon: '#efe4cc', ground: '#8a8f5a', sunDir: [0.5, 0.45, 0.7], sun: '#fff0cc', sunPower: 12, intensity: 0.62 },
   plankway: { zenith: '#4a6fa6', horizon: '#e9dcc8', ground: '#d8dde6', sunDir: [0.55, 0.35, 0.75], sun: '#ffe2b0', sunPower: 11, intensity: 0.6 },
   summit: { zenith: '#2f5fae', horizon: '#f0cf9c', ground: '#e9e2d6', sunDir: [0.5, 0.14, -1], sun: '#ffcf8a', sunPower: 12, intensity: 0.45 },
 };

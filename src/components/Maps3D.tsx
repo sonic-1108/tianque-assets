@@ -1,3 +1,4 @@
+import { WendingMap } from './maps/Wending';
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
@@ -1293,6 +1294,7 @@ export function Maps3D({ mapId }: { mapId: MapId }) {
   if (mapId === 'rooftop') return <ChanganMap />;
   if (mapId === 'summit') return <SummitMap />;
   if (mapId === 'plankway') return <PlankwayMap />;
+  if (mapId === 'wending') return <WendingMap />;
   if (mapId === 'forest') return <ForestMap />;
   if (mapId === 'desert') return <DesertMap />;
   return <TempleMap />;
