@@ -1244,6 +1244,7 @@ function GameImpl({
       if (!c.isGrounded && c.actionState !== 'buried' && !hovering) {
         const y0 = c.pos[1];
         c.vel[1] -= gravity * cdt;
+        if ((c.glide ?? 0) > 0) c.vel[1] = Math.max(c.vel[1], -TRADER.glide.fall);
         c.pos[1] += c.vel[1] * cdt;
         if ((map.id === 'sea' || map.id === 'desert' || map.id === 'rooftop' || map.id === 'losangeles') && c.vel[1] > 0) {
           // a cabin's (or barracks', or a bridge's) ceiling stops a jump
@@ -2292,7 +2293,6 @@ function GameImpl({
         }
         c.vel[0] = THREE.MathUtils.damp(c.vel[0], dx * G.speed, 3.5, dt);
         c.vel[2] = THREE.MathUtils.damp(c.vel[2], dz * G.speed, 3.5, dt);
-        if (c.vel[1] < -G.fall) c.vel[1] = -G.fall;
         c.rotY = c.targetRotY = Math.atan2(-dx, -dz);
         return;
       }
@@ -3366,13 +3366,21 @@ function GameImpl({
           }
         }
         if ((f.glide ?? 0) > 0) {
-          f.glide = (f.glide ?? 0) - dt;
+          const glideDt = Math.min(f.glide ?? 0, dt);
+          f.glide = Math.max(0, (f.glide ?? 0) - dt);
           const G = TRADER.glide;
           if (f.hp <= 0) f.glide = 0;
           else if (f.isGrounded && (f.glide ?? 0) < G.t - 0.4) {
             f.glide = 0;
             vfx.dustPuff(vB.set(f.pos[0], f.pos[1], f.pos[2]), 10, 0.4, 2, 0.5);
-          } else if (Math.random() < dt * 6) vfx.embers(vB.set(f.pos[0], f.pos[1] + 2.2, f.pos[2]), 1, '#e8641e', 0.3, -1, 0.05);
+          } else {
+            if (!f.isGrounded && !round.over) {
+              const heal = Math.min(f.maxHp - f.hp, f.maxHp * G.heal * glideDt);
+              f.hp += heal;
+              f.totalHealingDone += heal;
+            }
+            if (Math.random() < dt * 6) vfx.embers(vB.set(f.pos[0], f.pos[1] + 2.2, f.pos[2]), 1, '#4ade80', 0.3, -1, 0.05);
+          }
         }
       }
       // the Rolexes: a little homing, a hit on the first foe they reach

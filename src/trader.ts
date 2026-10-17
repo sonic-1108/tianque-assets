@@ -63,7 +63,7 @@ export function resetTrader() {
 export const TRADER = {
   rolex: { speed: 26, life: 0.85, dmg: 110, home: 2.2, r: 0.85 },
   cash: { r: 4.5, t: 10, dmg: 30, ahead: 3.5, max: 3, dream: 3.5, bills: 120 },
-  glide: { up: 13, fall: 1.0, speed: 16, t: 5 },
+  glide: { up: 26, fall: 0.6, speed: 20, t: 8, heal: 0.025 },
   short: { range: 16, t: 7, dmg: 1.35, slow: 0.7, drain: 0.025, refund: 0.6 },
   crash: { range: 25, r: 7, n: 10, dur: 2.0, dmg: 90, bigDmg: 240, warn: 0.55 },
   compound: { per: 0.04, max: 10 },
