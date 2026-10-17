@@ -23,6 +23,8 @@ import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './set
 import { TQ_DARK } from './components/characterShading';
 import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOREST_X, SHRINE, SHRINES, WAR, warHeight, COAST, coastHeight, LA, LOOT, laHeight, laWater, lakeE, fixedLightAt, inSwamp, zipLine, zipAt, VOLCANO_CRATER, GLACIER, ROOF, SUMMIT, terrainHeight, terrainGradient, glacierHeight, glacierPath, FOREST, waterDepth, riverZ, templeToWorld, underTempleRoof, sheltered, CANDLE_POINTS, TREE_HOOKS, MAX_ITEMS, CANDLE_LIGHT, CUSHIONS, MEDITATE, shipFloorAt, shipCeilAt, shipBlocked, shipSolidAt, shipRegion, SHIP_LAYOUT, ShipRegion, SEA_BALLISTAE, SHIP_GAP, SHIP_HELM, SHIP_PLANKS, inPlank, shipOf, overShip, syncShips, shipTable, DESERT, desertSheltered, desertIndoor, desertCeil, desertHeight, GATE_DOOR, gateDoorDist, PLANK, plankAt, plankCount, bridgeY, roofFloorAt, roofCamSolid, roofCeilAt, paradeAt, paradeNearest, PARADE_R, DT, FIRMS, FIRM_IN, laFloorAt, laCeilAt, laPushOut, laClamp, laInside, laBlocked, liftCar, inLift, firmAt, firmLevel, IB_SPOTS, FIRM_SPOTS, marketPx, marketT } from './maps';
 import { getIb, ibSet, payCash, IB_NOTIONAL, ibTask, ibDone, ibExpire } from './banker';
+import { TR, TRADER, resetTrader } from './trader';
+import { TraderFx } from './components/TraderFx';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -606,7 +608,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * ((c.warT ?? 0) > 0 ? WAR.drum.speed : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * ((c.warT ?? 0) > 0 ? WAR.drum.speed : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1) * ((c.shortT ?? 0) > 0 ? TRADER.short.slow : 1);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const fighters = fightersRef.current;
@@ -2083,6 +2085,9 @@ function GameImpl({
       if (c.classId === 'Shadowblade' && ((c.burrowT ?? 0) > 0 || req === 'attack' || req.startsWith('skill') || req === 'ultimate')) {
         return executeShadow(slot, c, foe, intent, req, { cur, phase, free, canSkill, start, paySkill, report, color });
       }
+      if (c.classId === 'Trader' && (req.startsWith('skill') || req === 'ultimate')) {
+        return executeTrader(slot, c, foe, intent, req, { start, paySkill });
+      }
       if (c.classId === 'Emperor' && (req.startsWith('skill') || req === 'ultimate' || ((req === 'attack' || req === 'dodge' || req === 'jump') && c.empMove))) {
         return executeEmperor(slot, c, foe, req, { canSkill, paySkill, report });
       }
@@ -2256,6 +2261,22 @@ function GameImpl({
     }
 
     function applyMovement(c: CombatantState, intent: Intent) {
+      if ((c.glide ?? 0) > 0 && !c.isGrounded) {
+        // 交易员 under his vest: steer with the keys, sink slowly
+        const G = TRADER.glide;
+        let dx = -Math.sin(c.rotY);
+        let dz = -Math.cos(c.rotY);
+        if (intent.move.lengthSq() > 0.01) {
+          const l = intent.move.length();
+          dx = intent.move.x / l;
+          dz = intent.move.z / l;
+        }
+        c.vel[0] = THREE.MathUtils.damp(c.vel[0], dx * G.speed, 3.5, dt);
+        c.vel[2] = THREE.MathUtils.damp(c.vel[2], dz * G.speed, 3.5, dt);
+        if (c.vel[1] < -G.fall) c.vel[1] = -G.fall;
+        c.rotY = c.targetRotY = Math.atan2(-dx, -dz);
+        return;
+      }
       const st = c.actionState;
       const ranger = c.classId === 'Ranger';
       const bers = c.classId === 'Berserker';
@@ -2556,10 +2577,20 @@ function GameImpl({
       const m = FX.mute;
       FX.mute = 0;
       const hp0 = def.hp;
+      if (att.classId === 'Trader') {
+        // 复利 and 做空
+        base *= 1 + TRADER.compound.per * (att.compound ?? 0);
+        if ((def.shortT ?? 0) > 0 && def.shortBy === slot) base *= TRADER.short.dmg;
+      }
       try {
         applyHitInner(slot, att, def, base, oIn);
       } finally {
         FX.mute = m;
+      }
+      if (def.hp < hp0) {
+        if (att.classId === 'Trader' && att !== def) att.compound = Math.min(TRADER.compound.max, (att.compound ?? 0) + 1);
+        if (def.classId === 'Trader') def.compound = 0;
+        if ((def.glide ?? 0) > 0) def.glide = 0; // knocked out of the sky
       }
       if (map.id === 'plankway') {
         // 悬空栈道: a blow that lands on someone standing on a bridge cracks the plank under them; the chain lets go
@@ -2986,6 +3017,7 @@ function GameImpl({
     function resolveAttacks(slot: number, c: CombatantState, foe: CombatantState) {
       if (c.hp <= 0) return;
       if (c.classId === 'Emperor' && !c.actionState.startsWith('attack_')) return; // his skills land in updateEmperor
+      if (c.classId === 'Trader' && !c.actionState.startsWith('attack_')) return; // his land in updateTrader
       const fwd = fwdOf(c.rotY).clone();
       // melee can't reach someone standing on a pillar above you (and vice versa)
       // how far up or down a blade reaches: 2.2 m on the flat; on a slope (雪岭) a bit more for each metre across, so
@@ -3189,6 +3221,218 @@ function GameImpl({
     }
 
     /** 天子 as a hero: 1 横扫千军, 2 龙威, 3 御林箭雨, 4 龙颜大怒, R 真龙降世 (the sword combo and block are the shared ones) */
+    /** 交易员's skills: the Rolex, the cash, the vest, the short, Black Monday */
+    function executeTrader(
+      slot: number,
+      c: CombatantState,
+      foe: CombatantState,
+      intent: Intent,
+      req: string,
+      h: { start: (next: CharacterActionState, push?: number) => void; paySkill: (idx: number, key: string, label: string) => boolean }
+    ): boolean {
+      const fwd = fwdOf(intent.faceYaw);
+      const enemies = fighters.filter((f) => f !== c && f.hp > 0 && (f.side ?? 0) !== (c.side ?? 0));
+      const nearest = (range: number) => {
+        let best: CombatantState | null = null;
+        let bd = range;
+        for (const f of enemies) {
+          const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]);
+          if (d < bd && Math.abs(f.pos[1] - c.pos[1]) < 6) {
+            bd = d;
+            best = f;
+          }
+        }
+        return best;
+      };
+      void foe;
+      switch (req) {
+        case 'skill1': {
+          if (!h.paySkill(0, 'skill1', '1')) return false;
+          h.start('attack_2', 0);
+          c.hasHitCurrentMove = true; // the throw, not a swing
+          const tgt = nearest(22);
+          let dir = new THREE.Vector3(fwd.x, 0, fwd.z);
+          if (tgt) dir = new THREE.Vector3(tgt.pos[0] - c.pos[0], tgt.pos[1] - c.pos[1], tgt.pos[2] - c.pos[2]).normalize();
+          if (tgt) c.rotY = c.targetRotY = yawTo(c.pos, tgt.pos);
+          vfx.later(0.14, () => {
+            const R = TRADER.rolex;
+            TR.rolex.push({ owner: slot, x: c.pos[0] + dir.x * 0.6, y: c.pos[1] + 1.35, z: c.pos[2] + dir.z * 0.6, vx: dir.x * R.speed, vy: dir.y * R.speed, vz: dir.z * R.speed, life: R.life, spin: 0 });
+            gameAudio.playThrowFan();
+          });
+          return true;
+        }
+        case 'skill2': {
+          if (!h.paySkill(1, 'skill2', '2')) return false;
+          h.start('skill_4');
+          const C = TRADER.cash;
+          const x = c.pos[0] + fwd.x * C.ahead;
+          const z = c.pos[2] + fwd.z * C.ahead;
+          const mine = TR.cash.filter((p) => p.owner === slot);
+          if (mine.length >= C.max) TR.cash.splice(TR.cash.indexOf(mine[0]), 1);
+          vfx.later(0.2, () => {
+            TR.cash.push({ owner: slot, x, y: groundAt(x, z, c.pos[1] + 0.5), z, r: C.r, t: C.t, slipped: [], seed: (Math.random() * 1e9) >>> 0 });
+            vfx.embers(vB.set(x, c.pos[1] + 1.5, z), 26, '#9be37a', 1.2, -2, 0.09);
+            gameAudio.playCrispClick();
+          });
+          if (slot === ME) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), 'MAKE IT RAIN', false, '#9be37a');
+          return true;
+        }
+        case 'skill3': {
+          if (!c.isGrounded) return false;
+          if (!h.paySkill(2, 'skill3', '3')) return false;
+          const G = TRADER.glide;
+          c.glide = G.t;
+          c.actionState = 'jump';
+          c.stateTimer = 0;
+          c.stateDuration = 0;
+          c.isGrounded = false;
+          c.vel[1] = G.up;
+          c.vel[0] = fwd.x * 6;
+          c.vel[2] = fwd.z * 6;
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 14, 0.5, 2.5, 0.6);
+          gameAudio.playJump();
+          return true;
+        }
+        case 'skill4': {
+          const tgt = nearest(TRADER.short.range);
+          if (!tgt) return slot === ME && vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), '附近没人可做空', false, '#a3a3a3'), false;
+          if (!h.paySkill(3, 'skill4', '4')) return false;
+          h.start('skill_4');
+          tgt.shortT = TRADER.short.t;
+          tgt.shortBy = slot;
+          vfx.damageNumber(vA.set(tgt.pos[0], tgt.pos[1] + 2.4, tgt.pos[2]), '做空!', true, '#ff3b3b');
+          vfx.ring(vB.set(tgt.pos[0], tgt.pos[1] + 0.08, tgt.pos[2]), 1.4, '#ff2a2a', 0.5, 0.1, 0.4);
+          gameAudio.playCrispClick();
+          return true;
+        }
+        case 'ultimate': {
+          if (!h.paySkill(4, 'ultimate', 'R')) return false;
+          h.start('skill_4');
+          const tgt = nearest(TRADER.crash.range);
+          const ti = tgt ? fighters.indexOf(tgt) : -1;
+          const x = tgt ? tgt.pos[0] : c.pos[0] + fwd.x * 10;
+          const z = tgt ? tgt.pos[2] : c.pos[2] + fwd.z * 10;
+          TR.crashes.push({ owner: slot, target: ti, x, z, t: 0, fired: 0 });
+          if (slot === ME) controller?.addShake(0.3);
+          onRoundEvent?.({ type: 'toast', text: '黑色星期一：道指单日暴跌 22.6%' });
+          gameAudio.playGong();
+          return true;
+        }
+      }
+      return false;
+    }
+    /** 交易员's things in the world: Rolexes flying, cash underfoot, candles falling; shorts and glides wearing off */
+    function updateTrader() {
+      const enemyOf = (owner: number, f: CombatantState) => f.hp > 0 && f !== fighters[owner] && (f.side ?? 0) !== (fighters[owner]?.side ?? 0);
+      for (const f of fighters) {
+        if ((f.shortT ?? 0) > 0) f.shortT = Math.max(0, (f.shortT ?? 0) - dt);
+        if ((f.glide ?? 0) > 0) {
+          f.glide = (f.glide ?? 0) - dt;
+          if (f.hp <= 0 || (f.isGrounded && (f.glide ?? 0) < TRADER.glide.t - 0.4)) f.glide = 0;
+          else if (Math.random() < dt * 6) vfx.embers(vB.set(f.pos[0], f.pos[1] + 2.2, f.pos[2]), 1, '#e8641e', 0.3, -1, 0.05);
+        }
+      }
+      // the Rolexes: a little homing, a hit on the first foe they reach
+      for (let k = TR.rolex.length - 1; k >= 0; k--) {
+        const r = TR.rolex[k];
+        const R = TRADER.rolex;
+        r.life -= dt;
+        r.spin += dt * 18;
+        const owner = fighters[r.owner];
+        let tgt: CombatantState | null = null;
+        let bd = 12;
+        for (const f of fighters) {
+          if (!owner || !enemyOf(r.owner, f)) continue;
+          const d = Math.hypot(f.pos[0] - r.x, f.pos[2] - r.z);
+          if (d < bd) {
+            bd = d;
+            tgt = f;
+          }
+        }
+        if (tgt) {
+          const want = new THREE.Vector3(tgt.pos[0] - r.x, tgt.pos[1] + 1.1 - r.y, tgt.pos[2] - r.z).normalize().multiplyScalar(R.speed);
+          const k2 = Math.min(1, R.home * dt);
+          r.vx += (want.x - r.vx) * k2;
+          r.vy += (want.y - r.vy) * k2;
+          r.vz += (want.z - r.vz) * k2;
+        }
+        r.x += r.vx * dt;
+        r.y += r.vy * dt;
+        r.z += r.vz * dt;
+        let hit = false;
+        for (const f of fighters) {
+          if (!owner || !enemyOf(r.owner, f)) continue;
+          if (Math.hypot(f.pos[0] - r.x, f.pos[2] - r.z) < R.r && r.y > f.pos[1] && r.y < f.pos[1] + 2.1) {
+            applyHit(r.owner, owner, f, R.dmg, { knock: 4, dur: 0.5, ranged: true, crit: true });
+            vfx.sparkBurst(vB.set(r.x, r.y, r.z), 18, '#ffd36a', 3, 0.06, UP, 0.7);
+            vfx.damageNumber(vA.set(f.pos[0], f.pos[1] + 2.6, f.pos[2]), 'Rolex!', true, '#ffd36a');
+            hit = true;
+            break;
+          }
+        }
+        if (hit || r.life <= 0 || r.y < fy(r.x, r.z, r.y) - 0.2) TR.rolex.splice(k, 1);
+      }
+      // the cash: whoever of the other side steps on it slips
+      for (let k = TR.cash.length - 1; k >= 0; k--) {
+        const P = TR.cash[k];
+        P.t -= dt;
+        if (P.t <= 0) {
+          TR.cash.splice(k, 1);
+          continue;
+        }
+        const owner = fighters[P.owner];
+        fighters.forEach((f, i) => {
+          if (!owner || !enemyOf(P.owner, f) || !f.isGrounded || P.slipped.includes(i)) return;
+          if (Math.hypot(f.pos[0] - P.x, f.pos[2] - P.z) > P.r || Math.abs(f.pos[1] - P.y) > 1) return;
+          P.slipped.push(i);
+          applyHit(P.owner, owner, f, TRADER.cash.dmg, { state: 'knockdown', dur: 1.0, knock: 2.5, unblockable: true, noStop: true });
+          vfx.embers(vB.set(f.pos[0], f.pos[1] + 0.3, f.pos[2]), 14, '#9be37a', 0.6, 2, 0.08);
+          vfx.damageNumber(vA.set(f.pos[0], f.pos[1] + 2.4, f.pos[2]), '踩钱滑倒!', true, '#9be37a');
+        });
+      }
+      // 黑色星期一: candles called round the target over two seconds, then the big one in the middle
+      const X = TRADER.crash;
+      for (let k = TR.crashes.length - 1; k >= 0; k--) {
+        const C = TR.crashes[k];
+        C.t += dt;
+        const tg = fighters[C.target];
+        if (tg && tg.hp > 0) {
+          C.x += (tg.pos[0] - C.x) * Math.min(1, dt * 2);
+          C.z += (tg.pos[2] - C.z) * Math.min(1, dt * 2);
+        }
+        const want = Math.min(X.n, Math.floor((C.t / X.dur) * X.n));
+        while (C.fired < want) {
+          C.fired++;
+          const a = Math.random() * Math.PI * 2;
+          const d = C.fired % 3 === 0 && tg ? 0 : 1.5 + Math.random() * (X.r - 1.5);
+          const x = (C.fired % 3 === 0 && tg ? tg.pos[0] : C.x) + Math.cos(a) * d;
+          const z = (C.fired % 3 === 0 && tg ? tg.pos[2] : C.z) + Math.sin(a) * d;
+          TR.candles.push({ owner: C.owner, x, y: fy(x, z, (tg ?? fighters[C.owner]).pos[1] + 1), z, t: 0, warn: X.warn, r: 1.6, dmg: X.dmg, big: false, landed: false });
+        }
+        if (C.t >= X.dur) {
+          TR.candles.push({ owner: C.owner, x: C.x, y: fy(C.x, C.z, (tg ?? fighters[C.owner]).pos[1] + 1), z: C.z, t: 0, warn: 0.8, r: 3.4, dmg: X.bigDmg, big: true, landed: false });
+          TR.crashes.splice(k, 1);
+        }
+      }
+      for (let k = TR.candles.length - 1; k >= 0; k--) {
+        const C = TR.candles[k];
+        C.t += dt;
+        if (!C.landed && C.t >= C.warn) {
+          C.landed = true;
+          const owner = fighters[C.owner];
+          vfx.groundSlam(vB.set(C.x, C.y, C.z), C.big ? 1.6 : 0.7, '#ff2a2a');
+          vfx.dustPuff(vB, C.big ? 24 : 8, C.big ? 1.2 : 0.5, 3, 0.7);
+          controller?.addShake(C.big ? 0.6 : 0.15);
+          gameAudio.playSlam();
+          for (const f of fighters) {
+            if (!owner || !enemyOf(C.owner, f)) continue;
+            if (Math.hypot(f.pos[0] - C.x, f.pos[2] - C.z) < C.r && Math.abs(f.pos[1] - C.y) < 3)
+              applyHit(C.owner, owner, f, C.dmg, { heavy: true, state: 'knockdown', dur: C.big ? 1.2 : 0.6, knock: C.big ? 6 : 3, launch: C.big ? 5 : 2, shake: C.big ? 0.5 : 0.2 });
+          }
+        }
+        if (C.t > C.warn + 1.6) TR.candles.splice(k, 1);
+      }
+    }
     function executeEmperor(
       slot: number,
       c: CombatantState,
@@ -4463,6 +4707,9 @@ function GameImpl({
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
         c.zipW = undefined;
         c.lift = undefined;
+        c.glide = 0;
+        c.shortT = 0;
+        c.compound = 0;
         c.ibWork = 0;
         c.haul = [];
         c.warT = 0;
@@ -4588,6 +4835,7 @@ function GameImpl({
         // 青冥古林: six herbs growing somewhere, eight of the hunters' traps set in the grass
         const pickSome = (list: [number, number][], n: number) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
         mapRuntime.la = { loot: [], next: 2 };
+        resetTrader();
         laBankedRef.current = false;
         mapRuntime.war = { drumT: WAR.drum.first, drumBy: -1, drumHold: 0, shots: [], boulders: [], leverCd: [0, 0], towerCd: [0, 0] };
         mapRuntime.shrine = { own: [-1, -1, -1], prog: [0, 0, 0], busy: [0, 0, 0], score: [0, 0], on: false };
@@ -7662,6 +7910,7 @@ function GameImpl({
       }
       if (map.id === 'wending') updateWar();
       if (map.id === 'losangeles') updateLoot();
+      updateTrader();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
@@ -9265,7 +9514,38 @@ function GameImpl({
           ai.strafe = Math.random() < 0.5 ? -1 : 1;
         }
       }
-      if (ai.think <= 0 && free && !ai.request && !monkAI && !shadowAI) {
+      if (ai.think <= 0 && free && !ai.request && me.classId === 'Trader') {
+        // 交易员: Rolex from range, cash at their feet, short them, glide in or out, crash the market when it'll land
+        ai.think = 0.22 + Math.random() * 0.25;
+        const r = Math.random();
+        if (foeAttacking && dist < 3.4 && r < 0.4) {
+          if (ready('skill3') && me.mp >= 20 && me.hp < me.maxHp * 0.5) ask('skill3');
+          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
+            ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
+            ask('dodge');
+          } else {
+            ai.plan = 'guard';
+            ai.planTimer = 0.4;
+          }
+        } else if (ready('ultimate') && me.mp >= 55 && dist < 16 && r < 0.2) ask('ultimate');
+        else if (ready('skill4') && me.mp >= 20 && dist < 12 && !(foe.shortT ?? 0) && r < 0.3) ask('skill4');
+        else if (ready('skill1') && me.mp >= 15 && dist > 3 && dist < 18 && r < 0.45) ask('skill1');
+        else if (ready('skill2') && me.mp >= 20 && dist < 4.5 && r < 0.35) ask('skill2');
+        else if (ready('skill3') && me.mp >= 20 && dist > 14 && r < 0.25) ask('skill3');
+        else if (dist > 2.4) {
+          ai.plan = r < 0.8 ? 'approach' : 'circle';
+          ai.planTimer = 0.5 + Math.random() * 0.4;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        } else if (r < 0.7) {
+          ask('attack');
+          ai.comboLeft = 2;
+        } else {
+          ai.plan = 'circle';
+          ai.planTimer = 0.4;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        }
+      }
+      if (ai.think <= 0 && free && !ai.request && !monkAI && !shadowAI && me.classId !== 'Trader') {
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
         if (foe.pos[1] - me.pos[1] > 2) {
@@ -9386,6 +9666,7 @@ function GameImpl({
       <directionalLight ref={fillLightRef} position={[-10, 6, 10]} color="#7f9cc9" intensity={0.5} />
 
       <Maps3D mapId={mapId} />
+      <TraderFx fighters={fightersRef} />
 
       {seats.map((seat, k) => (
         <group key={k} ref={groupRefs[k]} position={[0, 0, k === meSlot ? 0 : -6]}>

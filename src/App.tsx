@@ -156,8 +156,27 @@ const EMPEROR_HOTBAR: HotbarEntry[] = [
   { id: 'true_dragon', key: 'R', name: ES[4].name, icon: ES[4].icon, short: '金龙俯冲', cdKey: 'ultimate', super: true, meta: eMeta(4), desc: ES[4].description,
     tip: '1 让人跪下后放 R，金龙落下时他还动不了。' },
 ];
-const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR, Emperor: EMPEROR_HOTBAR };
-const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor'];
+const TS = CLASS_CONFIGS.Trader.skills;
+const tMeta = (i: number) => [`MP ${TS[i].mpCost}`, `冷却 ${TS[i].cooldown}s`];
+const TRADER_HOTBAR: HotbarEntry[] = [
+  { id: 't_attack', key: '左键', name: '钱箱子', icon: '💼', short: '钱箱三连', basic: true, meta: ['可连按', '第三下击倒'],
+    desc: '抡起装满现金的铝箱子三连砸，第三下把人砸倒。被动「复利」：每打中一下，之后的伤害多 4%，最多 +40%，自己挨打就清零。',
+    tip: '复利叠起来以后伤害很高：先用 1 甩劳力士、2 撒钱把层数打上去，再贴身砸。' },
+  { id: 't_block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'],
+    desc: '按住右键举起箱子挡，正面伤害减少60%。看准对手出手的瞬间按下能打出完美格挡。' },
+  { id: 'rolex_throw', key: '1', name: TS[0].name, icon: TS[0].icon, short: '远程砸人', cdKey: 'skill1', meta: tMeta(0), desc: TS[0].description,
+    tip: '会自己拐弯追人，中远距离先甩一块再冲上去。' },
+  { id: 'make_it_rain', key: '2', name: TS[1].name, icon: TS[1].icon, short: '踩上滑倒', cdKey: 'skill2', meta: tMeta(1), desc: TS[1].description,
+    tip: '撒在自己和对手之间，他冲过来就会摔一跤，正好接三连。' },
+  { id: 'patagonia', key: '3', name: TS[2].name, icon: TS[2].icon, short: '马甲滑翔', cdKey: 'skill3', meta: tMeta(2), desc: TS[2].description,
+    tip: '被围住时往外飞；也能从高处飞过去追人。半空挨打会掉下来。' },
+  { id: 'short_sell', key: '4', name: TS[3].name, icon: TS[3].icon, short: '易伤减速', cdKey: 'skill4', meta: tMeta(3), desc: TS[3].description,
+    tip: '先做空再开大，黑色星期一的伤害再多四分之一。' },
+  { id: 'black_monday', key: 'R', name: TS[4].name, icon: TS[4].icon, short: '红K砸盘', cdKey: 'ultimate', super: true, meta: tMeta(4), desc: TS[4].description,
+    tip: '对手被撒的钱滑倒时放，最后那根巨型阴线基本躲不开。' },
+];
+const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR, Emperor: EMPEROR_HOTBAR, Trader: TRADER_HOTBAR };
+const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Trader'];
 
 export default function App() {
   const settings = useSettings();

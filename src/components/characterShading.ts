@@ -11,7 +11,7 @@ import type * as THREE from 'three';
 /** 0 normal .. 1 pitch-black night: dims the viewer-side fill and rim so characters vanish into the dark */
 export const TQ_DARK = { value: 0 };
 
-export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: boolean, monkGold: boolean, cut?: { value: number }) {
+export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: boolean, monkGold: boolean, cut?: { value: number }, suit = false) {
   const rim = isPlayer ? 'vec3(1.0, 0.82, 0.55) * 0.22' : 'vec3(0.45, 0.68, 1.0) * 0.28';
   m.onBeforeCompile = (sh) => {
     sh.uniforms.tqDark = TQ_DARK;
@@ -40,6 +40,21 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += tqSkin * vec3(0.13, 0.08, 0.015) * ${isPlayer ? '1.0' : '0.6'} * (1.0 - tqDark);`);
     }
+    if (suit) {
+      // 交易员's stand-in: everything but skin and hair becomes a navy suit (the texture's detail kept as shading)
+      f = f.replace('#include <map_fragment>', `#include <map_fragment>
+        {
+          vec3 tqC = diffuseColor.rgb;
+          float tqR = max(tqC.r, 1e-4);
+          float tqGR = tqC.g / tqR;
+          float tqBG = tqC.b / max(tqC.g, 1e-4);
+          float tqSkin = smoothstep(0.15, 0.26, tqGR) * (1.0 - smoothstep(0.9, 1.0, tqGR)) * smoothstep(0.35, 0.5, tqBG) * (1.0 - smoothstep(0.95, 1.1, tqBG)) * smoothstep(0.06, 0.14, tqC.r);
+          float tqL = dot(tqC, vec3(0.3, 0.59, 0.11));
+          float tqHair = (1.0 - smoothstep(0.03, 0.06, tqL)) * (1.0 - smoothstep(1.6, 2.4, tqR / max(tqC.g, 1e-4)));
+          vec3 tqSuit = vec3(0.05, 0.07, 0.13) * (0.75 + tqL * 1.6);
+          diffuseColor.rgb = mix(tqSuit, tqC, max(tqSkin, tqHair));
+        }`);
+    }
     f = f.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
       totalEmissiveRadiance += vec3(0.9, 0.55, 0.2) * (1.0 - smoothstep(0.0, 0.07, tqEdge)) * step(tqCut, 50.0) * 1.5;`);
     f = f.replace('#include <aomap_fragment>', `#include <aomap_fragment>
@@ -53,6 +68,6 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
       }`);
     sh.fragmentShader = f;
   };
-  m.customProgramCacheKey = () => 'tq-char-' + (isPlayer ? 'p' : 'e') + (monkGold ? 'g' : '');
+  m.customProgramCacheKey = () => 'tq-char-' + (isPlayer ? 'p' : 'e') + (monkGold ? 'g' : '') + (suit ? 's' : '');
   m.needsUpdate = true;
 }

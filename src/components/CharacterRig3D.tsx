@@ -22,6 +22,7 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
   Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
   Emperor: `${import.meta.env.BASE_URL}emperor.glb`,
+  Trader: `${import.meta.env.BASE_URL}trader.glb`, // 交易员: until his own model is uploaded, 霍岩's body in a navy suit
   Guard: `${import.meta.env.BASE_URL}guard.glb`, // 御林军 (until it's uploaded, 霍岩's body in red-and-gold armour) // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
 };
 /** 影刃's throwing dagger (Tripo prop, laid along +Y with the grip at the origin; see tools/optimize-prop.mjs) */
@@ -303,6 +304,36 @@ export function buildSpear() {
   // laid along the hand's fingers like the blades: shaft runs across the fist
   g.rotation.set(0, 0, Math.PI / 2);
   g.position.set(0, 0.08, 0.03);
+  return g;
+}
+
+/** 交易员's weapon: a silver attaché case stuffed with cash, the handle in the fist, the case along the swing */
+function buildBriefcase() {
+  const g = new THREE.Group();
+  const alu = new THREE.MeshStandardMaterial({ color: '#c8ccd2', metalness: 0.9, roughness: 0.3, envMapIntensity: 1.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: '#1b1c1f', metalness: 0.3, roughness: 0.6 });
+  const cash = new THREE.MeshStandardMaterial({ color: '#7fae6a', roughness: 0.8 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, 0.11), alu);
+  body.position.set(0, 0.26, 0);
+  body.castShadow = true;
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.35, 0.012), dark);
+  rim.position.set(0, 0.26, 0);
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 14, Math.PI), dark);
+  handle.rotation.set(0, 0, Math.PI);
+  handle.position.set(0, 0.09, 0);
+  // a few bills poking out of the seam
+  for (const x of [-0.12, 0.04, 0.15]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.004), cash);
+    b.position.set(x, 0.44, 0.012);
+    b.rotation.z = x * 2;
+    g.add(b);
+  }
+  for (const x of [-0.15, 0.15]) {
+    const latch = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.02), dark);
+    latch.position.set(x, 0.12, 0.06);
+    g.add(latch);
+  }
+  g.add(body, rim, handle);
   return g;
 }
 
@@ -667,7 +698,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.envMapIntensity = 1.6;
           m.roughness = Math.min(m.roughness ?? 1, 0.85);
         }
-        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU);
+        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU, classId === 'Trader' && asset.fallback);
         o.material = m;
         mats.push(m);
       }
@@ -709,6 +740,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     const left = ranger ? buildKnife(glow) : shadow ? buildDagger(glow) : buildCleaver(glow);
     if (ranger) left.group.visible = false; // 暗器: one knife in the right hand, the rest fly
     if (classId === 'BuddhistMage') right.group.visible = left.group.visible = false; // 梵音 fights bare-handed
+    if (classId === 'Trader') {
+      // 钱箱子: an aluminium case of cash swung by its handle (the blade stays hidden; its markers still draw the trail)
+      left.group.visible = false;
+      right.group.traverse((o: any) => {
+        if (o.isMesh) o.visible = false;
+      });
+      right.group.add(buildBriefcase());
+    }
     let spear: THREE.Group | null = null;
     if (classId === 'Guard') {
       // 长枪: a long red-tasselled spear in the right hand instead of blades

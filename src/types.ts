@@ -9,7 +9,8 @@ export type CharacterClassId =
   | 'Ranger'
   | 'Shadowblade'
   | 'Emperor'
-  | 'Guard';
+  | 'Guard'
+  | 'Trader';
 
 export type CharacterActionState =
   | 'idle'
@@ -255,6 +256,10 @@ export interface CombatantState {
   sandExpo?: number; // 大漠玉门关: seconds caught out in a thick sandstorm
   mantraTgt?: number; // 六字真言: who the words are hunting (-1 nobody in reach)
   zip?: { t: number; dir: 1 | -1 }; // 悬空栈道: sliding along the iron chain (t 0..1 from the step to the peak)
+  glide?: number; // 交易员: seconds left of gliding under the Patagonia vest
+  shortT?: number; // 交易员 做空: seconds left marked (takes more from the trader who shorted, runs slower)
+  shortBy?: number; // which fighter slot shorted them
+  compound?: number; // 交易员 复利: stacks of extra damage from hits in a row
   lift?: { k: number; from: number; to: number; t: number; x: number; z: number }; // 洛城午后: riding a tower's lift (firm k, from level to level)
   ibWork?: number; // 投行家: seconds left of working the model at the desk
   zipW?: { k: number; t: number; dir: 1 | -1 }; // 青冥古林: riding zip line k (t 0..1 from end a to end b)

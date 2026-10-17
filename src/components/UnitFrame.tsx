@@ -30,6 +30,7 @@ const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: `${import.meta.env.BASE_URL}portraits/monk.png`,
   Shadowblade: `${import.meta.env.BASE_URL}portraits/shadowblade.png`,
   Emperor: `${import.meta.env.BASE_URL}portraits/emperor.png`,
+  Trader: `${import.meta.env.BASE_URL}portraits/trader.png`,
 };
 
 /** Slanted bar. The bright fill snaps to the new value; a pale "ghost" lingers and drains after a hit. */
