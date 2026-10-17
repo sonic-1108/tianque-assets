@@ -107,10 +107,10 @@ function SkyDome() {
     const s = new SkyObject();
     s.scale.setScalar(1000);
     const u = s.material.uniforms;
-    u.turbidity.value = 7.5;
-    u.rayleigh.value = 2.4;
-    u.mieCoefficient.value = 0.007;
-    u.mieDirectionalG.value = 0.86;
+    u.turbidity.value = 4;
+    u.rayleigh.value = 1.6;
+    u.mieCoefficient.value = 0.0035;
+    u.mieDirectionalG.value = 0.93;
     u.sunPosition.value.copy(SUN).multiplyScalar(400);
     if (u.cloudCoverage) {
       u.cloudCoverage.value = 0.32;
@@ -173,7 +173,7 @@ function landMaterial(rock: THREE.Texture, rockN: THREE.Texture) {
           float slope = 1.0 - n.y;
           float n1 = fbm4(p.xz * 0.035); float n2 = fbm4(p.xz * 0.22 + 7.0); float n3 = noise(p.xz * 1.7);
           // dry wild-oat gold, straw in the light patches, olive where it holds water
-          vec3 straw = mix(vec3(0.62, 0.47, 0.22), vec3(0.80, 0.64, 0.33), n2);
+          vec3 straw = mix(vec3(0.42, 0.32, 0.15), vec3(0.58, 0.45, 0.22), n2);
           straw = mix(straw, vec3(0.70, 0.56, 0.30), n3 * 0.35);
           vec3 olive = mix(vec3(0.33, 0.33, 0.14), vec3(0.42, 0.40, 0.18), n2);
           float wet = smoothstep(0.58, 0.75, n1) * (1.0 - smoothstep(0.25, 0.5, slope));
@@ -795,7 +795,7 @@ function grassMat(tex: THREE.Texture, sway: number) {
           // the low sun shining through the seed heads: a halo of gold
           vec3 V = normalize(cameraPosition - vFW);
           float back = pow(max(dot(-V, uSun), 0.0), 3.0);
-          reflectedLight.directDiffuse += diffuseColor.rgb * vec3(1.0, 0.72, 0.38) * back * (0.6 + vTip * 2.2);
+          reflectedLight.directDiffuse += diffuseColor.rgb * vec3(1.0, 0.72, 0.38) * back * (0.3 + vTip * 1.2);
           reflectedLight.indirectDiffuse *= 0.7 + vTip * 0.6;
         }`
       );
@@ -822,7 +822,10 @@ function Meadow() {
       const z = Math.sin(a) * r;
       if (blocked(x, z)) continue;
       // thinner on the trodden paths
-      const s = 0.55 + rand() * 0.6;
+      // shorter, patchy: knee-high mostly, a few tall clumps
+      const patch = Math.sin(x * 0.21 + z * 0.13) * Math.cos(z * 0.17 - x * 0.07);
+      if (patch < -0.35 && rand() < 0.6) continue;
+      const s = 0.3 + rand() * 0.3 + Math.max(0, patch) * 0.25;
       spots.push([x, z, s]);
     }
     const oats = new THREE.InstancedMesh(card, grassMat(oatsTexture(), 0.09), spots.length);
@@ -833,7 +836,7 @@ function Meadow() {
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rand() * Math.PI);
       m.compose(new THREE.Vector3(x, H(x, z) - 0.05, z), q, new THREE.Vector3(s * (1 + rand() * 0.6), s, s * (1 + rand() * 0.6)));
       oats.setMatrixAt(i, m);
-      col.setHSL(0.1 + rand() * 0.03, 0.4 + rand() * 0.2, 0.62 + rand() * 0.2);
+      col.setHSL(0.09 + rand() * 0.04, 0.3 + rand() * 0.2, 0.45 + rand() * 0.2);
       oats.setColorAt(i, col);
     });
     oats.receiveShadow = true;
