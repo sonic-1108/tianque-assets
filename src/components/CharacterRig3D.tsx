@@ -1031,7 +1031,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy;
       // the left hand carries the candle / candle-shade in 青冥古林
-      if (w0.left) w0.left.group.visible = !handsBusy && classId !== 'Ranger' && !c.candle && !c.shade;
+      if (w0.left) w0.left.group.visible = !handsBusy && classId !== 'Ranger' && classId !== 'Trader' && !c.candle && !c.shade;
     }
 
     // Face protection (暗器 model): damp neck / head rotation toward rest

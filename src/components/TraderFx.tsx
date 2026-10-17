@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { TR } from '../trader';
+import { TR, TRADER } from '../trader';
 import { CombatantState } from '../types';
 
 // 交易员's things in the world: Rolexes in flight, cash on the ground, the red candles of 黑色星期一 coming down,
@@ -58,6 +58,37 @@ const shortTex = (() => {
     return t;
   };
 })();
+const dreamTex = (() => {
+  let t: THREE.Texture | null = null;
+  return () => {
+    if (t) return t;
+    const c = document.createElement('canvas');
+    c.width = 200;
+    c.height = 160;
+    const g = c.getContext('2d')!;
+    g.fillStyle = 'rgba(255,255,255,0.92)';
+    g.strokeStyle = '#2f6b3f';
+    g.lineWidth = 5;
+    g.beginPath();
+    g.ellipse(100, 62, 88, 54, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    for (const [x, y, r] of [[48, 128, 12], [28, 148, 7]]) {
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
+    g.fillStyle = '#2f8a3f';
+    g.font = 'bold 70px Arial, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('$$$', 100, 66);
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+})();
 function billTex() {
   const c = document.createElement('canvas');
   c.width = 128;
@@ -109,7 +140,7 @@ function vestMat() {
 }
 
 const MAXR = 8;
-const MAXB = 3 * 6 * 40;
+const MAXB = 6 * TRADER.cash.bills;
 const MAXC = 20;
 export function TraderFx({ fighters }: { fighters: React.MutableRefObject<CombatantState[]> }) {
   const wg = useMemo(() => watchGeo(), []);
@@ -142,6 +173,13 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
       wick: im(new THREE.BoxGeometry(1, 1, 1), mats.wick, MAXC),
       ring: im(new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2), mats.ring, MAXC),
       vest: im(vestGeo(), mats.vest, 9),
+      dreams: Array.from({ length: 9 }, () => {
+        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dreamTex(), depthTest: false, transparent: true }));
+        s.scale.set(1.0, 0.8, 1);
+        s.visible = false;
+        s.renderOrder = 10;
+        return s;
+      }),
       shorts: Array.from({ length: 9 }, () => {
         const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: shortTex(), depthTest: false, transparent: true }));
         s.scale.set(1.1, 0.7, 1);
@@ -178,11 +216,15 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
       let s = P.seed;
       const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
       const fade = Math.min(1, P.t / 0.8);
-      for (let k = 0; k < 40 && b < MAXB; k++) {
+      const age = TRADER.cash.t - P.t;
+      for (let k = 0; k < TRADER.cash.bills && b < MAXB; k++) {
         const a = rnd() * Math.PI * 2;
         const d = Math.sqrt(rnd()) * P.r;
-        o.position.set(P.x + Math.cos(a) * d, P.y + 0.03 + rnd() * 0.04 + Math.sin(t * 3 + k) * 0.01, P.z + Math.sin(a) * d);
-        o.rotation.set((rnd() - 0.5) * 0.3, rnd() * 6.28, (rnd() - 0.5) * 0.3);
+        // each bill flutters down out of the air over the first second, then lies there
+        const fall = Math.max(0, 1 - (age - rnd() * 0.5) / 0.9);
+        const h = fall * (2.5 + rnd() * 3);
+        o.position.set(P.x + Math.cos(a) * d + Math.sin(t * 6 + k) * 0.25 * fall, P.y + 0.03 + rnd() * 0.05 + h, P.z + Math.sin(a) * d);
+        o.rotation.set((rnd() - 0.5) * 0.3 + fall * Math.sin(t * 7 + k) * 1.2, rnd() * 6.28 + fall * t * 3, (rnd() - 0.5) * 0.3);
         o.scale.setScalar(1.3 * fade);
         o.updateMatrix();
         meshes.bills.setMatrixAt(b++, o.matrix);
@@ -226,6 +268,11 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
     // over the fighters: the SHORT arrow, the vest canopy
     let v = 0;
     fighters.current.forEach((f, i) => {
+      const dr = meshes.dreams[i];
+      if (dr) {
+        dr.visible = (f.dreamT ?? 0) > 0 && f.hp > 0;
+        if (dr.visible) dr.position.set(f.pos[0] + 0.35, f.pos[1] + 2.4 + Math.sin(t * 2.5) * 0.1 + ((f.shortT ?? 0) > 0 ? 0.8 : 0), f.pos[2]);
+      }
       const sp = meshes.shorts[i];
       if (sp) {
         sp.visible = (f.shortT ?? 0) > 0 && f.hp > 0;

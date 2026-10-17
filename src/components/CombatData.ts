@@ -590,9 +590,9 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     passiveDesc: '连续命中利滚利：每打中一下，之后的伤害多 4%，最多叠到 40%。自己挨打就清零。',
     skills: [
       { id: 'rolex_throw', name: '甩劳力士', key: '1', description: '摘下手上的劳力士甩出去，飞 20 米，会稍微追人：110 伤害，打中让人僵直 0.5 秒。', mpCost: 15, cooldown: 5, icon: '⌚' },
-      { id: 'make_it_rain', name: '撒钱', key: '2', description: '打开钱箱把一大把钞票撒在前方（半径 3 米，留 9 秒）。对手踩上去会滑倒：45 伤害并摔倒 1 秒，每片钱每人只滑一次。最多同时撒 3 片。', mpCost: 20, cooldown: 9, icon: '💸' },
-      { id: 'patagonia', name: 'Patagonia 起飞', key: '3', description: '脱下身上的 Patagonia 马甲举过头顶当滑翔伞，先蹿上半空再往前飘大约 18 米，方向键能控制方向。落地就收起来。', mpCost: 20, cooldown: 11, icon: '🧥' },
-      { id: 'short_sell', name: '做空', key: '4', description: '对 14 米内的对手开空单：头上挂一个红色的 SHORT 箭头 6 秒，这段时间他受你的伤害 +25%，跑得慢 15%。', mpCost: 20, cooldown: 12, icon: '📉' },
+      { id: 'make_it_rain', name: '撒钱', key: '2', description: '打开钱箱，漫天钞票砸在前方一大片（半径 4.5 米，留 10 秒）。对手踩进去就开始做白日梦 3.5 秒：头上冒出美元泡泡，把自己的队友当敌人打（一打一时就晕头转向乱走，出不了招）。每片钱每人只中一次，最多同时撒 3 片。', mpCost: 20, cooldown: 9, icon: '💸' },
+      { id: 'patagonia', name: 'Patagonia 起飞', key: '3', description: '脱下 Patagonia 马甲当滑翔伞，蹿上十几米高再往前飘 4 秒（大约 50 米），方向键控制方向，挨打也不会掉。落地时砸出一圈冲击（120 伤害并击倒）；飞着再按 3 直接俯冲砸下去（190 伤害，范围更大）。', mpCost: 20, cooldown: 10, icon: '🧥' },
+      { id: 'short_sell', name: '做空', key: '4', description: '对 16 米内的对手开空单 7 秒：头上挂红色 SHORT 箭头，他的血像股价一样每秒掉 2.5%，受到所有人的伤害 +35%，跑得慢 30%。掉的血有六成变成你的利润：给你回血。', mpCost: 20, cooldown: 11, icon: '📉' },
       { id: 'black_monday', name: '黑色星期一', key: 'R', description: '股市崩盘：对手周围（25 米内，没人就在前方）亮起红圈，一根根红色的大阴线从天上砸下来（每根 90 伤害并击倒），最后一根巨型阴线砸在正中间：240 伤害并击倒 1.2 秒。', mpCost: 55, cooldown: 30, icon: '📊', isSuper: true },
     ],
   },
