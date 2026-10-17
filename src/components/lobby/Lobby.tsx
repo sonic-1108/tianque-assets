@@ -320,7 +320,7 @@ const LOBBY_CSS = `
 
 .tq-l-heroes { flex:1; min-height:0; display:grid; grid-template-columns:auto 1fr; grid-template-rows:1fr auto; column-gap:2.4vw; row-gap:1.6vh; align-items:end; }
 .tq-l-label { grid-row:1 / span 2; align-self:center; font-family:"Ma Shan Zheng",serif; font-size:30px; line-height:1.15; color:var(--ink2); }
-.tq-heroes { display:grid; grid-template-columns:repeat(5, minmax(0, 190px)); gap:1.3vw; align-items:end; }
+.tq-heroes { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0, 178px); gap:1vw; align-items:end; }
 .tq-hero { --acc:#a3402b; position:relative; text-align:left; cursor:pointer; padding:0 0 14px; border-radius:14px;
   background:linear-gradient(180deg, rgba(246,241,231,0) 0%, rgba(246,241,231,.55) 46%, rgba(246,241,231,.8) 100%);
   border:1px solid rgba(31,28,24,.12); transition:transform .25s ease, box-shadow .25s ease, border-color .25s; overflow:visible; }
@@ -332,7 +332,7 @@ const LOBBY_CSS = `
 .tq-hero-wash { position:absolute; left:50%; bottom:6%; width:86%; aspect-ratio:1; transform:translateX(-50%); border-radius:50%;
   background:radial-gradient(circle, color-mix(in srgb, var(--acc) 26%, transparent) 0%, transparent 66%); opacity:.0; transition:opacity .3s; }
 .tq-hero.on .tq-hero-wash, .tq-hero:hover .tq-hero-wash { opacity:1; }
-.tq-hero-name { padding:6px 16px 0; font-family:"Ma Shan Zheng",serif; font-size:clamp(26px,2.6vw,36px); line-height:1; color:var(--ink); }
+.tq-hero-name { padding:6px 16px 0; font-family:"Ma Shan Zheng",serif; font-size:clamp(24px,2.3vw,34px); line-height:1; color:var(--ink); }
 .tq-hero.on .tq-hero-name { color:var(--acc); }
 .tq-hero-who { padding:4px 16px 0; font-size:12px; letter-spacing:.35em; color:var(--ink2); }
 .tq-hero-tag { padding:6px 16px 0; font-size:12px; color:var(--ink2); }
@@ -427,7 +427,7 @@ const LOBBY_CSS = `
 
 @media (max-width: 900px) {
   /* narrow: the heroes keep their full height and the page scrolls, instead of the map strip sliding over them */
-  .tq-heroes { grid-template-columns:repeat(3, minmax(0,1fr)); }
+  .tq-heroes { grid-auto-flow:row; grid-template-columns:repeat(3, minmax(0,1fr)); }
   .tq-l-heroes { grid-template-columns:1fr; flex:none; }
   .tq-l-label { display:none; }
   .tq-l-maps { grid-template-columns:1fr; }

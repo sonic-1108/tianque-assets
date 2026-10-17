@@ -2292,8 +2292,7 @@ function GameImpl({
         }
         c.vel[0] = THREE.MathUtils.damp(c.vel[0], dx * G.speed, 3.5, dt);
         c.vel[2] = THREE.MathUtils.damp(c.vel[2], dz * G.speed, 3.5, dt);
-        if (c.glideDive) c.vel[1] = Math.min(c.vel[1], -30);
-        else if (c.vel[1] < -G.fall) c.vel[1] = -G.fall;
+        if (c.vel[1] < -G.fall) c.vel[1] = -G.fall;
         c.rotY = c.targetRotY = Math.atan2(-dx, -dz);
         return;
       }
@@ -3294,13 +3293,8 @@ function GameImpl({
         }
         case 'skill3': {
           if ((c.glide ?? 0) > 0 && !c.isGrounded) {
-            // 俯冲: fold the vest and drop on them
-            if (c.glideDive) return false;
-            c.glideDive = true;
-            c.vel[1] = -30;
-            c.vel[0] *= 0.4;
-            c.vel[2] *= 0.4;
-            gameAudio.playSwingHeavy();
+            // fold the vest: drop straight down
+            c.glide = 0;
             return true;
           }
           if (!c.isGrounded) return false;
@@ -3375,22 +3369,9 @@ function GameImpl({
           f.glide = (f.glide ?? 0) - dt;
           const G = TRADER.glide;
           if (f.hp <= 0) f.glide = 0;
-          else if (f.isGrounded && ((f.glide ?? 0) < G.t - 0.4 || f.glideDive)) {
-            // touchdown: the case hits the ground (a dive harder)
-            const dive = !!f.glideDive;
+          else if (f.isGrounded && (f.glide ?? 0) < G.t - 0.4) {
             f.glide = 0;
-            f.glideDive = false;
-            const r = dive ? G.diveR : G.landR;
-            const i = fighters.indexOf(f);
-            vfx.groundSlam(vB.set(f.pos[0], f.pos[1], f.pos[2]), dive ? 1.3 : 0.9, '#e8641e');
-            vfx.embers(vC.set(f.pos[0], f.pos[1] + 0.3, f.pos[2]), dive ? 40 : 20, '#9be37a', 1, 3, 0.08);
-            controller?.addShake(i === ME ? (dive ? 0.6 : 0.35) : 0.2);
-            gameAudio.playSlam();
-            for (const e of fighters) {
-              if (e === f || e.hp <= 0 || (e.side ?? 0) === (f.side ?? 0)) continue;
-              if (Math.hypot(e.pos[0] - f.pos[0], e.pos[2] - f.pos[2]) < r && Math.abs(e.pos[1] - f.pos[1]) < 2.5)
-                applyHit(i, f, e, dive ? G.dive : G.land, { heavy: true, state: 'knockdown', dur: dive ? 1.1 : 0.8, knock: dive ? 7 : 5, launch: dive ? 5 : 3, shake: 0.3 });
-            }
+            vfx.dustPuff(vB.set(f.pos[0], f.pos[1], f.pos[2]), 10, 0.4, 2, 0.5);
           } else if (Math.random() < dt * 6) vfx.embers(vB.set(f.pos[0], f.pos[1] + 2.2, f.pos[2]), 1, '#e8641e', 0.3, -1, 0.05);
         }
       }
@@ -9620,7 +9601,7 @@ function GameImpl({
         else if (ready('skill4') && me.mp >= 20 && dist < 12 && !(foe.shortT ?? 0) && r < 0.3) ask('skill4');
         else if (ready('skill1') && me.mp >= 15 && dist > 3 && dist < 18 && r < 0.45) ask('skill1');
         else if (ready('skill2') && me.mp >= 20 && dist < 4.5 && r < 0.35) ask('skill2');
-        else if (ready('skill3') && me.mp >= 20 && dist > 14 && r < 0.25) ask('skill3');
+        else if (ready('skill3') && me.mp >= 20 && dist < 6 && me.hp < me.maxHp * 0.35 && r < 0.5) ask('skill3');
         else if (dist > 2.4) {
           ai.plan = r < 0.8 ? 'approach' : 'circle';
           ai.planTimer = 0.5 + Math.random() * 0.4;

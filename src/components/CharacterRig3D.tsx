@@ -307,6 +307,7 @@ export function buildSpear() {
   return g;
 }
 
+export const buildBriefcaseForPreview = () => buildBriefcase();
 /** 交易员's weapon: a silver attaché case stuffed with cash, the handle in the fist, the case along the swing */
 function buildBriefcase() {
   const g = new THREE.Group();
@@ -334,6 +335,11 @@ function buildBriefcase() {
     g.add(latch);
   }
   g.add(body, rim, handle);
+  // the weapon group is turned a quarter round the hand; undo that so the case hangs off the fist along the fingers
+  // (down at the side when the arm hangs, out in front on a swing) instead of across the shoulder
+  g.rotation.z = -Math.PI / 2;
+  g.position.set(0.005, 0, -0.025);
+  g.scale.setScalar(0.85);
   return g;
 }
 
