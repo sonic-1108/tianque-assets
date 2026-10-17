@@ -159,6 +159,7 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
     let n = 0;
     for (const r of TR.rolex) {
       if (n >= MAXR) break;
+      if (r.delay > 0) continue;
       o.position.set(r.x, r.y, r.z);
       o.rotation.set(r.spin, r.spin * 0.7, 0);
       o.scale.setScalar(1.6);
@@ -173,6 +174,7 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
     // cash on the ground: 40 bills a patch, scattered by its seed, fluttering a little
     let b = 0;
     for (const P of TR.cash) {
+      if (P.delay > 0) continue;
       let s = P.seed;
       const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
       const fade = Math.min(1, P.t / 0.8);

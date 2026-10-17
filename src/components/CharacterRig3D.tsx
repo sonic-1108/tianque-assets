@@ -22,7 +22,7 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
   Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
   Emperor: `${import.meta.env.BASE_URL}emperor.glb`,
-  Trader: `${import.meta.env.BASE_URL}trader.glb`, // 交易员: until his own model is uploaded, 霍岩's body in a navy suit
+  Trader: `${import.meta.env.BASE_URL}trader.glb`, // 交易员 陈百万 (Tripo, Mixamo rig): his own idle/run/walk, 霍岩's fighting moves
   Guard: `${import.meta.env.BASE_URL}guard.glb`, // 御林军 (until it's uploaded, 霍岩's body in red-and-gold armour) // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
 };
 /** 影刃's throwing dagger (Tripo prop, laid along +Y with the grip at the origin; see tools/optimize-prop.mjs) */
@@ -571,7 +571,7 @@ export function prefetchHeroModels(classes: CharacterClassId[]) {
   const urls = new Set<string>();
   for (const c of classes) {
     urls.add(MODEL_URLS[c] || BERSERKER_MODEL_URL);
-    if (c === 'Emperor' || c === 'Guard') urls.add(BERSERKER_MODEL_URL); // they borrow 霍岩's fighting moves
+    if (c === 'Emperor' || c === 'Guard' || c === 'Trader') urls.add(BERSERKER_MODEL_URL); // they borrow 霍岩's fighting moves
   }
   urls.add(EXTRA_ANIMS_URL);
   for (const u of urls) loadGLB(u).catch(() => {});
@@ -632,7 +632,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)
       // 皇上 brought only a few gestures of his own (angry_01, agree…): every fighting move is borrowed from 霍岩 (same skeleton)
-      .then((a) => ((classId === 'Emperor' || classId === 'Guard') && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
+      .then((a) => ((classId === 'Emperor' || classId === 'Guard' || classId === 'Trader') && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
       .then((a) => (a.raw.some((c) => c.name.toLowerCase().startsWith('swim')) ? a : loadGLB(EXTRA_ANIMS_URL).then((e) => ({ ...a, raw: [...a.raw, ...e.raw] })).catch(() => a)))
       .then((a) => {
         if (!alive) return;

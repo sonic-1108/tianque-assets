@@ -10,6 +10,8 @@ export interface Rolex {
   vz: number;
   life: number;
   spin: number;
+  /** seconds before it leaves the hand */
+  delay: number;
 }
 export interface CashPatch {
   owner: number;
@@ -22,6 +24,8 @@ export interface CashPatch {
   /** fighter slots that already slipped on it */
   slipped: number[];
   seed: number;
+  /** seconds before it lands (the throw) */
+  delay: number;
 }
 export interface Candle {
   owner: number;

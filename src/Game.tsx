@@ -3254,11 +3254,9 @@ function GameImpl({
           let dir = new THREE.Vector3(fwd.x, 0, fwd.z);
           if (tgt) dir = new THREE.Vector3(tgt.pos[0] - c.pos[0], tgt.pos[1] - c.pos[1], tgt.pos[2] - c.pos[2]).normalize();
           if (tgt) c.rotY = c.targetRotY = yawTo(c.pos, tgt.pos);
-          vfx.later(0.14, () => {
-            const R = TRADER.rolex;
-            TR.rolex.push({ owner: slot, x: c.pos[0] + dir.x * 0.6, y: c.pos[1] + 1.35, z: c.pos[2] + dir.z * 0.6, vx: dir.x * R.speed, vy: dir.y * R.speed, vz: dir.z * R.speed, life: R.life, spin: 0 });
-            gameAudio.playThrowFan();
-          });
+          const R = TRADER.rolex;
+          TR.rolex.push({ owner: slot, x: c.pos[0] + dir.x * 0.6, y: c.pos[1] + 1.35, z: c.pos[2] + dir.z * 0.6, vx: dir.x * R.speed, vy: dir.y * R.speed, vz: dir.z * R.speed, life: R.life, spin: 0, delay: 0.14 });
+          gameAudio.playThrowFan();
           return true;
         }
         case 'skill2': {
@@ -3269,11 +3267,9 @@ function GameImpl({
           const z = c.pos[2] + fwd.z * C.ahead;
           const mine = TR.cash.filter((p) => p.owner === slot);
           if (mine.length >= C.max) TR.cash.splice(TR.cash.indexOf(mine[0]), 1);
-          vfx.later(0.2, () => {
-            TR.cash.push({ owner: slot, x, y: groundAt(x, z, c.pos[1] + 0.5), z, r: C.r, t: C.t, slipped: [], seed: (Math.random() * 1e9) >>> 0 });
-            vfx.embers(vB.set(x, c.pos[1] + 1.5, z), 26, '#9be37a', 1.2, -2, 0.09);
-            gameAudio.playCrispClick();
-          });
+          TR.cash.push({ owner: slot, x, y: groundAt(x, z, c.pos[1] + 0.5), z, r: C.r, t: C.t, slipped: [], seed: (Math.random() * 1e9) >>> 0, delay: 0.2 });
+          vfx.embers(vB.set(x, c.pos[1] + 1.5, z), 26, '#9be37a', 1.2, -2, 0.09);
+          gameAudio.playCrispClick();
           if (slot === ME) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), 'MAKE IT RAIN', false, '#9be37a');
           return true;
         }
@@ -3336,6 +3332,16 @@ function GameImpl({
       for (let k = TR.rolex.length - 1; k >= 0; k--) {
         const r = TR.rolex[k];
         const R = TRADER.rolex;
+        if (r.delay > 0) {
+          r.delay -= dt;
+          const o = fighters[r.owner];
+          if (o) {
+            r.x = o.pos[0] + (r.vx / R.speed) * 0.6;
+            r.y = o.pos[1] + 1.35;
+            r.z = o.pos[2] + (r.vz / R.speed) * 0.6;
+          }
+          continue;
+        }
         r.life -= dt;
         r.spin += dt * 18;
         const owner = fighters[r.owner];
@@ -3375,6 +3381,10 @@ function GameImpl({
       // the cash: whoever of the other side steps on it slips
       for (let k = TR.cash.length - 1; k >= 0; k--) {
         const P = TR.cash[k];
+        if (P.delay > 0) {
+          P.delay -= dt;
+          continue;
+        }
         P.t -= dt;
         if (P.t <= 0) {
           TR.cash.splice(k, 1);
