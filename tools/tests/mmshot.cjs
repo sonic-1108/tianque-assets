@@ -1,0 +1,33 @@
+const { chromium } = require('playwright');
+const T0 = Date.now(); const log = (...a) => console.log(((Date.now() - T0) / 1000 | 0) + 's', ...a);
+(async () => {
+  const b = await chromium.launch({ args: ['--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+  p.on('pageerror', e => log('ERR', e.message.slice(0, 300)));
+  p.on('console', m => { const t = m.text(); if (m.type() === 'error' && !/WebSocket|mqtt|favicon|relay|api/.test(t)) log('CE', t.slice(0, 200)); });
+  await p.addInitScript(() => { for (const C of [WebGL2RenderingContext, WebGLRenderingContext]) { const P = C.prototype; for (const f of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements']) if (P[f]) P[f] = function () {}; } });
+  await p.addInitScript(() => { for (const C of [WebGL2RenderingContext, WebGLRenderingContext]) { const P = C.prototype;
+    P.compileShader = function () {}; P.linkProgram = function () {};
+    const gsp = P.getShaderParameter; P.getShaderParameter = function (s, pn) { return pn === this.COMPILE_STATUS ? true : gsp.call(this, s, pn); };
+    P.getProgramParameter = function (pr, pn) { if (pn === this.LINK_STATUS || pn === 0x8B82) return true; return 0; };
+    P.getShaderInfoLog = function () { return ''; }; P.getProgramInfoLog = function () { return ''; }; } });
+  await p.addInitScript(() => { globalThis.__TQ_NOWARM = true; globalThis.__TQ_NOGHOST = true; try { localStorage.setItem('tq_nickname', '测'); localStorage.setItem('tq_settings', JSON.stringify({ quality: 'low', qualityPicked: true })) } catch (e) {} });
+  await p.goto((process.env.URL || 'http://127.0.0.1:4180/'), { waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('.tq-maps', { timeout: 200000 });
+  for (let t = 0; t < 20; t++) { const ok = await p.evaluate(() => { if (document.querySelector('.tq-map.on .tq-map-n')?.textContent === '青冥古林') return true; const m = [...document.querySelectorAll('.tq-map')].find(x => x.textContent.includes('青冥古林')); m && m.click(); return false; }); if (ok) break; await new Promise(r => setTimeout(r, 700)); }
+  await p.waitForFunction(() => /出征/.test(document.querySelector('.tq-go')?.textContent || ''), null, { timeout: 200000 });
+  await p.evaluate(() => document.querySelector('.tq-go').click());
+  await p.waitForFunction(() => { const q = globalThis.__TQ?.fighters?.current; return q?.length > 1 && Math.abs(q[0].pos[2]) > 50; }, null, { timeout: 400000, polling: 500 });
+  log('in game');
+  await new Promise(r => setTimeout(r, 3000));
+  await p.evaluate(() => { const T = globalThis.__TQ; const [me, ai] = T.fighters.current; T.ai.current = false; me.pos = [60, me.pos[1], 40]; ai.pos = [40, ai.pos[1], 10]; });
+  await new Promise(r => setTimeout(r, 1500));
+  const el = await p.$('canvas[style*="border-radius: 50%"]');
+  log('minimap found', !!el);
+  if (el) await el.screenshot({ path: './mm_small.png' });
+  await p.keyboard.press('KeyN');
+  await new Promise(r => setTimeout(r, 1500));
+  const el2 = await p.$('canvas[style*="border-radius: 50%"]');
+  if (el2) await el2.screenshot({ path: './mm_big.png' });
+  await b.close();
+})();

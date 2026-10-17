@@ -1,0 +1,33 @@
+const { chromium } = require('playwright');
+const T0 = Date.now(); const log = (...a) => console.log(((Date.now() - T0) / 1000 | 0) + 's', ...a);
+(async () => {
+  const b = await chromium.launch({ args: ['--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const p = await b.newPage({ viewport: { width: 320, height: 180 } });
+  p.on('pageerror', e => log('ERR', e.message.slice(0, 300)));
+  p.on('console', m => { const t = m.text(); if (m.type() === 'error' && !/WebSocket|mqtt|favicon|relay|api/.test(t)) log('CE', t.slice(0, 200)); });
+  await p.addInitScript(() => { for (const C of [WebGL2RenderingContext, WebGLRenderingContext]) { const P = C.prototype; for (const f of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements']) if (P[f]) P[f] = function () {}; } });
+  await p.addInitScript(() => { for (const C of [WebGL2RenderingContext, WebGLRenderingContext]) { const P = C.prototype;
+    P.compileShader = function () {}; P.linkProgram = function () {};
+    const gsp = P.getShaderParameter; P.getShaderParameter = function (s, pn) { return pn === this.COMPILE_STATUS ? true : gsp.call(this, s, pn); };
+    P.getProgramParameter = function (pr, pn) { if (pn === this.LINK_STATUS || pn === 0x8B82) return true; return 0; };
+    P.getShaderInfoLog = function () { return ''; }; P.getProgramInfoLog = function () { return ''; }; } });
+  await p.addInitScript(() => { globalThis.__TQ_NOWARM = true; globalThis.__TQ_NOGHOST = true; try { localStorage.setItem('tq_nickname', '测'); localStorage.setItem('tq_settings', JSON.stringify({ quality: 'low', qualityPicked: true })) } catch (e) {} });
+  await p.goto((process.env.URL || 'http://127.0.0.1:4180/'), { waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('.tq-maps', { timeout: 200000 });
+  for (let t = 0; t < 20; t++) { const ok = await p.evaluate(() => { if (document.querySelector('.tq-map.on .tq-map-n')?.textContent === '青冥古林') return true; const m = [...document.querySelectorAll('.tq-map')].find(x => x.textContent.includes('青冥古林')); m && m.click(); return false; }); if (ok) break; await new Promise(r => setTimeout(r, 700)); }
+  await p.waitForFunction(() => /出征/.test(document.querySelector('.tq-go')?.textContent || ''), null, { timeout: 200000 });
+  await p.evaluate(() => document.querySelector('.tq-go').click());
+  await p.waitForFunction(() => { const q = globalThis.__TQ?.fighters?.current; return q?.length > 1 && Math.abs(q[0].pos[2]) > 50; }, null, { timeout: 400000, polling: 500 });
+  log('in game');
+  const H = `const T = globalThis.__TQ; const M = T.maps; const R = M.mapRuntime; const X = M.FOREST_X; const [me, ai] = T.fighters.current; T.ai.current = false;
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const put = (f, x, z, y) => { f.trapT = 0; f.zipW = undefined; f.pos = [x, y ?? M.terrainHeight('forest', x, z), z]; f.vel = [0, 0, 0]; f.isGrounded = true; f.actionState = 'idle'; f.stateTimer = 0; };
+    const F = async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyF', key: 'f', bubbles: true })); await wait(900); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyF', key: 'f', bubbles: true })); await wait(600); };
+    put(ai, 0, -150);`;
+  const run = (name, body) => p.evaluate(new Function(`return (async () => { ${H} ${body} })()`)).then(r => log(name, JSON.stringify(r))).catch(e => log(name, 'THREW', e.message.slice(0, 300)));
+  log('exports', await p.evaluate(() => Object.keys(globalThis.__TQ.maps).filter(k => /FOREST_X|wood|zip|inSwamp|mapRuntime/.test(k))));
+  await run('herb', `const h = R.wood.herbs.find(h => h.kind === 0) || R.wood.herbs[0]; me.hp = me.maxHp * 0.5; put(me, h.x + 0.4, h.z); await wait(1500); const hint = me.interactHint; const hp0 = me.hp; await F(); await wait(500); return { kind: h.kind, hint, gained: Math.round(me.hp - hp0), haste: me.hasteT, regrowT: +h.t.toFixed(1) };`);
+  await run('herb2', `const h = R.wood.herbs.find(h => h.kind === 1 && h.t <= 0); if (!h) return 'no fruit'; put(me, h.x + 0.4, h.z); await wait(1500); await F(); return { haste: +(me.hasteT||0).toFixed(1) };`);
+  await run('zip full', `globalThis.__TQ_TURBO = 4; const Z = M.zipLine(0); put(me, Z.ax, Z.az, Z.deckA + 0.02); await wait(1500); await F(); const riding = !!me.zipW; const t0 = performance.now(); while (me.zipW && performance.now() - t0 < 40000) await wait(200); await wait(1500); globalThis.__TQ_TURBO = 1; return { riding, end: me.pos.map(v => +v.toFixed(1)), target: [+Z.bx.toFixed(1), +Z.deckB.toFixed(1), +Z.bz.toFixed(1)], grounded: me.isGrounded };`);
+  await b.close();
+})();

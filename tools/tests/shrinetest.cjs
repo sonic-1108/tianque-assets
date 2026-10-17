@@ -1,0 +1,35 @@
+const { chromium } = require('playwright');
+const T0 = Date.now(); const log = (...a) => console.log(((Date.now() - T0) / 1000 | 0) + 's', ...a);
+(async () => {
+  const b = await chromium.launch({ args: ['--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const p = await b.newPage({ viewport: { width: 320, height: 180 } });
+  p.on('pageerror', e => log('ERR', e.message.slice(0, 300)));
+  p.on('console', m => { const t = m.text(); if (m.type() === 'error' && !/WebSocket|mqtt|favicon|relay|api/.test(t)) log('CE', t.slice(0, 200)); });
+  await p.addInitScript(() => { for (const C of [WebGL2RenderingContext, WebGLRenderingContext]) { const P = C.prototype; for (const f of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced', 'drawRangeElements']) if (P[f]) P[f] = function () {}; } });
+  await p.addInitScript(() => { for (const C of [WebGL2RenderingContext, WebGLRenderingContext]) { const P = C.prototype;
+    P.compileShader = function () {}; P.linkProgram = function () {};
+    const gsp = P.getShaderParameter; P.getShaderParameter = function (s, pn) { return pn === this.COMPILE_STATUS ? true : gsp.call(this, s, pn); };
+    P.getProgramParameter = function (pr, pn) { if (pn === this.LINK_STATUS || pn === 0x8B82) return true; return 0; };
+    P.getShaderInfoLog = function () { return ''; }; P.getProgramInfoLog = function () { return ''; }; } });
+  await p.addInitScript(() => { globalThis.__TQ_NOWARM = true; globalThis.__TQ_NOGHOST = true; try { localStorage.setItem('tq_nickname', '测'); localStorage.setItem('tq_settings', JSON.stringify({ quality: 'low', qualityPicked: true })) } catch (e) {} });
+  await p.goto((process.env.URL || 'http://127.0.0.1:4180/'), { waitUntil: 'domcontentloaded' });
+  await p.waitForSelector('.tq-heroes', { timeout: 150000 });
+  await p.evaluate(() => { const s = [...document.querySelectorAll('.tq-seg button')].find(x => x.textContent.includes('会还手')); s && s.click(); });
+  await p.waitForSelector('.tq-maps', { timeout: 200000 });
+  for (let t = 0; t < 20; t++) { const ok = await p.evaluate(() => { if (document.querySelector('.tq-map.on .tq-map-n')?.textContent === '青冥古林') return true; const m = [...document.querySelectorAll('.tq-map')].find(x => x.textContent.includes('青冥古林')); m && m.click(); return false; }); if (ok) break; await new Promise(r => setTimeout(r, 700)); }
+  await p.waitForFunction(() => /出征/.test(document.querySelector('.tq-go')?.textContent || ''), null, { timeout: 200000 });
+  await p.evaluate(() => document.querySelector('.tq-go').click());
+  await p.waitForFunction(() => { const q = globalThis.__TQ?.fighters?.current; return q?.length > 1 && Math.abs(q[0].pos[2]) > 50; }, null, { timeout: 400000, polling: 500 });
+  log('in game');
+  const H = `const T = globalThis.__TQ; const M = T.maps; const R = M.mapRuntime; const X = M.FOREST_X; const [me, ai] = T.fighters.current; T.ai.current = true; globalThis.__TQ_TURBO = 4;
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+    const put = (f, x, z, y) => { f.trapT = 0; f.zipW = undefined; f.pos = [x, y ?? M.terrainHeight('forest', x, z), z]; f.vel = [0, 0, 0]; f.isGrounded = true; f.actionState = 'idle'; f.stateTimer = 0; };
+    const F = async () => { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyF', key: 'f', bubbles: true })); await wait(900); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyF', key: 'f', bubbles: true })); await wait(600); };
+    put(ai, 0, -150);`;
+  const run = (name, body) => p.evaluate(new Function(`return (async () => { ${H} ${body} })()`)).then(r => log(name, JSON.stringify(r))).catch(e => log(name, 'THREW', e.message.slice(0, 300)));
+  await run('capture', `const S = R.shrine; const sd = me.side ?? 0; const sh = M.SHRINES[0]; put(ai, 150, -150); put(me, sh.x + 0.5, sh.z, sh.y); const t0 = performance.now(); while (performance.now() - t0 < 20000 && S.own[0] < 0) { await wait(300); me.hp = me.maxHp; } return { on: S.on, own: S.own, prog: S.prog.map(v => +v.toFixed(2)), mySide: sd, score: S.score.map(v => +v.toFixed(1)), myY: +me.pos[1].toFixed(2), shY: sh.y };`);
+  await run('ko+respawn', `const S = R.shrine; const sc0 = S.score[me.side ?? 0]; const [fx, fz] = X.camp.fire; ai.hp = 20; put(ai, fx, fz); const t1 = performance.now(); while (performance.now() - t1 < 6000 && ai.hp > 0) await wait(100); const down = ai.hp <= 0; const rT = +(ai.respawnT||0).toFixed(1); const over = document.body.innerText.includes('胜'); const t2 = performance.now(); while (performance.now() - t2 < 30000 && ai.hp <= 0) await wait(300); return { down, respawnT: rT, secs: Math.round((performance.now() - t2) / 1000), gotKoBonus: +(S.score[me.side ?? 0] - sc0).toFixed(1), hpAfter: Math.round(ai.hp), at: ai.pos.map(v => +v.toFixed(0)), maxHp: ai.maxHp };`);
+  await run('ai plays', `T.ai.current = true; const S = R.shrine; put(me, -150, 120); me.hp = me.maxHp; globalThis.__TQ_TURBO = 6; const log = []; const t0 = performance.now(); while (performance.now() - t0 < 30000) { await wait(3000); me.hp = me.maxHp; put(me, -150, 120); log.push({ own: S.own.join(','), sc: S.score.map(v => Math.round(v)).join('/'), ai: ai.pos.map(v => Math.round(v)).join(',') }); } globalThis.__TQ_TURBO = 1; return log;`);
+  await run('win', `const S = R.shrine; const sd = me.side ?? 0; S.score[sd] = 99.5; S.own[0] = sd; await wait(4000); return { score: S.score.map(v => +v.toFixed(1)), text: document.body.innerText.split(String.fromCharCode(10)).filter(l => /胜|败|赢|香火/.test(l)).slice(0, 4) };`);
+  await b.close();
+})();
