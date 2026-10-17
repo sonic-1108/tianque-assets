@@ -112,7 +112,25 @@ export function splitTraderVest(body: THREE.SkinnedMesh): TraderVest | null {
     for (const i of ids) shirtPositions.setXYZ(i, point.x, point.y, point.z);
   }
   shirtGeo.setAttribute('position', shirtPositions);
+  // The GLB normals use normalized Int16. Accumulating tiny triangle areas in
+  // that buffer rounds them to zero before normalization, producing invalid
+  // lighting that contaminates the bloom pass. Rebuild in floating point.
+  shirtGeo.deleteAttribute('normal');
   shirtGeo.computeVertexNormals();
+  const shirtNormals = shirtGeo.getAttribute('normal');
+  const originalNormals = source.getAttribute('normal');
+  const normal = new THREE.Vector3();
+  for (const ids of groups.values()) {
+    for (const i of ids) {
+      normal.fromBufferAttribute(shirtNormals, i);
+      if (!Number.isFinite(normal.lengthSq()) || normal.lengthSq() < 1e-10) {
+        normal.fromBufferAttribute(originalNormals, i);
+        if (!Number.isFinite(normal.lengthSq()) || normal.lengthSq() < 1e-10) normal.set(0, 0, 1);
+        normal.normalize();
+        shirtNormals.setXYZ(i, normal.x, normal.y, normal.z);
+      }
+    }
+  }
   const shirt = new THREE.SkinnedMesh(shirtGeo, new THREE.MeshStandardMaterial({ color: '#e1e6eb', roughness: 0.95, side: THREE.DoubleSide }));
   shirt.name = 'Trader undershirt';
   shirt.position.copy(body.position);
