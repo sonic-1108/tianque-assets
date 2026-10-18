@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast' | 'losangeles';
+export type MapId = 'quarry' | 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast' | 'losangeles';
 
 export interface Circle {
   x: number;
@@ -1212,7 +1212,24 @@ MAPS.desert = {
 };
 
 
-export const MAP_ORDER: MapId[] = ['losangeles', 'temple', 'wending', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
+/** Shared scenery/collision layout for the first gathering expedition. */
+export const QUARRY_ROCKS = [
+  { x: -10, z: -5, r: 2.4, h: 2.8 }, { x: 11, z: -9, r: 3, h: 3.8 },
+  { x: -15, z: 7, r: 2.1, h: 2.5 }, { x: 14, z: 9, r: 1.8, h: 2.2 },
+  { x: -6, z: -19, r: 2.7, h: 3.3 }, { x: 6, z: -21, r: 2.4, h: 2.7 },
+];
+MAPS.quarry = {
+  id: 'quarry', name: '青岚采石场', subtitle: '山谷营地、青石矿脉与试炼守卫。第一段单人寻材冒险。',
+  icon: '⛏️', mechanics: ['单人寻材：沿石径挑战守卫', '击败守卫后靠近金色标记拾取铁料', '材料自动保存在当前浏览器；按 M 回大厅', '每次出发一名守卫，武器制作尚未开放'],
+  homeClass: 'Berserker', homeClassName: '狂刃', homeBonus: '单人寻材试验', available: true,
+  radius: 27, spawnPlayer: [0, 17], spawnEnemy: [0, -6],
+  background: '#adc8c4', fog: [48, 135], hemi: ['#d9eee3', '#625443', 1.8],
+  keyColor: '#ffe0a5', keyIntensity: 2.7, exposure: 1.05, env: .55, bloom: .3,
+  cardGradient: 'linear-gradient(135deg,#153c3c,#698e7c,#d8ba78)', sizeClass: '10Q',
+  pillars: [...QUARRY_ROCKS, { x: -5, z: 19, r: .4 }, { x: 5, z: 19, r: .4 }, { x: -9, z: 15, r: 1.5 }],
+};
+
+export const MAP_ORDER: MapId[] = ['quarry', 'losangeles', 'temple', 'wending', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
 
 /** Shared per-frame values the map visuals read (written by the game loop) */
 export const mapRuntime = {

@@ -4,3 +4,5 @@ dist
 .preview/
 relay/.wrangler/
 public/_cmp/
+
+.adventure-test/

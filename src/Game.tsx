@@ -1,3 +1,5 @@
+import { adventure } from './adventure';
+import { AdventureDrop } from './components/AdventureDrop';
 import { shipSteer, newNavState, shipGraph } from './shipNav';
 import { newStreetNav, streetSteer, streetLineClear } from './streetNav';
 import { desertBumped, desertSteer, newDesertNav } from './desertNav';
@@ -587,6 +589,14 @@ function GameImpl({
       cameraControllerRef.current = null;
     };
   }, [camera, gl.domElement]);
+
+  useEffect(() => {
+    const controller = cameraControllerRef.current;
+    if (controller) {
+      controller.enabled = gameState.status === 'PLAYING';
+      controller.pendingDX = controller.pendingDY = 0;
+    }
+  }, [gameState.status, camera, gl.domElement]);
 
   // ==========================================================
   // MAIN LOOP
@@ -4756,6 +4766,7 @@ function GameImpl({
     (globalThis as any).__TQ_RESET = () => resetRound(true); // balance tests: end a stalemate
     function resetRound(fromKO: boolean) {
       round.over = false;
+      if (adventure.getSnapshot().active) adventure.reset();
       if (map.id === 'sea') {
         mapRuntime.shipX = [-SHIP_GAP.start / 2, SHIP_GAP.start / 2];
         mapRuntime.board = { mode: 0, plank: 0 };
@@ -4880,6 +4891,15 @@ function GameImpl({
           c.rotY = c.targetRotY = yawTo(c.pos, o.pos);
         });
         if (map.id === 'sea') for (const c of fighters) shipUnstick(c);
+      }
+      if (adventure.getSnapshot().active && map.id === 'quarry') {
+        const [x, z] = map.spawnPlayer;
+        fighters.forEach((c, k) => {
+          const cz = k === ME ? z : map.spawnEnemy[1];
+          c.pos = [x, fy(x, cz), cz];
+          c.rotY = c.targetRotY = k === ME ? 0 : Math.PI;
+          if (k !== ME) { c.maxHp = Math.round(c.maxHp * .35); c.hp = c.maxHp; }
+        });
       }
       if (controller) controller.yaw = p1.rotY;
       for (const a of aiRefs.current) a.think = 1.2;
@@ -6512,6 +6532,15 @@ function GameImpl({
         if (defSlot === ME) onRoundEvent?.({ type: 'toast', text: '你倒下了，身上的钱和表全掉在地上' });
         def.haul = [];
       }
+      if (adventure.getSnapshot().active && map.id === 'quarry') {
+        if (defSlot === ME) {
+          onRoundEvent?.({ type: 'toast', text: '寻材失败 · 按 M 回大厅重新出发，已保存材料不会丢失' });
+        } else {
+          adventure.defeatEnemy([def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]]);
+          onRoundEvent?.({ type: 'toast', text: '守卫掉落铁料！靠近金色标记自动拾取' });
+        }
+        return;
+      }
       if (map.id === 'forest') {
         // 祖坛: down is not out. Back at your camp in a few seconds; the side that cut you down gets a little score
         def.respawnT = SHRINE.respawn;
@@ -7976,6 +8005,9 @@ function GameImpl({
         updateForest();
         updateWeather();
         updateShrines();
+      }
+      if (map.id === 'quarry' && adventure.getSnapshot().active && adventure.collect(p1.pos, p1.hp > 0)) {
+        onRoundEvent?.({ type: 'toast', text: '铁料 +1 · 已保存到冒险背包' });
       }
       if (map.id === 'wending') updateWar();
       if (map.id === 'losangeles') updateLoot();
@@ -9744,6 +9776,7 @@ function GameImpl({
       <directionalLight ref={fillLightRef} position={[-10, 6, 10]} color="#7f9cc9" intensity={0.5} />
 
       <Maps3D mapId={mapId} />
+      <AdventureDrop />
       <TraderFx fighters={fightersRef} />
 
       {seats.map((seat, k) => (

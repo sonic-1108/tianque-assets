@@ -36,6 +36,8 @@ const ACCENT: Partial<Record<CharacterClassId, string>> = {
 };
 
 export interface LobbyProps {
+  adventurePanel?: React.ReactNode;
+  onAdventure?: () => void;
   nickname: string;
   onRename: () => void;
   heroes: CharacterClassId[];
@@ -79,6 +81,11 @@ export function Lobby(p: LobbyProps) {
       <style>{LOBBY_CSS}</style>
       <InkBackdrop />
       <div className="tq-l-wrap">
+        <section aria-label="采石场冒险" style={{ borderBottom: '1px solid #b99b60', paddingBottom: 10 }}>
+          {p.adventurePanel}
+          <button className="tq-btn" disabled={!p.onAdventure || p.loadPct !== undefined} onClick={p.onAdventure}>青岚采石场 · 单人寻材</button>
+          <small style={{ marginLeft: 10 }}>狂刃挑战一名守卫，拾取铁料 · 联机时不可进入</small>
+        </section>
         {/* ---- title and name ---- */}
         <header className="tq-l-head">
           <div className="tq-l-title">
@@ -252,7 +259,7 @@ export function Lobby(p: LobbyProps) {
               return (
                 <button
                   key={id}
-                  disabled={!m.available || p.hostPicks}
+                  disabled={!m.available || p.hostPicks || (id === 'quarry' && p.online)}
                   className={`tq-map ${on ? 'on' : ''}`}
                   onClick={() => {
                     setPick(id);
@@ -272,7 +279,7 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          <button className={'tq-go' + (p.loadPct !== undefined ? ' loading' : '')} disabled={p.hostPicks || !map.available || !p.ready || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
+          <button className={'tq-go' + (p.loadPct !== undefined ? ' loading' : '')} disabled={p.hostPicks || !map.available || (!p.ready && pick !== 'quarry') || (pick === 'quarry' && p.online) || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
             {p.loadPct !== undefined && !p.hostPicks ? (
               // the scene is still being built before the download even starts: say so, rather than a frozen 0%
               <small>{p.loadPct <= 5 ? '准备' : p.loadPct >= 99 ? '即将' : '载入'}

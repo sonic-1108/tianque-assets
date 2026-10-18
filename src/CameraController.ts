@@ -3,6 +3,7 @@ import { getSettings } from './settings';
 import * as THREE from 'three';
 
 export class CameraController {
+  enabled = false;
   yaw = 0; // radians, absolute
   pitch = 0.28; // radians, absolute
   distance = 4.6;
@@ -23,6 +24,8 @@ export class CameraController {
   private followY = 0;
   private initialized = false;
   private onMouseMove: (e: MouseEvent) => void;
+  private lastPointer: [number, number] | null = null;
+  private resetPointer = () => { this.lastPointer = null; this.pendingDX = this.pendingDY = 0; };
   private onWheel: (e: WheelEvent) => void;
 
   // Camera Trauma & Shake
@@ -31,15 +34,31 @@ export class CameraController {
 
   constructor(private camera: THREE.PerspectiveCamera, private canvas: HTMLCanvasElement) {
     this.onMouseMove = (e: MouseEvent) => {
-      if (document.pointerLockElement !== this.canvas) return;
-      this.pendingDX += e.movementX;
-      this.pendingDY += e.movementY;
+      if (!this.enabled) { this.resetPointer(); return; }
+      if (document.pointerLockElement === this.canvas) {
+        this.lastPointer = null;
+        this.pendingDX += e.movementX;
+        this.pendingDY += e.movementY;
+        return;
+      }
+      // Embedded browsers may reject pointer lock. Only the actual canvas accepts
+      // unlocked look input, so moving over menus and HUD controls never turns it.
+      if (document.pointerLockElement || e.target !== this.canvas) { this.lastPointer = null; return; }
+      if (this.lastPointer) {
+        this.pendingDX += e.clientX - this.lastPointer[0];
+        this.pendingDY += e.clientY - this.lastPointer[1];
+      }
+      this.lastPointer = [e.clientX, e.clientY];
     };
     this.onWheel = (e: WheelEvent) => {
+      if (!this.enabled) return;
       this.distance = THREE.MathUtils.clamp(this.distance + e.deltaY * 0.004, 2.6, 9);
     };
 
     document.addEventListener('mousemove', this.onMouseMove);
+    document.addEventListener('pointerlockchange', this.resetPointer);
+    this.canvas.addEventListener('mouseleave', this.resetPointer);
+    window.addEventListener('blur', this.resetPointer);
     this.canvas.addEventListener('wheel', this.onWheel, { passive: true });
   }
 
@@ -161,6 +180,9 @@ export class CameraController {
 
   dispose() {
     document.removeEventListener('mousemove', this.onMouseMove);
+    document.removeEventListener('pointerlockchange', this.resetPointer);
+    this.canvas.removeEventListener('mouseleave', this.resetPointer);
+    window.removeEventListener('blur', this.resetPointer);
     this.canvas.removeEventListener('wheel', this.onWheel);
   }
 }

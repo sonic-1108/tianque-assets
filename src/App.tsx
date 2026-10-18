@@ -1,3 +1,5 @@
+import { adventure } from './adventure';
+import { AdventureHud } from './components/AdventureHud';
 import * as MapsAll from './maps';
 import * as BankerAll from './banker';
 import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
@@ -193,8 +195,11 @@ export default function App() {
   const [isHowToPlayOpen, setIsHowToPlayOpen] = useState(false);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isPointerLocked, setIsPointerLocked] = useState(false);
+  const [pointerLockFailed, setPointerLockFailed] = useState(false);
 
   const [skillCard, setSkillCard] = useState<string | null>(null);
+  const [adventureRun, setAdventureRun] = useState(0);
+  const [adventureMode, setAdventureMode] = useState(false);
   const [mapId, setMapId] = useState<MapId>('temple');
   const [isMapSelectOpen, setIsMapSelectOpen] = useState(true);
   const isMapSelectOpenRef = useRef(true);
@@ -270,6 +275,12 @@ export default function App() {
   const lineupKey = JSON.stringify(room.map((s) => [s.kind, s.id, s.cls, s.name])) + '|' + localSeat;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const lineup = useMemo(() => {
+    if (adventureMode && !net) return {
+      seats: [
+        { cls: 'Berserker', side: 0, ctl: 'local', name: nickname || '侠客' },
+        { cls: 'Berserker', side: 1, ctl: 'ai', name: '试炼守卫' },
+      ] as import('./types').FighterSeat[], me: 0, seatOf: [0, 2],
+    };
     const l = lineupOf(room, Math.max(0, localSeat), mapId);
     // nobody on one side (the last AI was just taken out in the lobby): the scene behind the lobby still needs an
     // opponent to look at, so a stand-in fills the gap until someone is seated (the match can't start like this)
@@ -279,7 +290,7 @@ export default function App() {
         l.seatOf.push(-1);
       }
     return l;
-  }, [lineupKey, mapId]);
+  }, [lineupKey, mapId, adventureMode, net, nickname]);
   const teamFight = lineup.seats.length > 2;
   const lineupRef = useRef(lineup);
   lineupRef.current = lineup;
@@ -360,6 +371,8 @@ export default function App() {
 
   const startNet = useCallback(
     (role: 'host' | 'guest', code: string) => {
+      adventure.stop();
+      setAdventureMode(false);
       netRef.current?.close();
       const n = new NetSession(role, code);
       n.subscribe(() => {
@@ -754,9 +767,15 @@ export default function App() {
     const handlePointerLockChange = () => {
       const locked = Boolean(document.pointerLockElement);
       setIsPointerLocked(locked);
+      if (locked) setPointerLockFailed(false);
     };
+    const onError = () => setPointerLockFailed(true);
+    document.addEventListener('pointerlockerror', onError);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
-    return () => document.removeEventListener('pointerlockchange', handlePointerLockChange);
+    return () => {
+      document.removeEventListener('pointerlockerror', onError);
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+    };
   }, []);
 
   // Sync HUD state from refs periodically
@@ -851,16 +870,31 @@ export default function App() {
       try {
         const promise = canvas.requestPointerLock() as unknown;
         if (promise && typeof (promise as Promise<void>).catch === 'function') {
-          (promise as Promise<void>).catch(() => {});
+          (promise as Promise<void>).catch(() => setPointerLockFailed(true));
         }
       } catch {
-        // Safe fallback
+        setPointerLockFailed(true);
       }
-    }
+    } else setPointerLockFailed(true);
     setIsHowToPlayOpen(false);
     setIsGameMenuOpen(false);
     gameAudio.playCrispClick();
   };
+
+  const startAdventure = () => {
+    if (net) return;
+
+            adventure.start();
+            setAdventureMode(true);
+            setAdventureRun(n => n + 1);
+            setPlayerClass('Berserker');
+            if (!aiEnabledRef.current) toggleAI();
+            setMapId('quarry');
+            setRoundBanner(null);
+            setIsGameMenuOpen(false);
+            setIsMapSelectOpen(false);
+            requestGameFocus();
+            };
 
   const berserkerConfig = CLASS_CONFIGS[playerClass];
 
@@ -902,6 +936,8 @@ export default function App() {
       {/* LOBBY: hero, opponent, battlefield */}
       {isMapSelectOpen && (
         <Lobby
+          adventurePanel={<AdventureHud lobby />}
+          onAdventure={!net ? startAdventure : undefined}
           loadPct={modelProgress.isLoading ? modelProgress.progress : undefined}
           nickname={nickname}
           onRename={() => {
@@ -944,7 +980,10 @@ export default function App() {
           mapId={mapId}
           onSelectMap={() => gameAudio.playCrispClick()}
           onStart={(id) => {
+            if (id === 'quarry') { startAdventure(); return; }
             if (!MAPS[id].available) return;
+            adventure.stop();
+            setAdventureMode(false);
             gameAudio.playCrispClick();
             setMapId(id);
             setRoundBanner(null);
@@ -1058,6 +1097,7 @@ export default function App() {
             className="w-full h-full block"
           >
             <Game
+              key={adventureMode ? `adventure-${adventureRun}` : "competitive"}
               gameState={gameState}
               setGameState={setGameState}
               inputRef={inputRef}
@@ -1119,7 +1159,8 @@ export default function App() {
           </div>
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
-        {mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
+        {!adventureMode && mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
+        {adventureMode && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <AdventureHud />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <LootHud />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <QuestHud />}
         {(mapId === 'forest' || mapId === 'desert' || mapId === 'wending' || mapId === 'losangeles') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}
@@ -1217,14 +1258,14 @@ export default function App() {
       </div>
 
       {/* FOCUS PROMPT BADGE */}
-      {!isPointerLocked && !isGameMenuOpen && !isHowToPlayOpen && !modelProgress.isLoading && (
+      {!isPointerLocked && !isMapSelectOpen && !isGameMenuOpen && !isHowToPlayOpen && !modelProgress.isLoading && (
         <div
           onClick={requestGameFocus}
           className="absolute top-20 inset-x-0 mx-auto w-fit bg-black/80 hover:bg-amber-950/90 border border-amber-500/60 rounded-full px-5 py-2 z-30 flex items-center gap-2 cursor-pointer transition-all shadow-xl hover:scale-105"
         >
           <MousePointer className="w-4 h-4 text-amber-400 animate-bounce" />
           <span className="text-xs font-bold text-amber-300">
-            点击画面锁定鼠标视角 · WASD 自由移动 · 滚轮缩放镜头
+            {pointerLockFailed ? '鼠标锁定不可用：在场景内移动鼠标转视角 · 点击重试' : '在场景内移动鼠标转视角 · 点击锁定 · WASD 移动'}
           </span>
         </div>
       )}

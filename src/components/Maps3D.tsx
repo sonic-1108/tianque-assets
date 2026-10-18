@@ -1,3 +1,4 @@
+import { QuarryMap } from './maps/Quarry';
 import { WendingMap } from './maps/Wending';
 import { CoastMap } from './maps/Coast';
 import { LAMap } from './maps/LA';
@@ -1290,6 +1291,7 @@ function SeaMap() {
 }
 
 export function Maps3D({ mapId }: { mapId: MapId }) {
+  if (mapId === 'quarry') return <QuarryMap />;
   if (mapId === 'lavacliff') return <LavaCliffMap />;
   if (mapId === 'sea') return <SeaMap />;
   if (mapId === 'glacier') return <GlacierMap />;
