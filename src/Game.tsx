@@ -1,3 +1,4 @@
+import { canRevive } from './revive';
 import { openStory, tradeBriefed } from './ibStory';
 import { adventure } from './adventure';
 import { AdventureDrop } from './components/AdventureDrop';
@@ -4837,6 +4838,7 @@ function GameImpl({
         c.shade = false;
         c.slip = 0;
         c.revived = 0;
+        c.reviveBlocked = false;
         c.reviveT = 0;
         c.beaconHold = 0;
         c.devoured = 0;
@@ -5401,7 +5403,7 @@ function GameImpl({
           continue;
         }
         c.hp = 0;
-        c.revived = 9;
+        c.reviveBlocked = true;
         koCheck(i, '#3a2a1a');
       }
     }
@@ -5911,6 +5913,7 @@ function GameImpl({
         c.dodgeIframeTimer = 1.5;
         c.celebrate = false;
         c.revived = 0;
+        c.reviveBlocked = false;
         c.reviveT = 0;
         c.swimming = false;
         c.treeClimb = undefined;
@@ -6363,11 +6366,10 @@ function GameImpl({
     }
     /** a downed teammate that can still be helped up this round */
     function revivable(c: CombatantState) {
-      return c.hp <= 0 && c.stateDuration === 99 && (c.revived ?? 0) < 1 && !c.swimming;
+      return canRevive(c);
     }
     /**
-     * Team fights: stand over a downed teammate and hold F for a few seconds to help them up with 30% HP (once
-     * each per round). Getting hit, moving off or starting an attack stops it, and the progress drains away.
+     * Team fights: stand over a downed teammate and hold F for a few seconds to help them up with 30% HP, without a per-round limit. Getting hit, moving off or starting an attack stops it, and the progress drains away.
      */
     function updateRevive(its: Intent[]) {
       for (const c of fighters) c.reviveHint = '';
@@ -6558,7 +6560,7 @@ function GameImpl({
       if (map.id === 'rooftop' && fighters.some(isBossFighter)) {
         // 皇上出征: only the seal decides it. Cutting the other side down doesn't win; everyone down is a draw.
         if (isBossFighter(def)) {
-          def.revived = 9;
+          def.reviveBlocked = true;
           dropSeal(def.pos[0], def.pos[2], def.pos[1]);
           gameAudio.playBoom();
           onRoundEvent?.({ type: 'screenFlash', color: 'rgba(255,215,120,0.4)' });
@@ -6566,7 +6568,7 @@ function GameImpl({
           return;
         }
         if ((def.side ?? 0) === 2) {
-          def.revived = 9;
+          def.reviveBlocked = true;
           if (def.classId === 'Guard') vfx.damageNumber(vA.set(def.pos[0], def.pos[1] + 2.2, def.pos[2]), '护驾不力', false, '#fca5a5');
           return;
         }
@@ -6578,13 +6580,13 @@ function GameImpl({
           onRoundEvent?.({ type: 'draw', reason: '两边都倒下了' });
           return;
         }
-        onRoundEvent?.({ type: 'toast', text: defSlot === ME ? (N > 3 && (def.revived ?? 0) < 1 ? '你倒下了 · 队友站到你身边按住 F 能把你扶起来' : '你倒下了') : `${def.tag || '有人'}倒下了${!up[0] || !up[1] ? ' · 但不抢到玉玺还不算赢' : ''}` });
+        onRoundEvent?.({ type: 'toast', text: defSlot === ME ? (N > 3 && !def.reviveBlocked ? '你倒下了 · 队友站到你身边按住 F 能把你扶起来' : '你倒下了') : `${def.tag || '有人'}倒下了${!up[0] || !up[1] ? ' · 但不抢到玉玺还不算赢' : ''}` });
         return;
       }
       // the round ends when one side has nobody left standing
       const standing = [0, 1].map((sd) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0));
       if (standing[0] && standing[1]) {
-        if (N > 2) onRoundEvent?.({ type: 'toast', text: defSlot === ME ? ((def.revived ?? 0) < 1 ? '你倒下了 · 队友站到你身边按住 F 能把你扶起来' : '你倒下了 · 观战队友') : `${def.tag || '有人'}倒下了` });
+        if (N > 2) onRoundEvent?.({ type: 'toast', text: defSlot === ME ? (!def.reviveBlocked ? '你倒下了 · 队友站到你身边按住 F 能把你扶起来' : '你倒下了 · 观战队友') : `${def.tag || '有人'}倒下了` });
         return;
       }
       round.over = true;
@@ -6788,7 +6790,7 @@ function GameImpl({
       }
       if (aiOn && !round.over && c.hp > 0) {
         c.hp = 0;
-        c.revived = 9; // gone over the edge: nobody can help you up from that
+        c.reviveBlocked = true; // gone over the edge: nobody can help you up from that
         const where = map.id === 'summit' ? '坠入云海' : map.id === 'plankway' ? '坠下悬崖' : map.id === 'coast' ? '坠入大海' : '坠入岩浆';
         onRoundEvent?.({ type: 'toast', text: i === ME ? `你${where}！` : `${fighters[i].tag || '对手'}${where}！` });
         koCheck(i, '#ff6a1a');

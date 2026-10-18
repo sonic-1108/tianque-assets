@@ -285,7 +285,8 @@ export interface CombatantState {
   intPrev?: boolean; // F was held last frame (pickups fire on the press)
   interactHint?: string; // what F would do right here (HUD)
   reviveT?: number; // team fights: seconds a teammate has spent helping this downed fighter up
-  revived?: number; // times this fighter was helped up this round (once per round)
+  revived?: number; // times helped up this round; no limit
+  reviveBlocked?: boolean; // unrecoverable environmental or objective death
   reviveHint?: string; // team fights: F prompt to help a downed teammate up (HUD)
   swimming?: boolean; // 青冥古林: floating in deep water
   ledgeBlocked?: number; // walking was stopped at a sheer drop (AI uses it to steer)

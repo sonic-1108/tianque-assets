@@ -1,3 +1,4 @@
+import { canRevive } from './revive';
 import { storySubscribe, storySnapshot } from './ibStory';
 import { StoryDialog } from './components/StoryDialog';
 import { adventure } from './adventure';
@@ -787,7 +788,7 @@ export default function App() {
       const p1 = p1RefState.current;
       const dummy = dummyRefState.current;
       const all = fightersRef.current;
-      if (all.length > 2) setRoster(all.map((c) => ({ name: c.tag || c.name, side: c.side ?? 0, hp: Math.max(0, c.hp), maxHp: c.maxHp, cls: c.classId, target: c === dummy, revive: (c.reviveT ?? 0) / 3, canRevive: c.hp <= 0 && (c.revived ?? 0) < 1 })));
+      if (all.length > 2) setRoster(all.map((c) => ({ name: c.tag || c.name, side: c.side ?? 0, hp: Math.max(0, c.hp), maxHp: c.maxHp, cls: c.classId, target: c === dummy, revive: (c.reviveT ?? 0) / 3, canRevive: canRevive(c) })));
       else setRoster((r) => (r.length ? [] : r));
       const zenHas = (owner: typeof p1, c: typeof p1) => !!owner.zenField && owner.zenField.t > 0 && Math.hypot(c.pos[0] - owner.zenField.x, c.pos[2] - owner.zenField.z) < 4.5;
       setHudMirror({
@@ -1157,7 +1158,7 @@ export default function App() {
           <div className="absolute left-1/2 -translate-x-1/2 top-24 z-30 pointer-events-none bg-black/70 border border-zinc-600/70 rounded-lg px-4 py-1.5 text-center">
             <div className="text-sm font-black text-zinc-100 tracking-widest">观战队友</div>
             <div className="text-[11px] text-zinc-400">
-              {roster[lineup.me]?.canRevive ? (roster[lineup.me].revive > 0 ? `队友正在扶你 ${Math.round(Math.min(1, roster[lineup.me].revive) * 100)}%` : '队友站到你身边按住 F 能把你扶起来') : '这回合已经被扶起过一次'}
+              {roster[lineup.me]?.canRevive ? (roster[lineup.me].revive > 0 ? `队友正在扶你 ${Math.round(Math.min(1, roster[lineup.me].revive) * 100)}%` : '队友站到你身边按住 F 能把你扶起来') : '当前无法扶起 · 等待重生或回合结束'}
             </div>
           </div>
         )}
