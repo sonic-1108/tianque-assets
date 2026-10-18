@@ -4,7 +4,7 @@ import { adventure } from '../adventure';
 export function AdventureHud({ lobby = false }: { lobby?: boolean }) {
   const state = useSyncExternalStore(adventure.subscribe, adventure.getSnapshot);
   useEffect(() => { adventure.read(); }, []);
-  return <section aria-label="冒险背包" style={lobby ? { padding: '10px 0' } : {
+  return <section aria-label="冒险背包" style={lobby ? { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 12px', minWidth: 0 } : {
     position: 'absolute', top: '28%', left: 12, maxWidth: 'min(300px, 78vw)',
     background: 'rgba(15,23,20,.9)', color: '#fef3c7', padding: 12, borderRadius: 10, pointerEvents: 'auto', zIndex: 20,
   }}>

@@ -81,11 +81,6 @@ export function Lobby(p: LobbyProps) {
       <style>{LOBBY_CSS}</style>
       <InkBackdrop />
       <div className="tq-l-wrap">
-        <section aria-label="采石场冒险" style={{ borderBottom: '1px solid #b99b60', paddingBottom: 10 }}>
-          {p.adventurePanel}
-          <button className="tq-btn" disabled={!p.onAdventure || p.loadPct !== undefined} onClick={p.onAdventure}>青岚采石场 · 单人寻材</button>
-          <small style={{ marginLeft: 10 }}>狂刃挑战一名守卫，拾取铁料 · 联机时不可进入</small>
-        </section>
         {/* ---- title and name ---- */}
         <header className="tq-l-head">
           <div className="tq-l-title">
@@ -123,6 +118,12 @@ export function Lobby(p: LobbyProps) {
           )}
           {showStats && <StatsPanel onClose={() => setShowStats(false)} />}
         </header>
+        <section aria-label="采石场冒险" className="tq-adventure-row">
+          <button className="tq-btn" disabled={!p.onAdventure || p.loadPct !== undefined} onClick={p.onAdventure}>青岚采石场 · 单人寻材</button>
+          {p.adventurePanel}
+          <small>挑战守卫，拾取铁料 · 仅限单人</small>
+        </section>
+
 
         {/* ---- the heroes ---- */}
         <section className="tq-l-heroes">
@@ -308,15 +309,19 @@ export function Lobby(p: LobbyProps) {
 const LOBBY_CSS = `
 .tq-lobby { --ink:#1f1c18; --ink2:#5a544a; --paper:#f4eee2; --red:#a8362a; --gold:#a8823c; color:var(--ink);
   font-family:"Noto Serif SC","Songti SC","STSong",serif; }
-.tq-l-wrap { position:relative; z-index:20; height:100%; display:flex; flex-direction:column; padding:3.2vh 4vw 3vh; gap:2vh; overflow-y:auto; }
-.tq-l-head { position:relative; display:flex; align-items:flex-start; justify-content:space-between; }
+.tq-l-wrap { position:relative; z-index:20; height:100%; display:flex; flex-direction:column; padding:3.2vh 4vw 3vh; gap:2vh; overflow-y:auto; overflow-x:hidden; }
+.tq-l-wrap > * { flex-shrink:0; min-width:0; }
+.tq-adventure-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px 20px; padding:10px 14px; border:1px solid rgba(31,28,24,.16); border-radius:10px; background:rgba(244,238,226,.65); }
+.tq-adventure-row small { color:var(--ink2); font-size:12px; }
+.tq-adventure-row .tq-btn { letter-spacing:.08em; }
+.tq-l-head { position:relative; display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; }
 .tq-l-title { display:flex; align-items:flex-end; gap:14px; }
 .tq-l-title h1 { margin:0; font-family:"Ma Shan Zheng","STXingkai","KaiTi",serif; font-weight:400; font-size:clamp(56px,7.5vw,108px); line-height:.9; letter-spacing:.05em; color:var(--ink); text-shadow:0 2px 0 rgba(255,255,255,.4); }
 .tq-seal { align-self:flex-start; margin-top:.5em; width:26px; text-align:center; font-family:"Ma Shan Zheng",serif; font-size:15px; line-height:1.15; color:#f6efe2; background:var(--red); padding:5px 0; border-radius:3px; box-shadow:inset 0 0 0 1.5px rgba(255,240,220,.35); }
 .tq-l-name { margin-left:10px; margin-bottom:10px; background:none; border:none; border-bottom:1px solid rgba(31,28,24,.25); color:var(--ink); font:600 15px "Noto Serif SC",serif; cursor:pointer; padding:2px 2px 4px; }
 .tq-l-name span { color:var(--ink2); font-weight:400; font-size:12px; margin-right:6px; letter-spacing:.2em; }
 .tq-l-name i { font-style:normal; color:var(--ink2); font-size:12px; margin-left:4px; }
-.tq-l-tools { display:flex; align-items:center; gap:12px; }
+.tq-l-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; max-width:100%; }
 .tq-chip { background:rgba(244,238,226,.6); backdrop-filter:blur(6px); border:1px solid rgba(31,28,24,.22); border-radius:999px; padding:7px 18px; font:600 14px "Noto Serif SC",serif; letter-spacing:.3em; color:var(--ink); cursor:pointer; transition:all .2s; }
 .tq-chip:hover, .tq-chip.on { border-color:var(--red); color:var(--red); }
 .tq-chip em { font-style:normal; letter-spacing:0; margin-left:8px; font-size:12px; color:#2f7a4e; }
@@ -325,7 +330,7 @@ const LOBBY_CSS = `
 .tq-pop-h { font-weight:900; letter-spacing:.3em; font-size:14px; margin-bottom:12px; }
 .tq-pop-x { position:absolute; right:10px; top:6px; background:none; border:none; font-size:22px; color:var(--ink2); cursor:pointer; }
 
-.tq-l-heroes { flex:1; min-height:0; display:grid; grid-template-columns:auto 1fr; grid-template-rows:1fr auto; column-gap:2.4vw; row-gap:1.6vh; align-items:end; }
+.tq-l-heroes { flex:1 0 auto; min-height:auto; padding-top:12px; display:grid; grid-template-columns:auto 1fr; grid-template-rows:1fr auto; column-gap:2.4vw; row-gap:1.6vh; align-items:end; }
 .tq-l-label { grid-row:1 / span 2; align-self:center; font-family:"Ma Shan Zheng",serif; font-size:30px; line-height:1.15; color:var(--ink2); }
 .tq-heroes { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0, 178px); gap:1vw; align-items:end; }
 .tq-hero { --acc:#a3402b; position:relative; text-align:left; cursor:pointer; padding:0 0 14px; border-radius:14px;
@@ -354,7 +359,7 @@ const LOBBY_CSS = `
 .tq-foe-l { font-size:12px; letter-spacing:.4em; color:var(--ink2); margin-right:4px; }
 .tq-foe-note { font-size:13px; color:var(--ink2); }
 .tq-vs { font:400 22px "Ma Shan Zheng",serif; color:var(--ink2); margin:0 2px; }
-.tq-side { display:flex; gap:6px; padding:4px; border-radius:12px; }
+.tq-side { display:flex; flex-wrap:wrap; max-width:100%; gap:6px; padding:4px; border-radius:12px; }
 .tq-side.s0 { background:rgba(163,64,43,.08); }
 .tq-side.s1 { background:rgba(44,74,110,.08); }
 .tq-seat { display:flex; align-items:center; gap:6px; min-width:118px; height:46px; padding:3px 8px 3px 3px; border-radius:999px; border:1px solid rgba(31,28,24,.18); background:rgba(246,241,231,.7); position:relative; }
@@ -379,7 +384,7 @@ const LOBBY_CSS = `
 .tq-lvl button.hell.on { background:#7a1712; }
 .tq-lvl button.hard.on { background:#a8362a; }
 
-.tq-l-maps { display:grid; grid-template-columns:minmax(220px,300px) 1fr auto; gap:1.8vw; align-items:end; }
+.tq-l-maps { flex:none; min-width:0; display:grid; grid-template-columns:minmax(220px,300px) 1fr auto; gap:1.8vw; align-items:end; }
 .tq-map-info { position:relative; padding-bottom:4px; }
 .tq-map-title { font-family:"Ma Shan Zheng",serif; font-size:clamp(30px,3vw,42px); line-height:1; display:flex; align-items:baseline; gap:10px; }
 .tq-map-size { font-family:"Noto Serif SC",serif; font-size:11px; letter-spacing:.1em; border:1px solid rgba(31,28,24,.3); padding:1px 6px; border-radius:3px; color:var(--ink2); }
@@ -443,6 +448,13 @@ const LOBBY_CSS = `
 }
 @media (max-width: 560px) {
   .tq-heroes { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .tq-l-title { flex-wrap:wrap; }
+  .tq-l-title h1 { font-size:64px; }
+  .tq-chip { padding:6px 10px; letter-spacing:.1em; }
+  .tq-maps { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .tq-seg { margin-left:0; flex-wrap:wrap; }
+  .tq-adventure-row { gap:8px; }
+
 }
 `;
 
