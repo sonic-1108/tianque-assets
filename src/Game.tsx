@@ -1,3 +1,4 @@
+import { openStory, tradeBriefed } from './ibStory';
 import { adventure } from './adventure';
 import { AdventureDrop } from './components/AdventureDrop';
 import { shipSteer, newNavState, shipGraph } from './shipNav';
@@ -5777,6 +5778,11 @@ function GameImpl({
       const desk = FIRM_SPOTS.findIndex((S) => near(S.trade, 1.5));
       const taskDesk = task?.kind === 'trade' && desk === task.firm;
       if (desk >= 0 && (taskDesk || ib.step > 4)) {
+        if (taskDesk && !tradeBriefed()) {
+          c.interactHint = '按 F 与周衡讨论交易计划';
+          if (pressed) openStory(() => say('交易计划已确认 · 按 F 买入'));
+          return;
+        }
         const px = marketPx(3, marketT(), 116);
         if (!ib.entry) {
           c.interactHint = `按 F 买入 MSFT @ ${px.toFixed(2)} · 盯着墙上的行情，涨了再卖${taskDesk ? ` · 任务要赚 ${((task!.pct ?? 0.02) * 100).toFixed(1)}%` : ''}`;
@@ -5801,17 +5807,8 @@ function GameImpl({
         return;
       }
       if (!task || task.kind === 'trade' || !near(task.spot)) return;
-      if (task.kind === 'work') {
-        c.interactHint = `按 F ${task.verb || '坐下加班'} · 20 秒别动`;
-        if (pressed) {
-          c.ibWork = 20;
-          c.vel[0] = c.vel[2] = 0;
-          say('开始加班 · 别动，别挨打');
-        }
-        return;
-      }
-      c.interactHint = `按 F ${task.verb}`;
-      if (pressed) finish();
+      c.interactHint = task.kind === 'work' ? '按 F 与林砚核对模型资料' : '按 F 与任务人物交谈';
+      if (pressed) openStory(() => finish());
     }
     /** 投行家: a task done: pay, promote, tell the player */
     function finish(extra = 0) {

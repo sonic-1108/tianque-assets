@@ -1,3 +1,4 @@
+import { sceneFor, storyRecord } from '../ibStory';
 import React, { useEffect, useState } from 'react';
 import { getIb, ibTitle, ibWhere, ibTask, ibNextTitle } from '../banker';
 import { firmAt, mapRuntime } from '../maps';
@@ -42,12 +43,14 @@ export function QuestHud() {
       {t && (
         <>
           <div className="mt-0.5 leading-snug">{t.task}</div>
+          <div className="text-amber-200 mt-1">对接人：{sceneFor(t, ib.step, D?.i).npc} · 靠近按 F 交谈</div>
           <div className="mt-0.5 text-[11px] text-sky-200/80">
             📍 {where}
             {dist > 3 ? ` · ${dist} 米` : ''}
           </div>
         </>
       )}
+      {storyRecord().last && <div className="text-[11px] mt-2 text-slate-300">客户信任 {storyRecord().trust} · {storyRecord().last}</div>}
       {ib.entry > 0 && <div className="text-[11px] text-emerald-300">持仓 MSFT @ {ib.entry.toFixed(2)}</div>}
       {ib.step >= 6 && <div className="text-[10px] text-sky-200/60 mt-0.5">已成交 {ib.deals} 单{nt ? ` · 再成 ${nt[1]} 单升 ${nt[0]}` : ''} · 四栋楼 40 层的交易台都能自己做单</div>}
     </div>

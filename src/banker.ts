@@ -33,7 +33,7 @@ export const IB_STEPS: IbStep[] = [
   { spot: 'reception', firm: 0, level: 0, task: '第一天上班：去 Goldman Sachs 大堂前台报到', done: '报到成功，领到工牌。欢迎加入，Summer Analyst', pay: 500 },
   { spot: 'printer', firm: 0, level: 2, task: '坐电梯上 GS 80 层投行部，去打印机拿刚印好的 pitchbook', done: 'pitchbook 拿到了，还是热的', pay: 0 },
   { spot: 'client', firm: -1, level: 0, task: '客户在湖边等着：把 pitchbook 送到他手里（湖东边的小路上）', done: '客户翻完 pitchbook 很满意。转正了：Analyst', pay: 2000 },
-  { spot: 'desk', firm: 0, level: 2, task: '回 GS 80 层你的工位熬夜改模型：按 F 坐下，20 秒别动，挨打就得重来', done: '模型改完，MD 说 "looks good"。升职：Associate', pay: 5000 },
+  { spot: 'desk', firm: 0, level: 2, task: '回 GS 80 层工位，与林砚核对收入和成本，修正模型', done: '模型改完，MD 说 "looks good"。升职：Associate', pay: 5000 },
   { spot: 'trade', firm: 2, level: 1, task: '去 Citadel 40 层交易台：按 F 买入，看墙上行情涨了再按 F 卖出，一笔赚到 2% 才算过', done: '漂亮的一笔。升职：VP', pay: 0 },
   { spot: 'board', firm: 1, level: 2, task: '收购谈下来了：去 Morgan Stanley 80 层董事会议室签 term sheet', done: '交易完成！升职：Managing Director', pay: 50000, watch: 'patek' },
 ];
@@ -112,7 +112,7 @@ function makeDeal(n: number): Deal {
   return {
     name: `熬夜赶 deck：${tgt}`,
     steps: [
-      { spot: FIRM_SPOTS[f].desk, firm: f, level: 2, task: `明早要见${tgt}：去 ${firmName(f)} 80 层工位熬夜改 deck（20 秒别动）`, verb: '坐下改 deck', kind: 'work' },
+      { spot: FIRM_SPOTS[f].desk, firm: f, level: 2, task: `明早要见${tgt}：去 ${firmName(f)} 80 层工位，与林砚核对 deck 数据`, verb: '坐下改 deck', kind: 'work' },
       { spot: FIRM_SPOTS[f].printer, firm: f, level: 2, task: `改完了：去 ${firmName(f)} 80 层打印机拿 deck`, verb: '拿 deck', kind: 'go' },
       clientTask(`把 deck 送到{at}，${tgt}的人在那等`, '交 deck'),
     ],
@@ -173,7 +173,7 @@ export function ibSet(p: Partial<IbState>) {
 function ensureDeal() {
   if (state.step < IB_STEPS.length || state.deal) return;
   state.deal = makeDeal(state.deals);
-  if (state.deal.deadline !== undefined) state.deal.deadline = Date.now() + 150000;
+  if (state.deal.deadline !== undefined) state.deal.deadline = Date.now() + 300000;
   save();
 }
 /** what to do now, or null */
@@ -221,6 +221,10 @@ export function ibDone(extra = 0): Done {
     next: t && state.deal ? `新的生意：${state.deal.name} · ${t.task}` : undefined,
     big: true,
   };
+}
+/** Dialogue reading time is excluded from the roadshow deadline, including after reload. */
+export function ibDelayDeadline(ms: number) {
+  if (state.deal?.deadline) { state.deal.deadline += Math.max(0, ms); save(); }
 }
 /** an IPO roadshow out of time: the deal falls through, a new one comes */
 export function ibExpire(): string | null {

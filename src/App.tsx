@@ -1,3 +1,5 @@
+import { storySubscribe, storySnapshot } from './ibStory';
+import { StoryDialog } from './components/StoryDialog';
 import { adventure } from './adventure';
 import { AdventureHud } from './components/AdventureHud';
 import * as MapsAll from './maps';
@@ -181,6 +183,7 @@ const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Bers
 const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Trader'];
 
 export default function App() {
+  const storyDialog = React.useSyncExternalStore(storySubscribe, storySnapshot);
   const settings = useSettings();
   const { sdk } = usePlayground();
   const isMobile = useIsMobile();
@@ -541,7 +544,7 @@ export default function App() {
   }, []);
 
   const inputRef = useGameInput({
-    enabled: gameState.status === 'PLAYING',
+    enabled: gameState.status === 'PLAYING' && !storyDialog,
     onToggleDebug: handleToggleDebug,
     onToggleHelp: handleToggleHelp,
     onEscape: handleEscape,
@@ -1098,7 +1101,7 @@ export default function App() {
           >
             <Game
               key={adventureMode ? `adventure-${adventureRun}` : "competitive"}
-              gameState={gameState}
+              gameState={storyDialog ? { ...gameState, status: 'PAUSED' } : gameState}
               setGameState={setGameState}
               inputRef={inputRef}
               p1RefState={p1RefState}
@@ -1161,6 +1164,7 @@ export default function App() {
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {!adventureMode && mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
         {adventureMode && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <AdventureHud />}
+        {storyDialog && <StoryDialog />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <LootHud />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <QuestHud />}
         {(mapId === 'forest' || mapId === 'desert' || mapId === 'wending' || mapId === 'losangeles') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}

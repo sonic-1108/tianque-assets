@@ -937,7 +937,7 @@ function ClientNpc() {
   const key = useRef('');
   useFrame(() => {
     const t = ibTask();
-    const p = t?.client ? t.spot : null;
+    const p = t ? t.spot : null;
     const k = p ? p.join(',') : '';
     if (k !== key.current) {
       key.current = k;
