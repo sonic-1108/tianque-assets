@@ -1,3 +1,4 @@
+import { CloudSavePanel } from '../CloudSavePanel';
 import React, { useEffect, useState } from 'react';
 import { CLASS_CONFIGS } from '../CombatData';
 import { MAPS } from '../../maps';
@@ -88,11 +89,12 @@ export function StatsPanel({ onClose }: { onClose: () => void }) {
         {!STATS_API && <div className="tq-st-note">这个版本没有连上战绩服务器。</div>}
         {err && <div className="tq-st-note">出错了：{err}</div>}
 
+        {acct && tab === 'me' && <CloudSavePanel />}
         {tab === 'me' && (
           <>
             {!acct && (
               <div className="tq-st-note">
-                打完一局（会还手模式或联机）就会自动建档，开始记录战绩和英雄熟练度。
+                进入游戏后会尝试自动建档；服务暂不可用时仍保留本机进度。
                 <br />
                 已经在别的设备上玩过？输入恢复码登录：
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -172,7 +174,8 @@ export function StatsPanel({ onClose }: { onClose: () => void }) {
                   </tbody>
                 </table>
                 <div className="tq-st-note">
-                  恢复码（换设备时输入它就能找回战绩，别给别人）：
+                  玩家 ID：{acct.id}<br />
+                  恢复码（换设备时找回账号和云存档，别给别人）：
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
                     <span className="tq-st-code">{acct.code}</span>
                     <button className="tq-st-btn ghost" onClick={() => navigator.clipboard?.writeText(acct.code)}>

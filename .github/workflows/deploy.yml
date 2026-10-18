@@ -12,7 +12,15 @@ permissions:
   id-token: write
 concurrency: { group: pages, cancel-in-progress: true }
 jobs:
+  account-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node --test tools/tests/profiles.test.mjs tools/tests/cloud-save.test.cjs
   build:
+    needs: account-tests
     runs-on: ubuntu-latest
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -31,6 +39,7 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_SEED: ${{ secrets.ADMIN_SEED }}
         run: |
           api=https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain
           resp=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" $api)
@@ -49,6 +58,8 @@ jobs:
           echo "::notice::token check: $(echo "$v" | jq -c '{success, status: .result.status, errors}' | cut -c1-200) · token length ${#CLOUDFLARE_API_TOKEN}"
           # the account's workers.dev subdomain, as set in the dashboard (not a secret)
           [ -z "$sub" ] && sub=msjzxy2022
+          # Server-side admin authentication uses only derived hashes, never the seed.
+          node --input-type=module -e 'import {hashTable,ITER} from "./tools/admin-codes.mjs"; import {writeFileSync} from "node:fs"; writeFileSync("relay/src/admin-hashes.js", "export default " + JSON.stringify({iter:ITER,days:process.env.ADMIN_SEED ? hashTable(process.env.ADMIN_SEED) : {}}) + ";\n");'
           cd relay
           # 战绩 database: Cloudflare D1 (created the first time); needs the token's D1 permission. Without it the
           # stats fall back to a Durable Object's SQLite, so the deploy goes on either way.

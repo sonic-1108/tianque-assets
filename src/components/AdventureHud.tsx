@@ -14,7 +14,7 @@ export function AdventureHud({ lobby = false }: { lobby?: boolean }) {
         : state.drop ? '找到金色材料标记，靠近 2.5 米内自动拾取。'
         : '采石场寻材：沿石径击败试炼守卫，收集一份铁料。'}
     </p>}
-    <small>仅保存在当前浏览器 · 武器制作尚未开放</small>
+    <small>本机保存 · 云备份状态见战绩 · 武器制作尚未开放</small>
     {state.error && <div role="alert"><p>{state.error}</p><button onClick={() => adventure.read()}>重试读取存档</button></div>}
   </section>;
 }

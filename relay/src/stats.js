@@ -1,3 +1,5 @@
+import { verifyAdmin } from './admin-auth.js';
+import { validSnapshot, summarize } from './profile.js';
 // 天阙 战绩 / 排行榜 / 账号: a small JSON API on the relay worker (/api/...).
 //
 // Storage: Cloudflare D1 (a distributed SQL database) when the deploy could bind it (env.DB), otherwise the
@@ -6,10 +8,12 @@
 // Accounts have no password. Registering returns a recovery code (shown to the player); the server keeps only
 // its SHA-256. The code proves who you are when reporting a result, and logs you in on another device.
 
-const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, x-tq-admin', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...CORS, 'content-type': 'application/json; charset=utf-8' } });
 
-const SCHEMA = [
+export const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS saves (player TEXT PRIMARY KEY, revision INTEGER NOT NULL, updated INTEGER NOT NULL, data TEXT NOT NULL, nonce TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS activity (player TEXT PRIMARY KEY, seen INTEGER NOT NULL, seconds INTEGER NOT NULL DEFAULT 0, page TEXT NOT NULL, map TEXT NOT NULL, hero TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS players (id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last INTEGER NOT NULL, xp INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS mastery (player TEXT NOT NULL, hero TEXT NOT NULL, games INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, xp INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (player, hero))`,
   `CREATE TABLE IF NOT EXISTS matches (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, player TEXT NOT NULL, hero TEXT NOT NULL, foe TEXT NOT NULL, map TEXT NOT NULL, mode TEXT NOT NULL, result INTEGER NOT NULL, dur INTEGER NOT NULL, dmg INTEGER NOT NULL)`,
@@ -36,16 +40,62 @@ const normCode = (c) => String(c ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
 const level = (xp) => Math.floor(Math.sqrt(Math.max(0, xp) / 40)) + 1;
 
 /** the API itself, over a store with all(sql, ...args) -> rows and run(sql, ...args) */
-export async function handle(req, q) {
+export async function handle(req, q, adminCheck = verifyAdmin) {
+  if (req.method === 'POST' && Number(req.headers.get('content-length') || 0) > 100000) return json({error: 'request too large'}, 413);
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/api/, '');
-  const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+  const raw = req.method === 'POST' ? await req.text() : '';
+  if (raw.length > 100000) return json({ error: 'request too large' }, 413);
+  let body = {};
+  try { body = raw ? JSON.parse(raw) : {}; } catch { return json({ error: 'invalid JSON' }, 400); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'invalid body' }, 400);
   const now = Date.now();
   const auth = async (id, code) => {
     const rows = await q.all('SELECT * FROM players WHERE id = ? AND key_hash = ?', String(id ?? ''), await sha(normCode(code)));
     return rows[0] || null;
   };
 
+  if (path.startsWith('/admin/')) {
+    if (!(await adminCheck(req.headers.get('x-tq-admin')))) return json({ error: '后台口令无效或尚未配置' }, 403);
+    if (path === '/admin/players') {
+      const offset = Math.max(0, Math.min(1000000, Number(url.searchParams.get('offset')) || 0));
+      const search = String(url.searchParams.get('search') || '').slice(0, 64);
+      const rows = await q.all(`SELECT p.id, p.name, p.created, p.last, p.xp, p.wins, p.losses, p.draws, a.seen, a.seconds, a.page, a.map, a.hero, s.updated, s.data FROM players p LEFT JOIN activity a ON a.player=p.id LEFT JOIN saves s ON s.player=p.id WHERE p.name LIKE ? OR p.id = ? ORDER BY COALESCE(a.seen,p.last) DESC, p.id LIMIT 51 OFFSET ?`, '%' + search + '%', search, offset);
+      return json({ players: rows.slice(0, 50).map(({ data, ...p }) => ({ ...p, online: now - (p.seen || 0) < 45000, progress: summarize(data) })), more: rows.length > 50 });
+    }
+    if (path === '/admin/player') {
+      const id = String(url.searchParams.get('id') || '');
+      const rows = await q.all('SELECT id, name, created, last, xp, wins, losses, draws FROM players WHERE id = ?', id);
+      if (!rows[0]) return json({ error: 'not found' }, 404);
+      const activity = (await q.all('SELECT seen, seconds, page, map, hero FROM activity WHERE player = ?', id))[0] || null;
+      const save = (await q.all('SELECT updated, revision, data FROM saves WHERE player = ?', id))[0];
+      const matches = await q.all('SELECT ts, hero, foe, map, mode, result, dur FROM matches WHERE player = ? ORDER BY ts DESC LIMIT 50', id);
+      return json({ player: rows[0], activity, progress: summarize(save?.data), savedAt: save?.updated || null, revision: save?.revision || 0, matches });
+    }
+    return json({ error: 'not found' }, 404);
+  }
+  if (path === '/heartbeat' && req.method === 'POST') {
+    const p = await auth(body.id, body.code);
+    if (!p) return json({ error: 'unauthorized' }, 401);
+    const active = body.active === true && body.page === 'game' ? 1 : 0;
+    await q.run(`INSERT INTO activity (player,seen,seconds,page,map,hero,active) VALUES (?,?,0,?,?,?,?) ON CONFLICT(player) DO UPDATE SET seconds=activity.seconds + CASE WHEN activity.active=1 AND excluded.seen-activity.seen BETWEEN 0 AND 45000 THEN CAST((excluded.seen-activity.seen)/1000 AS INTEGER) ELSE 0 END, seen=excluded.seen,page=excluded.page,map=excluded.map,hero=excluded.hero,active=excluded.active`, p.id, now, body.page === 'game' ? 'game' : 'lobby', String(body.map || '').slice(0,64), String(body.hero || '').slice(0,32), active);
+    return json({ ok: true });
+  }
+  if (path === '/save' && req.method === 'POST') {
+    const p = await auth(body.id, body.code);
+    if (!p) return json({ error: 'unauthorized' }, 401);
+    if (body.action === 'read') {
+      const saved = (await q.all('SELECT revision, updated, data FROM saves WHERE player = ?', p.id))[0];
+      return json(saved ? { ...saved, data: JSON.parse(saved.data) } : { revision: 0, updated: null, data: null });
+    }
+    if (!validSnapshot(body.data) || !Number.isSafeInteger(body.revision) || body.revision < 0) return json({ error: '存档格式不正确' }, 400);
+    const nonce = crypto.randomUUID();
+    // One conditional statement: two devices cannot both overwrite the same revision.
+    await q.run(`INSERT INTO saves (player,revision,updated,data,nonce) SELECT ?,1,?,?,? WHERE ?=0 OR EXISTS(SELECT 1 FROM saves WHERE player=?) ON CONFLICT(player) DO UPDATE SET revision=saves.revision+1,updated=excluded.updated,data=excluded.data,nonce=excluded.nonce WHERE saves.revision=?`, p.id, now, JSON.stringify(body.data), nonce, body.revision, p.id, body.revision);
+    const saved = (await q.all('SELECT revision, updated, nonce FROM saves WHERE player = ?', p.id))[0];
+    if (saved?.nonce !== nonce) return json({ error: '另一台设备已更新存档，请选择要保留的版本', conflict: true }, 409);
+    return json({ revision: saved.revision, updated: saved.updated });
+  }
   if (path === '/register' && req.method === 'POST') {
     const code = newCode();
     const id = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');

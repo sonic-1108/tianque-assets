@@ -1,3 +1,5 @@
+import { startProfiles } from './adminProfiles';
+let profileCode = '';
 // 天阙 admin: everyone with the game open right now, from the presence heartbeats (see presence.ts)
 import { PRESENCE_TOPIC, PRESENCE_BROKERS, PRESENCE_HTTP, BEAT_MS, PresenceState } from './presence';
 
@@ -114,6 +116,7 @@ function pollRelay() {
 
 async function start() {
   showPage();
+  startProfiles(profileCode);
   pollRelay();
   const mqtt = (await import('mqtt')).default;
   for (const b of PRESENCE_BROKERS) {
@@ -185,6 +188,7 @@ function lockScreen() {
         } catch {
           /* private window: ask again next time */
         }
+        profileCode = input.value;
         start();
         return;
       }
@@ -200,7 +204,7 @@ function lockScreen() {
   // the code entered earlier today (or late last night) is re-checked, not trusted blindly
   try {
     const saved = JSON.parse(localStorage.getItem('tq_admin_ok') || 'null');
-    if (saved && (saved.date === chicagoDate(0) || saved.date === chicagoDate(-1)) && __ADMIN__.days[saved.date] && (await hashFor(saved.code, saved.date, __ADMIN__.iter)) === __ADMIN__.days[saved.date]) return start();
+    if (saved && (saved.date === chicagoDate(0) || saved.date === chicagoDate(-1)) && __ADMIN__.days[saved.date] && (await hashFor(saved.code, saved.date, __ADMIN__.iter)) === __ADMIN__.days[saved.date]) { profileCode = saved.code; return start(); }
   } catch {
     /* no storage or junk in it */
   }

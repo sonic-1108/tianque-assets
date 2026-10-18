@@ -16,3 +16,12 @@
 验证：`npx tsc --noEmit -p .`、`npm run build`。
 存档测试：`npx tsc --ignoreConfig src/adventure.ts --target ES2022 --module ESNext --outDir .adventure-test --skipLibCheck`，然后 `node --test tools/tests/adventure.test.mjs`。
 镜头测试：Node 22.13+ 执行 `node --test tools/tests/camera-input.test.cjs`。
+
+### 账号档案与云存档
+
+- 玩家资料与进度存入 Cloudflare 的 D1 / Durable Object SQLite，不提交 GitHub。登录恢复码对应固定玩家 ID；旧版公开在线列表仍仅使用会话 ID，账号身份通过带凭据的 `/api/heartbeat` 发送。
+- `战绩 → 我的战绩` 中查看云存档状态，每 20 秒备份钱包、手表、铁料、洛城职位及任务。换设备或换账号发现不同版本时暂停同步，由玩家选择保留本机或读取云端；读取会刷新游戏，原本机进度可通过“恢复本机备份”找回。
+- 更新以前的游玩时间无法补算。后台时间为心跳估算的可见游戏页面活跃时长，断线超过 45 秒不补算。客户端上报的进度不是反作弊依据。
+- `admin.html` 增加按昵称 / 账号 ID 搜索、分页和玩家详情。新增档案接口在服务端验证每日口令；未配置 `ADMIN_SEED` 时拒绝访问。部署流程只把派生哈希写入 Worker，不把种子写入代码。
+- 数据表只增加 `saves` 与 `activity`，保留已有账号、战绩。存档用版本号条件写入，拒绝跨设备陈旧版本覆盖；服务失败时保留本机进度。
+- 开发验证（Node 24）：`node --test tools/tests/profiles.test.mjs tools/tests/cloud-save.test.cjs`。包含 SQLite 接口、鉴权、存档版本冲突、换号隔离及旧存档兼容测试。

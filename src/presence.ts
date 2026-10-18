@@ -1,3 +1,4 @@
+import { getAccount, STATS_API } from './stats';
 // Who is playing right now. Every open game posts a small heartbeat (nickname, what screen it's on,
 // map, class, match type) to a public MQTT topic every few seconds; admin.html listens and lists them.
 // Nothing else is sent: no IP, no location, no input.
@@ -73,6 +74,13 @@ function send() {
   state.t = Date.now();
   const msg = JSON.stringify(state);
   post(msg);
+  const account = getAccount();
+  // Stable account identity is sent only to the authenticated private profile endpoint, never public MQTT.
+  if (account && STATS_API) fetch(STATS_API + '/heartbeat', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: account.id, code: account.code, page: state.page, map: state.map, hero: state.cls, active: document.visibilityState === 'visible' }),
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => {});
   for (const c of clients) if (c.connected) c.publish(PRESENCE_TOPIC + sid, msg, { qos: 0, retain: true });
 }
 

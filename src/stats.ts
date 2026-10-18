@@ -53,6 +53,8 @@ export async function ensureAccount(name: string): Promise<Account> {
   const a = getAccount();
   if (a) return a;
   making ??= call<Account>('/register', { name }).then((n) => {
+    const current = getAccount();
+    if (current) return current; // A recovery-code login may have finished during registration.
     saveAccount(n);
     return n;
   });

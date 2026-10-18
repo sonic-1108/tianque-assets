@@ -1,3 +1,4 @@
+import { startCloud } from './cloudSave';
 import { canRevive } from './revive';
 import { storySubscribe, storySnapshot } from './ibStory';
 import { StoryDialog } from './components/StoryDialog';
@@ -662,6 +663,8 @@ export default function App() {
     lockedEnemyId: null,
     friendlyTargetId: null,
   });
+
+  useEffect(() => { if (nickname) startCloud(nickname); }, [nickname]);
 
   // HUD sync states
   // who's playing: a heartbeat for admin.html (nickname, screen, map, class, match type)
