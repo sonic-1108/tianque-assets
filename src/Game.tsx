@@ -1,3 +1,4 @@
+import { shouldTraderTakeoff, traderFlightDirection } from '../shared/trader-ai.js';
 import { materialReaction, RECIPES } from '../shared/materials.js';
 import { materialById } from './materials';
 import { canRevive } from './revive';
@@ -9546,6 +9547,20 @@ function GameImpl({
         ai.requestTtl = 0.35;
       };
 
+      if (me.classId === 'Trader' && (me.glide ?? 0) > 0 && !me.isGrounded) {
+        ai.request = null; // Skill 3 again folds the vest, so never carry a queued request into flight.
+        out.request = null;
+        out.block = false;
+        const [mx,mz] = traderFlightDirection(dx,dz,ai.strafe);
+        out.move.set(mx,0,mz);
+        if (danger(me.pos[0]+mx*7,me.pos[2]+mz*7,0)) {
+          const safe=safeSpot(me.pos[0],me.pos[2]);
+          out.move.set(safe[0]-me.pos[0],0,safe[1]-me.pos[2]);
+          if(out.move.lengthSq()>.01)out.move.normalize();
+        }
+        out.faceYaw=Math.atan2(-out.move.x,-out.move.z);
+        return;
+      }
       if (aiBreakout(me, ai, dt2)) {
         out.request = ai.request;
         return;
@@ -9653,9 +9668,10 @@ function GameImpl({
         // 交易员: Rolex from range, cash at their feet, short them, glide in or out, crash the market when it'll land
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
-        if (foeAttacking && dist < 3.4 && r < 0.4) {
-          if (ready('skill3') && me.mp >= 20 && me.hp < me.maxHp * 0.5) ask('skill3');
-          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
+        if (shouldTraderTakeoff({grounded:me.isGrounded,glide:me.glide,cooldown:me.cooldowns.skill3,mp:me.mp,hp:me.hp,maxHp:me.maxHp,distance:dist,threat:foeAttacking})) {
+          ai.plan='retreat';ai.planTimer=.6;ask('skill3');
+        } else if (foeAttacking && dist < 3.4 && r < 0.4) {
+          if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
             ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
             ask('dodge');
           } else {
@@ -9666,7 +9682,6 @@ function GameImpl({
         else if (ready('skill4') && me.mp >= 20 && dist < 12 && !(foe.shortT ?? 0) && r < 0.3) ask('skill4');
         else if (ready('skill1') && me.mp >= 15 && dist > 3 && dist < 18 && r < 0.45) ask('skill1');
         else if (ready('skill2') && me.mp >= 20 && dist < 4.5 && r < 0.35) ask('skill2');
-        else if (ready('skill3') && me.mp >= 20 && dist < 6 && me.hp < me.maxHp * 0.35 && r < 0.5) ask('skill3');
         else if (dist > 2.4) {
           ai.plan = r < 0.8 ? 'approach' : 'circle';
           ai.planTimer = 0.5 + Math.random() * 0.4;

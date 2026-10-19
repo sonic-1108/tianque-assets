@@ -1,0 +1,6 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {shouldTraderTakeoff as fly,traderFlightDirection as direction} from '../../shared/trader-ai.js';
+const base={grounded:true,glide:0,cooldown:0,mp:50,hp:100,maxHp:100,distance:8,threat:false};
+test('Trader proactively heals, escapes pressure, or closes a distant gap',()=>{assert.equal(fly({...base,hp:79}),true);assert.equal(fly({...base,threat:true,distance:3}),true);assert.equal(fly({...base,distance:20}),true);assert.equal(fly(base),false)});
+test('takeoff respects resource, life, ground and cooldown; never folds an active glider',()=>{for(const patch of [{mp:19},{hp:0},{grounded:false},{cooldown:1},{glide:7}])assert.equal(fly({...base,hp:50,...patch}),false);assert.equal(fly({...base,hp:50,mp:20}),true)});
+test('flight withdraws close, circles medium and approaches distant opponents',()=>{assert.ok(direction(0,3)[1]<0);assert.equal(direction(0,10)[1],0);assert.ok(direction(0,20)[1]>0);for(const d of [0,3,10,20])assert.ok(Math.abs(Math.hypot(...direction(0,d))-1)<1e-10);assert.ok(direction(0,10,-1)[0]>0)});
