@@ -1,3 +1,4 @@
+import { parseMaterialSave } from '../../shared/materials.js';
 export const SAVE_KEYS = ['tq_wallet', 'tq_ib', 'tq_adventure_v1', 'tq_ib_story'];
 export function validSnapshot(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data) || JSON.stringify(data).length > 64000) return false;
@@ -10,7 +11,7 @@ export function validSnapshot(data) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const nonneg = n => Number.isSafeInteger(n) && n >= 0;
     if (key === 'tq_wallet' && (!nonneg(value.cash) || !value.watches || typeof value.watches !== 'object' || Object.values(value.watches).some(n => !nonneg(n)))) return false;
-    if (key === 'tq_adventure_v1' && (value.version !== 1 || !nonneg(value.iron))) return false;
+    if (key === 'tq_adventure_v1') { try { parseMaterialSave(raw); } catch { return false; } }
     if (key === 'tq_ib') {
       if (!nonneg(value.step) || value.step > 6 || !nonneg(value.deals)) return false;
       const d = value.deal;
@@ -24,5 +25,5 @@ export function summarize(raw) {
   let data; try { data = JSON.parse(raw || '{}'); } catch { data = {}; }
   const read = key => { try { return JSON.parse(data[key] || '{}'); } catch { return {}; } };
   const wallet = read('tq_wallet'), career = read('tq_ib'), adventure = read('tq_adventure_v1');
-  return { cash: wallet.cash || 0, watches: wallet.watches || {}, careerStep: career.step || 0, deals: career.deals || 0, quest: career.deal?.steps?.[career.deal.i]?.task || ['前台报到','核对打印材料','湖边会见客户','修正模型','交易考核','董事会签约'][career.step] || career.deal?.name || '', iron: adventure.iron || 0 };
+  return { cash: wallet.cash || 0, watches: wallet.watches || {}, careerStep: career.step || 0, deals: career.deals || 0, quest: career.deal?.steps?.[career.deal.i]?.task || ['前台报到','核对打印材料','湖边会见客户','修正模型','交易考核','董事会签约'][career.step] || career.deal?.name || '', iron: adventure.iron || 0, materials: adventure.materials || {}, equipped: adventure.equipped || null };
 }

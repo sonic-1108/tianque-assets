@@ -1,3 +1,5 @@
+import { materialReaction, RECIPES } from '../shared/materials.js';
+import { materialById } from './materials';
 import { canRevive } from './revive';
 import { openStory, tradeBriefed } from './ibStory';
 import { adventure } from './adventure';
@@ -410,6 +412,7 @@ function GameImpl({
   /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
   const desertAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
   const lightningRef = useRef({ timer: 5 });
+  const materialHits = useRef(0);
   const ridgeRef = useRef({ timer: 9, warn: 0 });
   const footLiftRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
   const visYRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -2806,6 +2809,7 @@ function GameImpl({
       // no hitting a grounded, knocked-down fighter (prevents infinite locks)
       if (def.actionState === 'knockdown' && def.isGrounded && !o.unblockable) return;
 
+      const materialCounter = (att.counterTimer ?? 0) > 0;
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
       let dmg = base * aiLevelDmg(att, def) * ((att.warT ?? 0) > 0 ? WAR.drum.dmg : 1) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.6 : 1.4) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
@@ -2909,6 +2913,19 @@ function GameImpl({
         return;
       }
 
+      if (map.id === 'quarry' && !net && slot === ME && !o.ranged && adventure.getSnapshot().active) {
+        const mod = adventure.getSnapshot().runMod;
+        const reaction = materialReaction(mod, ++materialHits.current, !!o.heavy, materialCounter);
+        dmg = Math.round(dmg * reaction.multiplier);
+        if (o.knock) o.knock *= reaction.knock;
+        if (reaction.heal) att.hp = Math.min(att.maxHp, att.hp + Math.round(att.maxHp * reaction.heal));
+        if (reaction.multiplier > 1 || reaction.heal) {
+          const recipe = RECIPES.find(r => r.id === mod)!;
+          vfx.sparkBurst(chest, 22, recipe.color, 5, .07, UP, .9);
+          vfx.ring(vA.set(def.pos[0], def.pos[1] + .2, def.pos[2]), 1.7, recipe.color, .4, .08, .3);
+          vfx.damageNumber(vA.set(att.pos[0], att.pos[1] + 2.5, att.pos[2]), recipe.name, true, recipe.color);
+        }
+      }
       def.hp = Math.max(0, def.hp - dmg);
       if (def.treeClimb !== undefined) {
         // knocked off the trunk
@@ -8006,7 +8023,7 @@ function GameImpl({
         updateShrines();
       }
       if (map.id === 'quarry' && adventure.getSnapshot().active && adventure.collect(p1.pos, p1.hp > 0)) {
-        onRoundEvent?.({ type: 'toast', text: '铁料 +1 · 已保存到冒险背包' });
+        onRoundEvent?.({ type: 'toast', text: `精铁 +1${adventure.getSnapshot().runTarget === 'iron' ? '' : ` · ${materialById(adventure.getSnapshot().runTarget).name} +1`} · 已保存到冒险背包` });
       }
       if (map.id === 'wending') updateWar();
       if (map.id === 'losangeles') updateLoot();

@@ -121,7 +121,7 @@ export function Lobby(p: LobbyProps) {
         <section aria-label="采石场冒险" className="tq-adventure-row">
           <button className="tq-btn" disabled={!p.onAdventure || p.loadPct !== undefined} onClick={p.onAdventure}>青岚采石场 · 单人寻材</button>
           {p.adventurePanel}
-          <small>挑战守卫，拾取铁料 · 仅限单人</small>
+          <small>挑战守卫，收集追踪原材 · 仅限单人</small>
         </section>
 
 

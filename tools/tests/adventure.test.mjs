@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAdventure, ADVENTURE_KEY } from '../../.adventure-test/adventure.js';
+import { createAdventure, ADVENTURE_KEY } from './adventure-source.mjs';
 const storage = () => { const values = new Map(); return { getItem: k => values.get(k) ?? null, setItem: (k,v) => values.set(k,v) }; };
 test('defeat, approach, collect once and reload persisted inventory', () => {
  const s=storage(), a=createAdventure(s); a.start();

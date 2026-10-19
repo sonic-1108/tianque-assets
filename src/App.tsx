@@ -1,3 +1,4 @@
+import { MaterialCodex } from './components/materials/MaterialCodex';
 import { startCloud } from './cloudSave';
 import { canRevive } from './revive';
 import { storySubscribe, storySnapshot } from './ibStory';
@@ -185,6 +186,8 @@ const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Bers
 const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Trader'];
 
 export default function App() {
+  const [materialsOpen, setMaterialsOpen] = useState(false);
+  const closeMaterials = useCallback(() => setMaterialsOpen(false), []);
   const storyDialog = React.useSyncExternalStore(storySubscribe, storySnapshot);
   const settings = useSettings();
   const { sdk } = usePlayground();
@@ -546,7 +549,7 @@ export default function App() {
   }, []);
 
   const inputRef = useGameInput({
-    enabled: gameState.status === 'PLAYING' && !storyDialog,
+    enabled: gameState.status === 'PLAYING' && !storyDialog && !materialsOpen,
     onToggleDebug: handleToggleDebug,
     onToggleHelp: handleToggleHelp,
     onEscape: handleEscape,
@@ -943,7 +946,7 @@ export default function App() {
       {/* LOBBY: hero, opponent, battlefield */}
       {isMapSelectOpen && (
         <Lobby
-          adventurePanel={<AdventureHud lobby />}
+          adventurePanel={<AdventureHud lobby onOpen={() => setMaterialsOpen(true)} />}
           onAdventure={!net ? startAdventure : undefined}
           loadPct={modelProgress.isLoading ? modelProgress.progress : undefined}
           nickname={nickname}
@@ -1105,7 +1108,7 @@ export default function App() {
           >
             <Game
               key={adventureMode ? `adventure-${adventureRun}` : "competitive"}
-              gameState={storyDialog ? { ...gameState, status: 'PAUSED' } : gameState}
+              gameState={storyDialog || materialsOpen ? { ...gameState, status: 'PAUSED' } : gameState}
               setGameState={setGameState}
               inputRef={inputRef}
               p1RefState={p1RefState}
@@ -1167,8 +1170,9 @@ export default function App() {
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {!adventureMode && mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
-        {adventureMode && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <AdventureHud />}
+        {adventureMode && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <AdventureHud onOpen={() => setMaterialsOpen(true)} />}
         {storyDialog && <StoryDialog />}
+        {materialsOpen && <MaterialCodex onClose={closeMaterials} />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <LootHud />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <QuestHud />}
         {(mapId === 'forest' || mapId === 'desert' || mapId === 'wending' || mapId === 'losangeles') && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <Minimap mapId={mapId} fighters={fightersRef} me={lineup.me} />}

@@ -36,7 +36,7 @@ export function startProfiles(code: string) {
       const d = await call('/admin/player?id=' + encodeURIComponent(id)); if (gen !== detailGeneration) return;
       const p = d.progress;
       detail.innerHTML = `<h2>${escape(d.player.name)} · ${escape(d.player.id)}</h2><p>注册：${escape(date(d.player.created))}<br>最近在线：${escape(date(d.activity?.seen || d.player.last))}<br>累计活跃游玩：${Math.floor((d.activity?.seconds || 0)/60)} 分钟<br>胜 / 负 / 平：${d.player.wins} / ${d.player.losses} / ${d.player.draws}</p>
-        <p>${d.savedAt ? `云存档版本 ${d.revision} · ${escape(date(d.savedAt))}<br>职位：${escape(title(p))} · 已成交 ${p.deals} 单<br>当前订单：${escape(p.quest || '初始主线或暂无订单')}<br>钱包：${p.cash} · 铁料：${p.iron}<br>手表：${escape(Object.entries(p.watches).map(([k,v])=>`${k} × ${v}`).join('，') || '无')}` : '该账号尚未上传云存档'}</p>
+        <p>${d.savedAt ? `云存档版本 ${d.revision} · ${escape(date(d.savedAt))}<br>职位：${escape(title(p))} · 已成交 ${p.deals} 单<br>当前订单：${escape(p.quest || '初始主线或暂无订单')}<br>钱包：${p.cash} · 铁料：${p.iron}<br>原材：${escape(Object.entries(p.materials || {}).map(([k,v])=>`${k} × ${v}`).join("，") || "无")}<br>改造：${escape(p.equipped || "未装备")}<br>手表：${escape(Object.entries(p.watches).map(([k,v])=>`${k} × ${v}`).join('，') || '无')}` : '该账号尚未上传云存档'}</p>
         <h3>最近 50 场对局</h3><div class="scroll"><table><thead><tr><th>时间</th><th>职业</th><th>地图</th><th>结果</th><th>时长</th></tr></thead><tbody>${d.matches.map(m=>`<tr><td>${escape(date(m.ts))}</td><td>${escape(m.hero)}</td><td>${escape(m.map)}</td><td>${['负','胜','平'][m.result] || '—'}</td><td>${m.dur} 秒</td></tr>`).join('') || '<tr><td colspan="5">暂无对局记录</td></tr>'}</tbody></table></div>`;
     } catch (e) { if(gen === detailGeneration) detail.textContent = String(e.message || e); }
   }

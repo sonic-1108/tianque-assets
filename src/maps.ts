@@ -1220,7 +1220,7 @@ export const QUARRY_ROCKS = [
 ];
 MAPS.quarry = {
   id: 'quarry', name: '青岚采石场', subtitle: '山谷营地、青石矿脉与试炼守卫。第一段单人寻材冒险。',
-  icon: '⛏️', mechanics: ['单人寻材：沿石径挑战守卫', '击败守卫后靠近金色标记拾取铁料', '材料自动保存在当前浏览器；按 M 回大厅', '每次出发一名守卫，武器制作尚未开放'],
+  icon: '⛏️', mechanics: ['单人寻材：沿石径挑战守卫', '击败守卫后靠近标本拾取追踪原材', '原材与改造持续保留；按 M 回大厅', '造物志选择寻材目标，制作改造后下次出发生效'],
   homeClass: 'Berserker', homeClassName: '狂刃', homeBonus: '单人寻材试验', available: true,
   radius: 27, spawnPlayer: [0, 17], spawnEnemy: [0, -6],
   background: '#adc8c4', fog: [48, 135], hemi: ['#d9eee3', '#625443', 1.8],
