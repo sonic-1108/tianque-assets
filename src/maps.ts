@@ -1,6 +1,6 @@
 import { CharacterClassId } from './types';
 
-export type MapId = 'quarry' | 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast' | 'losangeles';
+export type MapId = 'experimental' | 'quarry' | 'temple' | 'lavacliff' | 'sea' | 'glacier' | 'bamboo' | 'rooftop' | 'summit' | 'forest' | 'desert' | 'plankway' | 'wending' | 'coast' | 'losangeles';
 
 export interface Circle {
   x: number;
@@ -1228,6 +1228,8 @@ MAPS.quarry = {
   cardGradient: 'linear-gradient(135deg,#153c3c,#698e7c,#d8ba78)', sizeClass: '10Q',
   pillars: [...QUARRY_ROCKS, { x: -5, z: 19, r: .4 }, { x: 5, z: 19, r: .4 }, { x: -9, z: 15, r: 1.5 }],
 };
+
+MAPS.experimental = { ...MAPS.quarry, id:'experimental', name:'青岚遗谷 · 实验地图', subtitle:'与工匠交谈，寻访矿脉与古炉，把原材带回营地。', spawnPlayer:[0,18], spawnEnemy:[0,-10], background:'#879c98', fog:[38,100], keyColor:'#ffdda5', homeBonus:'实验寻材', pillars:[], mechanics:['营地与石师傅交谈接受委托','靠近矿脉停留片刻采集，至少寻找两处','守卫为可选挑战，额外奖励追踪原材','回营地交付才会保存；倒下五秒后回营，样本保留'] };
 
 export const MAP_ORDER: MapId[] = ['quarry', 'losangeles', 'temple', 'wending', 'lavacliff', 'sea', 'glacier', 'forest', 'desert', 'rooftop', 'summit', 'plankway'];
 

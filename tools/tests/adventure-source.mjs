@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { runInNewContext } from 'node:vm';
+import { EXPEDITION_NODES, EXPEDITION_CAMP } from '../../shared/expedition.js';
 import { parseMaterialSave, materialCount, RECIPES, MATERIAL_IDS } from '../../shared/materials.js';
 const source = readFileSync(new URL('../../src/adventure.ts', import.meta.url), 'utf8').replace(/^import .*;$/gm, '').replace(/export /g, '');
 const out = {};
-runInNewContext(stripTypeScriptTypes(source, { mode: 'transform' }) + ';Object.assign(out,{createAdventure,ADVENTURE_KEY});', { out, parseMaterialSave, materialCount, RECIPES, MATERIAL_IDS });
+runInNewContext(stripTypeScriptTypes(source, { mode: 'transform' }) + ';Object.assign(out,{createAdventure,ADVENTURE_KEY});', { out, EXPEDITION_NODES, EXPEDITION_CAMP, parseMaterialSave, materialCount, RECIPES, MATERIAL_IDS });
 export const { createAdventure, ADVENTURE_KEY } = out;

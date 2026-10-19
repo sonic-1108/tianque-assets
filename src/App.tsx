@@ -891,15 +891,15 @@ export default function App() {
     gameAudio.playCrispClick();
   };
 
-  const startAdventure = () => {
+  const startAdventure = (experimental = false) => {
     if (net) return;
 
-            adventure.start();
+            adventure.start(experimental);
             setAdventureMode(true);
             setAdventureRun(n => n + 1);
             setPlayerClass('Berserker');
             if (!aiEnabledRef.current) toggleAI();
-            setMapId('quarry');
+            setMapId(experimental ? 'experimental' : 'quarry');
             setRoundBanner(null);
             setIsGameMenuOpen(false);
             setIsMapSelectOpen(false);
@@ -947,7 +947,8 @@ export default function App() {
       {isMapSelectOpen && (
         <Lobby
           adventurePanel={<AdventureHud lobby onOpen={() => setMaterialsOpen(true)} />}
-          onAdventure={!net ? startAdventure : undefined}
+          onAdventure={!net ? () => startAdventure() : undefined}
+          onExperiment={!net ? () => startAdventure(true) : undefined}
           loadPct={modelProgress.isLoading ? modelProgress.progress : undefined}
           nickname={nickname}
           onRename={() => {
@@ -990,7 +991,7 @@ export default function App() {
           mapId={mapId}
           onSelectMap={() => gameAudio.playCrispClick()}
           onStart={(id) => {
-            if (id === 'quarry') { startAdventure(); return; }
+            if (id === 'quarry' || id === 'experimental') { startAdventure(id === 'experimental'); return; }
             if (!MAPS[id].available) return;
             adventure.stop();
             setAdventureMode(false);

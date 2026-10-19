@@ -1126,7 +1126,7 @@ function GameImpl({
         it.request = round.over || c.hp <= 0 ? null : (r.req as InputKeyAction | null);
         r.reqTtl -= dt;
         if (r.reqTtl <= 0) r.req = null;
-      } else if (aiOn && !round.over && c.hp > 0) {
+      } else if (aiOn && !round.over && c.hp > 0 && (map.id !== 'experimental' || (adventure.getSnapshot().accepted && !adventure.getSnapshot().banked && foes[i].pos[2] < 3))) {
         if (!(N > 2 && aiGoRevive(i, c, it)) && !aiInDark(i, c, foes[i], it)) {
           runAI(c, foes[i], it, dt);
           if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
@@ -1855,7 +1855,7 @@ function GameImpl({
       }
       // sky tint from lightning / eruption, same as on the host
       bgBase.set(map.background);
-      bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
+      bgTmp.copy(bgBase).lerp(bgBase.set('#7a1a06'), mapRuntime.eruption * 0.75);
       if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
       if (map.id === 'forest') bgTmp.lerp(bgNight, mapRuntime.night * 0.92); // night
       if (map.id === 'desert') bgTmp.lerp(bgSand, Math.max(mapRuntime.desert.sand * 0.9, mapRuntime.desert.warn * 0.35)); // the sandstorm
@@ -2913,7 +2913,7 @@ function GameImpl({
         return;
       }
 
-      if (map.id === 'quarry' && !net && slot === ME && !o.ranged && adventure.getSnapshot().active) {
+      if ((map.id === 'quarry' || map.id === 'experimental') && !net && slot === ME && !o.ranged && adventure.getSnapshot().active) {
         const mod = adventure.getSnapshot().runMod;
         const reaction = materialReaction(mod, ++materialHits.current, !!o.heavy, materialCounter);
         dmg = Math.round(dmg * reaction.multiplier);
@@ -4912,7 +4912,7 @@ function GameImpl({
         });
         if (map.id === 'sea') for (const c of fighters) shipUnstick(c);
       }
-      if (adventure.getSnapshot().active && map.id === 'quarry') {
+      if (adventure.getSnapshot().active && (map.id === 'quarry' || map.id === 'experimental')) {
         const [x, z] = map.spawnPlayer;
         fighters.forEach((c, k) => {
           const cz = k === ME ? z : map.spawnEnemy[1];
@@ -6548,12 +6548,13 @@ function GameImpl({
         if (defSlot === ME) onRoundEvent?.({ type: 'toast', text: '你倒下了，身上的钱和表全掉在地上' });
         def.haul = [];
       }
-      if (adventure.getSnapshot().active && map.id === 'quarry') {
+      if (adventure.getSnapshot().active && (map.id === 'quarry' || map.id === 'experimental')) {
         if (defSlot === ME) {
-          onRoundEvent?.({ type: 'toast', text: '寻材失败 · 按 M 回大厅重新出发，已保存材料不会丢失' });
+          if(map.id==='experimental')def.respawnT=5;
+          onRoundEvent?.({ type: 'toast', text: map.id==='experimental'?'五秒后回营地 · 已采样本保留，可继续探索':'寻材失败 · 按 M 回大厅重新出发，已保存材料不会丢失' });
         } else {
           adventure.defeatEnemy([def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]]);
-          onRoundEvent?.({ type: 'toast', text: '守卫掉落铁料！靠近金色标记自动拾取' });
+          onRoundEvent?.({ type: 'toast', text: map.id==='experimental'?'古炉守卫已击败 · 额外原材已装袋，回营地交付':'守卫掉落原材！靠近标本自动拾取' });
         }
         return;
       }
@@ -7992,7 +7993,7 @@ function GameImpl({
 
       // sky tint: volcano glow / lightning
       bgBase.set(map.background);
-      bgTmp.copy(bgBase).lerp(bgTmp.set('#7a1a06'), mapRuntime.eruption * 0.75);
+      bgTmp.copy(bgBase).lerp(bgBase.set('#7a1a06'), mapRuntime.eruption * 0.75);
       if (map.id === 'forest') bgTmp.lerp(bgRain, mapRuntime.rain * 0.72); // storm clouds
       if (map.id === 'forest') bgTmp.lerp(bgNight, mapRuntime.night * 0.92); // night
       bgTmp.lerp(bgBase.set('#dfe8ff'), mapRuntime.lightning * 0.55);
@@ -8022,7 +8023,15 @@ function GameImpl({
         updateWeather();
         updateShrines();
       }
-      if (map.id === 'quarry' && adventure.getSnapshot().active && adventure.collect(p1.pos, p1.hp > 0)) {
+      if (map.id === 'experimental' && adventure.getSnapshot().active) {
+        if (p1.hp <= 0 && (p1.respawnT ?? 0) > 0) {
+          p1.respawnT = Math.max(0,p1.respawnT-dt);
+          if (p1.respawnT === 0) { p1.pos=[0,fy(0,18),18];p1.vel=[0,0,0];p1.hp=p1.maxHp;p1.mp=p1.maxMp;p1.isGrounded=true;p1.actionState='idle';p1.stateTimer=0;p1.stateDuration=0;p1.dodgeIframeTimer=2;p1.reviveBlocked=false;p1.reviveT=0;p1.celebrate=false; }
+        }
+        adventure.expeditionTick(p1.pos,p1.hp>0,dt);
+        if(p1.hp>0 && actions.interact && !adventure.getSnapshot().accepted)adventure.accept();
+      }
+      if ((map.id === 'quarry' || map.id === 'experimental') && adventure.getSnapshot().active && adventure.collect(p1.pos, p1.hp > 0)) {
         onRoundEvent?.({ type: 'toast', text: `精铁 +1${adventure.getSnapshot().runTarget === 'iron' ? '' : ` · ${materialById(adventure.getSnapshot().runTarget).name} +1`} · 已保存到冒险背包` });
       }
       if (map.id === 'wending') updateWar();

@@ -38,6 +38,7 @@ const ACCENT: Partial<Record<CharacterClassId, string>> = {
 export interface LobbyProps {
   adventurePanel?: React.ReactNode;
   onAdventure?: () => void;
+  onExperiment?: () => void;
   nickname: string;
   onRename: () => void;
   heroes: CharacterClassId[];
@@ -120,6 +121,7 @@ export function Lobby(p: LobbyProps) {
         </header>
         <section aria-label="采石场冒险" className="tq-adventure-row">
           <button className="tq-btn" disabled={!p.onAdventure || p.loadPct !== undefined} onClick={p.onAdventure}>青岚采石场 · 单人寻材</button>
+          <button className="tq-btn tq-experiment" disabled={!p.onExperiment || p.loadPct !== undefined} onClick={p.onExperiment}>实验地图 · 青岚遗谷 <small>探索 / 采集 / 回营锻造</small></button>
           {p.adventurePanel}
           <small>挑战守卫，收集追踪原材 · 仅限单人</small>
         </section>
@@ -280,7 +282,7 @@ export function Lobby(p: LobbyProps) {
               );
             })}
           </div>
-          <button className={'tq-go' + (p.loadPct !== undefined ? ' loading' : '')} disabled={p.hostPicks || !map.available || (!p.ready && pick !== 'quarry') || (pick === 'quarry' && p.online) || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
+          <button className={'tq-go' + (p.loadPct !== undefined ? ' loading' : '')} disabled={p.hostPicks || !map.available || (!p.ready && pick !== 'quarry' && pick !== 'experimental') || ((pick === 'quarry' || pick === 'experimental') && p.online) || p.loadPct !== undefined} onClick={() => p.onStart(pick)}>
             {p.loadPct !== undefined && !p.hostPicks ? (
               // the scene is still being built before the download even starts: say so, rather than a frozen 0%
               <small>{p.loadPct <= 5 ? '准备' : p.loadPct >= 99 ? '即将' : '载入'}
@@ -312,6 +314,8 @@ const LOBBY_CSS = `
 .tq-l-wrap { position:relative; z-index:20; height:100%; display:flex; flex-direction:column; padding:3.2vh 4vw 3vh; gap:2vh; overflow-y:auto; overflow-x:hidden; }
 .tq-l-wrap > * { flex-shrink:0; min-width:0; }
 .tq-adventure-row { display:flex; flex-wrap:wrap; align-items:center; gap:10px 20px; padding:10px 14px; border:1px solid rgba(31,28,24,.16); border-radius:10px; background:rgba(244,238,226,.65); }
+.tq-experiment { background:#284c45!important; color:#f4e4b8!important; }
+.tq-experiment small { display:block; color:#d7d8c1!important; margin-top:4px; font-size:10px!important; }
 .tq-adventure-row small { color:var(--ink2); font-size:12px; }
 .tq-adventure-row .tq-btn { letter-spacing:.08em; }
 .tq-l-head { position:relative; display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; }

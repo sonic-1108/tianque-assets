@@ -18,6 +18,7 @@ export interface SkyEnv {
 }
 
 export const SKY_ENV: Record<MapId, SkyEnv> = {
+  experimental: { zenith:'#567e86',horizon:'#ded5b6',ground:'#686e52',sunDir:[-.4,.65,.5],sun:'#ffe0a5',sunPower:8,intensity:.55 },
   quarry: { zenith: '#5d8e9c', horizon: '#d9ddbd', ground: '#8e9270', sunDir: [-.4,.65,.5], sun: '#ffe0a5', sunPower: 8, intensity: .55 },
   temple: { zenith: '#3d5f8f', horizon: '#f2b27a', ground: '#8a6656', sunDir: [0.35, 0.16, -1], sun: '#ffcf8a', sunPower: 14, intensity: 0.75 },
   lavacliff: { zenith: '#1d0907', horizon: '#9a3412', ground: '#ff5a14', sunDir: [-0.5, 0.3, -0.8], sun: '#ff7a2a', sunPower: 6, intensity: 0.7 },
