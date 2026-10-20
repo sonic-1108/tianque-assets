@@ -985,6 +985,7 @@ export default function App() {
           heroes={PLAYABLE}
           playerClass={playerClass}
           onPlayerClass={(cid) => {
+            career.stop();setCareerMode(false);
             gameAudio.playCrispClick();
             setPlayerClass(cid);
             setScore({ player: 0, enemy: 0 });
@@ -994,6 +995,7 @@ export default function App() {
           canEdit={!net || net.role === 'host'}
           ready={roomReady(room) && localSeat >= 0}
           onSeat={(k, ch) => {
+            career.stop();setCareerMode(false);
             gameAudio.playCrispClick();
             setScore({ player: 0, enemy: 0 });
             setRoom((r) => {
