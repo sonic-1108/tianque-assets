@@ -1,3 +1,4 @@
+import {mapRuntime,shipOf} from './maps';
 import {ensureAccount,getAccount,onAccount,STATS_API} from './stats';
 import {CONTRACTS} from '../shared/career.js';
 let state:any={xp:0,level:1,hero:null,path:null,mastery:0,discovered:[],active:null,receipt:null,ready:false,error:'',busy:false,run:null};
@@ -18,7 +19,7 @@ export const career={subscribe:(f:()=>void)=>{listeners.add(f);return()=>{listen
  async choose(hero:string){try{await request('choose',{hero});return true}catch(e){update({error:e.message});return false}},
  async start(hero:string,map:string,kind:string,name:string){try{const s=await request('start',{hero,map,kind},name);update({run:{...s.active,seconds:0,damage:0,origin:null,previousDamage:null,ready:false,failed:false,returned:false},receipt:null});return true}catch(e){update({error:e.message});return false}},
  stop(){update({run:null})},
- tick(p:any,dt:number){const r=state.run;if(!r||r.failed||state.receipt||!p||p.classId!==r.hero)return;if(p.hp<=0){update({run:{...r,failed:true},error:'本次契约失败，回大厅重新接取。'});return}const c=CONTRACTS[r.kind],origin=r.origin||[...p.pos];const damage=r.damage+(r.previousDamage===null?0:Math.max(0,p.totalDamageDealt-r.previousDamage));const seconds=r.seconds+Math.min(dt,1);const ready=damage>=c.damage&&seconds>=c.seconds;const returned=ready&&Math.hypot(p.pos[0]-origin[0],p.pos[2]-origin[2])<4&&Math.abs(p.pos[1]-origin[1])<4;update({run:{...r,origin,position:[...p.pos],damage,seconds,ready,returned,previousDamage:p.totalDamageDealt}})},
+ tick(p:any,dt:number){const r=state.run;if(!r||r.failed||state.receipt||!p||p.classId!==r.hero)return;if(p.hp<=0){update({run:{...r,failed:true},error:'本次契约失败，回大厅重新接取。'});return}const c=CONTRACTS[r.kind],origin=r.origin?[...r.origin]:[...p.pos];const ship=r.map==='sea'?(r.ship??shipOf(p.pos[0])):null;const shipX=ship===null?0:mapRuntime.shipX[ship];if(r.origin&&ship!==null)origin[0]+=shipX-(r.shipX??shipX);const damage=r.damage+(r.previousDamage===null?0:Math.max(0,p.totalDamageDealt-r.previousDamage));const seconds=r.seconds+Math.min(dt,1);const ready=damage>=c.damage&&seconds>=c.seconds;const returned=ready&&Math.hypot(p.pos[0]-origin[0],p.pos[2]-origin[2])<4&&Math.abs(p.pos[1]-origin[1])<4;update({run:{...r,origin,ship,shipX,position:[...p.pos],damage,seconds,ready,returned,previousDamage:p.totalDamageDealt}})},
  fail(){if(state.run)update({run:{...state.run,failed:true},error:'本次契约失败，回大厅重新接取。'})},
  async finish(){const r=state.run;if(!r||r.failed||!r.returned)return;try{await request('finish',{runId:r.id,seconds:r.seconds,damage:r.damage,returned:true,alive:true});update({run:null})}catch(e){update({error:e.message})}}
 };
