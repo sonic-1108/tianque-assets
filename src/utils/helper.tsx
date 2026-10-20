@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { WuxiaSound, AmbienceId } from './wuxiaSound';
 import { getSettings, onSettings } from '../settings';
+import { silentPreview } from './audioPolicy';
 
 /**  --- Overlay component ---
  * A full-screen UI overlay component used to display game states
@@ -379,6 +380,7 @@ class GameAudio {
    * become no-ops.
    */
   private ensure(): AudioContext | null {
+    if (silentPreview) return null;
     if (this.ctx) return this.ctx;
     if (typeof window === 'undefined') return null;
 

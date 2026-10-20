@@ -144,6 +144,8 @@ export interface EmpMove {
 }
 
 export interface CombatantState {
+  expeditionWeapon?: {id?:string;name?:string;blade:string;grip:string;core:string;appearance?:Record<string,any>};
+  weaponLost?: boolean;
   id: string;
   isPlayer: boolean;
   /** team fights: which side (0 or 1). Friendly fire is on, this only decides who wins and who the AI goes after */

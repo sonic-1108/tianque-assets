@@ -46,6 +46,8 @@ short, no dashes in prose, deploy quickly when asked, and say plainly what was n
 
 ## Testing (no GPU in the cloud container)
 
+- Always open agent-driven game previews with `?silent=1` (or `&silent=1` when a query exists). The owner requires silent testing; do not change their saved sound settings or system volume.
+
 - Software rendering cannot draw the big forest, so 3D screenshots there are not possible: test logic, not looks, and
   tell the owner the visuals are unseen. 2D things (minimap) can be screenshotted.
 - Pattern: `npx vite build --outDir /tmp/b --base /`, `npx vite preview --outDir /tmp/b --port 4180`, then

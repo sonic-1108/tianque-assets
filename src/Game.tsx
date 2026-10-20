@@ -1,3 +1,7 @@
+import {CareerBeacon} from './components/CareerBeacon';
+import {career} from './career';
+import { weaponReaction, STARTER_WEAPON } from '../shared/weapons.js';
+import { WeaponDrops } from './components/forge/WeaponDrops';
 import { shouldTraderTakeoff, traderFlightDirection } from '../shared/trader-ai.js';
 import { materialReaction, RECIPES } from '../shared/materials.js';
 import { materialById } from './materials';
@@ -1127,7 +1131,7 @@ function GameImpl({
         it.request = round.over || c.hp <= 0 ? null : (r.req as InputKeyAction | null);
         r.reqTtl -= dt;
         if (r.reqTtl <= 0) r.req = null;
-      } else if (aiOn && !round.over && c.hp > 0 && (map.id !== 'experimental' || (adventure.getSnapshot().accepted && !adventure.getSnapshot().banked && foes[i].pos[2] < 3))) {
+      } else if (aiOn && !round.over && c.hp > 0 && (map.id !== 'experimental' || !adventure.getSnapshot().active || (adventure.getSnapshot().accepted && !adventure.getSnapshot().banked && foes[i].pos[2] < 3))) {
         if (!(N > 2 && aiGoRevive(i, c, it)) && !aiInDark(i, c, foes[i], it)) {
           runAI(c, foes[i], it, dt);
           if (map.id === 'glacier') routeUpMountain(c, foes[i], it);
@@ -2915,7 +2919,7 @@ function GameImpl({
       }
 
       if ((map.id === 'quarry' || map.id === 'experimental') && !net && slot === ME && !o.ranged && adventure.getSnapshot().active) {
-        const mod = adventure.getSnapshot().runMod;
+        const mod = map.id==='experimental'&&!adventure.getSnapshot().runWeapon ? null : adventure.getSnapshot().runMod;
         const reaction = materialReaction(mod, ++materialHits.current, !!o.heavy, materialCounter);
         dmg = Math.round(dmg * reaction.multiplier);
         if (o.knock) o.knock *= reaction.knock;
@@ -2927,6 +2931,14 @@ function GameImpl({
           vfx.damageNumber(vA.set(att.pos[0], att.pos[1] + 2.5, att.pos[2]), recipe.name, true, recipe.color);
         }
       }
+      if(map.id==='experimental' && !net && slot===ME && !o.ranged && adventure.getSnapshot().active){
+        const w=adventure.getSnapshot().runWeapon;
+        const effect=weaponReaction(w,materialHits.current,!!o.heavy,materialCounter);
+        dmg=Math.round(dmg*effect.multiplier);
+        if(effect.heal)att.hp=Math.min(att.maxHp,att.hp+Math.round(att.maxHp*effect.heal));
+        if(effect.multiplier>1){vfx.sparkBurst(chest,18,w?.blade==='copper'?'#9ee7ed':'#b6a1e9',4,.05,UP,.7);}
+      }
+      if(att===fighters[ME]&&career.getSnapshot().run&&!career.getSnapshot().run.failed&&career.getSnapshot().path==='edge')dmg=Math.round(dmg*1.08);
       def.hp = Math.max(0, def.hp - dmg);
       if (def.treeClimb !== undefined) {
         // knocked off the trunk
@@ -4803,6 +4815,7 @@ function GameImpl({
       for (const c of fighters) {
         const cc = CLASS_CONFIGS[c.classId];
         c.maxHp = Math.round((isBossFighter(c) ? 6500 : cc.hp) * HP_SCALE); // 长安 boss 6500 before the scale
+        if(c===fighters[ME]&&career.getSnapshot().run&&career.getSnapshot().path==='ward')c.maxHp=Math.round(c.maxHp*1.15);
         c.zipW = undefined;
         c.lift = undefined;
         c.glide = 0;
@@ -4919,7 +4932,8 @@ function GameImpl({
           const cz = k === ME ? z : map.spawnEnemy[1];
           c.pos = [x, fy(x, cz), cz];
           c.rotY = c.targetRotY = k === ME ? 0 : Math.PI;
-          if (k !== ME) { c.maxHp = Math.round(c.maxHp * .35); c.hp = c.maxHp; }
+          if(map.id==='experimental'){c.maxHp=20000;c.hp=c.maxHp;c.expeditionWeapon=k===ME?adventure.getSnapshot().runWeapon:{...STARTER_WEAPON,name:'古炉守卫长刀'};c.weaponLost=false;}
+          else if (k !== ME) { c.maxHp = Math.round(c.maxHp * .35); c.hp = c.maxHp; }
         });
       }
       if (controller) controller.yaw = p1.rotY;
@@ -6549,10 +6563,16 @@ function GameImpl({
         if (defSlot === ME) onRoundEvent?.({ type: 'toast', text: '你倒下了，身上的钱和表全掉在地上' });
         def.haul = [];
       }
+      if(career.getSnapshot().run){
+        if(defSlot===ME)career.fail();
+        else onRoundEvent?.({type:'toast',text:'对手已倒下，完成存活条件后返回交付点。'});
+        return;
+      }
       if (adventure.getSnapshot().active && (map.id === 'quarry' || map.id === 'experimental')) {
+        if(map.id==='experimental'){adventure.dropWeapon([def.pos[0],fy(def.pos[0],def.pos[2],def.pos[1]),def.pos[2]],defSlot===ME?'player':`guard-${defSlot}`);def.weaponLost=true;}
         if (defSlot === ME) {
           if(map.id==='experimental')def.respawnT=5;
-          onRoundEvent?.({ type: 'toast', text: map.id==='experimental'?'五秒后回营地 · 已采样本保留，可继续探索':'寻材失败 · 按 M 回大厅重新出发，已保存材料不会丢失' });
+          onRoundEvent?.({ type: 'toast', text: map.id==='experimental'?'五秒后回营地 · 武器留在原处，靠近可拾回':'寻材失败 · 按 M 回大厅重新出发，已保存材料不会丢失' });
         } else {
           adventure.defeatEnemy([def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]]);
           onRoundEvent?.({ type: 'toast', text: map.id==='experimental'?'古炉守卫已击败 · 额外原材已装袋，回营地交付':'守卫掉落原材！靠近标本自动拾取' });
@@ -8029,6 +8049,9 @@ function GameImpl({
           p1.respawnT = Math.max(0,p1.respawnT-dt);
           if (p1.respawnT === 0) { p1.pos=[0,fy(0,18),18];p1.vel=[0,0,0];p1.hp=p1.maxHp;p1.mp=p1.maxMp;p1.isGrounded=true;p1.actionState='idle';p1.stateTimer=0;p1.stateDuration=0;p1.dodgeIframeTimer=2;p1.reviveBlocked=false;p1.reviveT=0;p1.celebrate=false; }
         }
+        adventure.recoverWeapons(p1.pos,p1.hp>0);
+        p1.expeditionWeapon=adventure.getSnapshot().runWeapon||STARTER_WEAPON;
+        p1.weaponLost=!adventure.getSnapshot().runWeapon;
         adventure.expeditionTick(p1.pos,p1.hp>0,dt);
         if(p1.hp>0 && actions.interact && !adventure.getSnapshot().accepted)adventure.accept();
       }
@@ -9817,6 +9840,7 @@ function GameImpl({
 
       <Maps3D mapId={mapId} />
       <AdventureDrop />
+      <WeaponDrops /><CareerBeacon/>
       <TraderFx fighters={fightersRef} />
 
       {seats.map((seat, k) => (

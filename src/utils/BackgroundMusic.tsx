@@ -1,4 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
+import {silentPreview} from './audioPolicy';
 
 /**
  * Properties for the BackgroundMusic component.
@@ -250,7 +251,7 @@ export function BackgroundMusic({
   const useFallbackRef = useRef(false);
   const [platformMuted, setPlatformMuted] = useState(false);
 
-  const effectiveMuted = isMuted || platformMuted;
+  const effectiveMuted = silentPreview || isMuted || platformMuted;
 
   // Sync latest playing state ref
   useEffect(() => {
@@ -273,6 +274,7 @@ export function BackgroundMusic({
 
   // Initialize AudioContext and Master Gain
   const getOrCreateContext = (): AudioContext | null => {
+    if (silentPreview) return null;
     if (typeof window === 'undefined') return null;
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       return audioCtxRef.current;
@@ -564,6 +566,7 @@ export function BackgroundMusic({
         ref={fallbackAudioRef}
         src={url}
         loop
+        muted={effectiveMuted}
         autoPlay={isPlaying}
         style={{display: 'none'}}
       />

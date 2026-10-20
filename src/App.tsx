@@ -1,3 +1,6 @@
+import {career} from './career';
+import {CareerHall,CareerHud} from './components/CareerHall';
+import { WeaponForge } from './components/forge/WeaponForge';
 import { MaterialCodex } from './components/materials/MaterialCodex';
 import { startCloud } from './cloudSave';
 import { canRevive } from './revive';
@@ -187,6 +190,11 @@ const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Sh
 
 export default function App() {
   const [materialsOpen, setMaterialsOpen] = useState(false);
+  const [careerOpen,setCareerOpen] = useState(false);
+  const [careerMode,setCareerMode] = useState(false);
+  const [careerRun,setCareerRun] = useState(0);
+  const [forgeOpen,setForgeOpen] = useState(false);
+  const closeForge = useCallback(()=>setForgeOpen(false),[]);
   const closeMaterials = useCallback(() => setMaterialsOpen(false), []);
   const storyDialog = React.useSyncExternalStore(storySubscribe, storySnapshot);
   const settings = useSettings();
@@ -315,6 +323,7 @@ export default function App() {
   const [hurtFlash, setHurtFlash] = useState(0);
   const [screenFlash, setScreenFlash] = useState<{ n: number; color: string }>({ n: 0, color: '' });
   const toggleAI = useCallback(() => {
+    if (career.getSnapshot().run) return;
     if (netRef.current) return; // online: the opponent is a real player
     aiEnabledRef.current = !aiEnabledRef.current;
     setAiEnabled(aiEnabledRef.current);
@@ -333,6 +342,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleAI]);
   const handleRoundEvent = useCallback((e: RoundEvent) => {
+    if (career.getSnapshot().run && e.type === 'ko' && e.winner === 'enemy') career.fail();
     const n = netRef.current;
     if (n && n.role === 'host' && e.type !== 'playerHit' && e.type !== 'toast') n.send({ t: 're', e });
     if (e.type === 'ko' || e.type === 'draw') {
@@ -341,7 +351,7 @@ export default function App() {
       const meSeat = L.seats[L.me];
       const foeSeat = L.seats.find((x) => x.side !== meSeat?.side && x.side !== 2) ?? L.seats.find((x) => x !== meSeat);
       const isOnline = !!netRef.current && netRef.current.status === 'connected';
-      if (meSeat && foeSeat && (aiEnabledRef.current || isOnline)) {
+      if (!career.getSnapshot().run && meSeat && foeSeat && (aiEnabledRef.current || isOnline)) {
         const st = roundStartRef.current;
         const p1 = p1RefState.current;
         const won = e.type === 'ko' ? (e.winner === 'player' ? 1 : 0) : 2;
@@ -379,6 +389,7 @@ export default function App() {
 
   const startNet = useCallback(
     (role: 'host' | 'guest', code: string) => {
+      career.stop();setCareerMode(false);
       adventure.stop();
       setAdventureMode(false);
       netRef.current?.close();
@@ -549,7 +560,7 @@ export default function App() {
   }, []);
 
   const inputRef = useGameInput({
-    enabled: gameState.status === 'PLAYING' && !storyDialog && !materialsOpen,
+    enabled: gameState.status === 'PLAYING' && !storyDialog && !materialsOpen && !forgeOpen && !careerOpen && !isGameMenuOpen && !isHowToPlayOpen,
     onToggleDebug: handleToggleDebug,
     onToggleHelp: handleToggleHelp,
     onEscape: handleEscape,
@@ -892,6 +903,7 @@ export default function App() {
   };
 
   const startAdventure = (experimental = false) => {
+    career.stop();setCareerMode(false);
     if (net) return;
 
             adventure.start(experimental);
@@ -906,6 +918,21 @@ export default function App() {
             requestGameFocus();
             };
 
+  const startCareer = async (hero:CharacterClassId,map:MapId,kind:string) => {
+    if(net)return;
+    if(!await career.start(hero,map,kind,nickname))return;
+    adventure.stop();setAdventureMode(false);setCareerMode(true);setCareerRun(n=>n+1);
+    setPlayerClass(hero);setRoom(defaultRoom(hero,nickname,'Berserker'));setMapId(map);
+    aiEnabledRef.current=true;setAiEnabled(true);setRoundBanner(null);
+    setCareerOpen(false);setIsMapSelectOpen(false);setIsGameMenuOpen(false);requestGameFocus();
+  };
+  useEffect(()=>{
+    if(!careerMode||isMapSelectOpen||isGameMenuOpen||isHowToPlayOpen||careerOpen||materialsOpen||forgeOpen||storyDialog||modelProgress.isLoading||gameState.status!=='PLAYING')return;
+    const id=window.setInterval(()=>career.tick(p1RefState.current,.25),250);
+    const deliver=(e:KeyboardEvent)=>{if(e.code==='KeyF'&&!e.repeat&&!(e.target instanceof HTMLInputElement))career.finish()};
+    window.addEventListener('keydown',deliver);
+    return()=>{clearInterval(id);window.removeEventListener('keydown',deliver)};
+  },[careerMode,isMapSelectOpen,isGameMenuOpen,isHowToPlayOpen,careerOpen,materialsOpen,forgeOpen,storyDialog,modelProgress.isLoading,gameState.status]);
   const berserkerConfig = CLASS_CONFIGS[playerClass];
 
   return (
@@ -946,7 +973,7 @@ export default function App() {
       {/* LOBBY: hero, opponent, battlefield */}
       {isMapSelectOpen && (
         <Lobby
-          adventurePanel={<AdventureHud lobby onOpen={() => setMaterialsOpen(true)} />}
+          adventurePanel={<><AdventureHud lobby onOpen={() => setMaterialsOpen(true)} onForge={() => setForgeOpen(true)} /><button className="mt-open" disabled={!!net} onClick={()=>setCareerOpen(true)}>百业试炼 · 账号成长 ↗</button></>}
           onAdventure={!net ? () => startAdventure() : undefined}
           onExperiment={!net ? () => startAdventure(true) : undefined}
           loadPct={modelProgress.isLoading ? modelProgress.progress : undefined}
@@ -991,6 +1018,7 @@ export default function App() {
           mapId={mapId}
           onSelectMap={() => gameAudio.playCrispClick()}
           onStart={(id) => {
+            career.stop();setCareerMode(false);
             if (id === 'quarry' || id === 'experimental') { startAdventure(id === 'experimental'); return; }
             if (!MAPS[id].available) return;
             adventure.stop();
@@ -1108,8 +1136,8 @@ export default function App() {
             className="w-full h-full block"
           >
             <Game
-              key={adventureMode ? `adventure-${adventureRun}` : "competitive"}
-              gameState={storyDialog || materialsOpen ? { ...gameState, status: 'PAUSED' } : gameState}
+              key={careerMode ? `career-${careerRun}` : adventureMode ? `adventure-${adventureRun}` : "competitive"}
+              gameState={storyDialog || materialsOpen || forgeOpen || careerOpen || isGameMenuOpen || isHowToPlayOpen ? { ...gameState, status: 'PAUSED' } : gameState}
               setGameState={setGameState}
               inputRef={inputRef}
               p1RefState={p1RefState}
@@ -1171,8 +1199,11 @@ export default function App() {
         )}
         {/* off-screen opponent: an arrow on the screen edge pointing at them, with the distance */}
         {!adventureMode && mapId === 'forest' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <ShrineHud />}
-        {adventureMode && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <AdventureHud onOpen={() => setMaterialsOpen(true)} />}
+        {adventureMode && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <AdventureHud onOpen={() => setMaterialsOpen(true)} onForge={() => setForgeOpen(true)} />}
         {storyDialog && <StoryDialog />}
+        {careerOpen && <CareerHall name={nickname} onClose={()=>setCareerOpen(false)} onStart={startCareer} />}
+        {careerMode && !isMapSelectOpen && !modelProgress.isLoading && <CareerHud/>}
+        {forgeOpen && <WeaponForge onClose={closeForge} />}
         {materialsOpen && <MaterialCodex onClose={closeMaterials} />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <LootHud />}
         {mapId === 'losangeles' && !isGameMenuOpen && !isHowToPlayOpen && !isMapSelectOpen && !modelProgress.isLoading && <QuestHud />}
@@ -1791,6 +1822,7 @@ export default function App() {
 
               <button
                 onClick={() => {
+                  if(career.getSnapshot().run){setToast(t=>({n:t.n+1,text:'契约中不能重置血量或位置，请回大厅重新接取。'}));return;}
                   p1RefState.current.pos = [0, 0, 0];
                   p1RefState.current.vel = [0, 0, 0];
                   p1RefState.current.rotY = 0;

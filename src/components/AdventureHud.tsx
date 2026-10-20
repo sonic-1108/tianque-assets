@@ -3,7 +3,7 @@ import { materialById } from '../materials';
 import { RECIPES } from '../../shared/materials.js';
 import { adventure } from '../adventure';
 
-export function AdventureHud({ lobby = false, onOpen }: { lobby?: boolean; onOpen?: () => void }) {
+export function AdventureHud({ lobby = false, onOpen, onForge }: { lobby?: boolean; onOpen?: () => void; onForge?: () => void }) {
   const state = useSyncExternalStore(adventure.subscribe, adventure.getSnapshot);
   useEffect(() => { adventure.read(); }, []);
   return <section aria-label="冒险背包" style={lobby ? { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 12px', minWidth: 0 } : {
@@ -12,6 +12,8 @@ export function AdventureHud({ lobby = false, onOpen }: { lobby?: boolean; onOpe
   }}>
     <strong>冒险背包 · 精铁 × {state.iron}</strong>
     <button className="mt-open" onClick={onOpen}>造物志 · 材料与改造 ↗</button>
+    <button className="mt-open" onClick={onForge}>铸兵坊 · 武器制造 ↗</button>
+    {!lobby&&state.experimental&&<small>手持：{state.runWeapon?.name||'空手 · 回倒下处拾回武器'} · 双方 20,000 生命</small>}
     <small>寻材目标：{materialById(lobby ? state.target : state.runTarget).name}</small>
     {!lobby && !state.experimental && <p style={{ fontSize: 13, marginTop: 6 }}>
       {state.collected ? '寻材完成！材料已保存。按 M 返回大厅，可再次出发。'

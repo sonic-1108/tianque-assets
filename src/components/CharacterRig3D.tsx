@@ -1,3 +1,4 @@
+import { buildForgedBlade, disposeWeapon } from './forge/weaponModel';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
@@ -613,6 +614,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const flipRef = useRef(0);
   const leanRef = useRef(new THREE.Vector2());
   const weaponScaledRef = useRef(false);
+  const forgedRef=useRef<{key:string;group:THREE.Group;parent:THREE.Group}|null>(null);
+  useEffect(()=>()=>{if(forgedRef.current){forgedRef.current.parent.remove(forgedRef.current.group);disposeWeapon(forgedRef.current.group);forgedRef.current=null}},[]);
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
   /** 飞虫沙暴: world height above which the body is gone (99 = whole) */
   const cutU = useMemo(() => ({ value: 99 }), []);
@@ -1078,14 +1081,24 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         if (o.isMesh) o.castShadow = shadowOn;
       });
     }
+    const forgedParent=weaponsRef.current.right?.group;
+    if(c.expeditionWeapon && forgedParent){
+      const spec=c.expeditionWeapon,key=[spec.blade,spec.grip,spec.core,JSON.stringify(spec.appearance)].join('/');
+      if(forgedRef.current?.key!==key||forgedRef.current?.parent!==forgedParent){
+        if(forgedRef.current){forgedRef.current.parent.remove(forgedRef.current.group);disposeWeapon(forgedRef.current.group);}
+        forgedParent.traverse((o:any)=>{if(o.isMesh)o.visible=false;});
+        const made=buildForgedBlade(spec);made.fullerMat.dispose();made.group.scale.multiplyScalar(.65);forgedParent.add(made.group);forgedRef.current={key,group:made.group,parent:forgedParent};
+      }
+      if(socketsRef){socketsRef.current.rightBase=c.weaponLost?null:weaponsRef.current.right.base;socketsRef.current.rightTip=c.weaponLost?null:weaponsRef.current.right.tip;socketsRef.current.leftBase=null;socketsRef.current.leftTip=null;}
+    }
     // no weapons in hand while swimming, climbing or sitting
     // (and once 飞虫沙暴 has eaten them past the hands)
     const handsBusy = climbingNow || glideBlend > 0.15 || !!c.swimming || sitBlendRef.current > 0.5 || drinkBlendRef.current > 0.3 || (c.devoured ?? 0) >= 0.45;
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
-      if (w0.right) w0.right.group.visible = !handsBusy;
+      if (w0.right) w0.right.group.visible = !handsBusy && !c.weaponLost && !(c.expeditionWeapon && c.hp<=0);
       // the left hand carries the candle / candle-shade in 青冥古林
-      if (w0.left) w0.left.group.visible = !handsBusy && classId !== 'Ranger' && classId !== 'Trader' && !c.candle && !c.shade;
+      if (w0.left) w0.left.group.visible = !handsBusy && !c.expeditionWeapon && classId !== 'Ranger' && classId !== 'Trader' && !c.candle && !c.shade;
     }
 
     // Face protection (暗器 model): damp neck / head rotation toward rest

@@ -1,3 +1,4 @@
+import {careerRoute} from './career.js';
 import { verifyAdmin } from './admin-auth.js';
 import { validSnapshot, summarize } from './profile.js';
 // 天阙 战绩 / 排行榜 / 账号: a small JSON API on the relay worker (/api/...).
@@ -12,6 +13,7 @@ const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...CORS, 'content-type': 'application/json; charset=utf-8' } });
 
 export const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS careers (player TEXT PRIMARY KEY, data TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS saves (player TEXT PRIMARY KEY, revision INTEGER NOT NULL, updated INTEGER NOT NULL, data TEXT NOT NULL, nonce TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS activity (player TEXT PRIMARY KEY, seen INTEGER NOT NULL, seconds INTEGER NOT NULL DEFAULT 0, page TEXT NOT NULL, map TEXT NOT NULL, hero TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0)`,
   `CREATE TABLE IF NOT EXISTS players (id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, created INTEGER NOT NULL, last INTEGER NOT NULL, xp INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, draws INTEGER NOT NULL DEFAULT 0)`,
@@ -21,7 +23,7 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS matches_ts ON matches (ts)`,
   `CREATE INDEX IF NOT EXISTS players_xp ON players (xp)`,
 ];
-const HEROES = new Set(['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Guard']);
+const HEROES = new Set(['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Guard', 'Trader']);
 const MODES = { easy: 0.5, normal: 1, hard: 1.5, hell: 2.5, online: 2 };
 
 async function sha(text) {
@@ -54,6 +56,13 @@ export async function handle(req, q, adminCheck = verifyAdmin) {
     const rows = await q.all('SELECT * FROM players WHERE id = ? AND key_hash = ?', String(id ?? ''), await sha(normCode(code)));
     return rows[0] || null;
   };
+
+  if (path.startsWith('/career/') && req.method === 'POST') {
+    const p = await auth(body.id, body.code);
+    if (!p) return json({error:'请先登录账号'},401);
+    try { return json(await careerRoute(path,body,p,q,now)); }
+    catch(e) { return json({error:e.message},409); }
+  }
 
   if (path.startsWith('/admin/')) {
     if (!(await adminCheck(req.headers.get('x-tq-admin')))) return json({ error: '后台口令无效或尚未配置' }, 403);

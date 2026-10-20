@@ -1,10 +1,13 @@
+import { weaponCosts, weaponAppearance, STARTER_WEAPON } from '../shared/weapons.js';
 import { EXPEDITION_NODES, EXPEDITION_CAMP } from '../shared/expedition.js';
 import { parseMaterialSave, materialCount, RECIPES, MATERIAL_IDS } from '../shared/materials.js';
 export const ADVENTURE_KEY = 'tq_adventure_v1';
 export type Point = [number, number, number];
 export function createAdventure(storage: Pick<Storage, 'getItem' | 'setItem'>) {
   let gathering = 0;
-  let state = { experimental:false, accepted:false, samples:[] as string[], pouch:{} as Record<string,number>, nearby: 'camp', progress:0, banked:false, ...parseMaterialSave(null), active:false, collected:false, drop:null as Point|null, defeated:false, error:'', notice:'', runTarget:'copper', runMod:null as string|null };
+  let serial = 0;
+  const nextWeaponId=()=>`w-${Date.now().toString(36)}-${(++serial).toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+  let state = { runWeapon:null as typeof STARTER_WEAPON|null, looseWeapons:[] as {weapon:typeof STARTER_WEAPON;at:Point;owner:string}[], experimental:false, accepted:false, samples:[] as string[], pouch:{} as Record<string,number>, nearby: 'camp', progress:0, banked:false, ...parseMaterialSave(null), active:false, collected:false, drop:null as Point|null, defeated:false, error:'', notice:'', runTarget:'copper', runMod:null as string|null };
   const listeners = new Set<()=>void>();
   const update = (patch:Partial<typeof state>) => { state={...state,...patch};listeners.forEach(f=>f()); };
   const load = () => parseMaterialSave(storage.getItem(ADVENTURE_KEY));
@@ -15,9 +18,29 @@ export function createAdventure(storage: Pick<Storage, 'getItem' | 'setItem'>) {
   }
   return {
     getSnapshot:()=>state,subscribe:(f:()=>void)=>{listeners.add(f);return()=>{listeners.delete(f)}},read,
-    start(experimental=false){read();gathering=0;update({experimental,accepted:false,samples:[],pouch:{},nearby:'camp',progress:0,banked:false,active:true,collected:false,drop:null,defeated:false,runTarget:state.target,runMod:state.equipped,notice:''});},
+    start(experimental=false){read();gathering=0;update({experimental,accepted:false,samples:[],pouch:{},nearby:'camp',progress:0,banked:false,active:true,collected:false,drop:null,defeated:false,runTarget:state.target,runMod:state.equipped,runWeapon:experimental?(state.weapons.find(w=>w.id===state.weaponEquipped&&!w.dropped)||({...STARTER_WEAPON})):null,looseWeapons:[],notice:''});},
     stop(){update({active:false,drop:null});},
     reset(){gathering=0;update({collected:false,drop:null,defeated:false,accepted:false,samples:[],pouch:{},nearby:'camp',progress:0,banked:false});},
+    forgeWeapon(spec:{blade:string;grip:string;core:string;appearance?:Record<string,any>},name:string){return change(s=>{if(state.active)throw Error('请先回大厅再制造武器');if(s.weapons.length>=40)throw Error('兵器架已满（40 把）');const costs=weaponCosts(spec);if(Object.entries(costs).some(([id,n])=>materialCount(s,id)<Number(n)))throw Error('材料不足，请先寻材');const title=name.trim().slice(0,24)||'无名长刀';for(const [id,n] of Object.entries(costs)){if(id==='iron')s.iron-=Number(n);else s.materials[id]-=Number(n);}const w={id:nextWeaponId(),name:title,...spec,appearance:weaponAppearance(spec.appearance),dropped:null};s.weapons.push(w);s.weaponEquipped=w.id;},'长刀已制成并装入行囊，下次进入实验地图装备。');},
+    equipWeapon(id:string){return change(s=>{if(state.active)throw Error('请在大厅更换出发武器');if(!s.weapons.some(w=>w.id===id&&!w.dropped))throw Error('这把武器不在兵器架上');s.weaponEquipped=id;},'出发武器已更换。');},
+    dropWeapon(at:Point,owner='player'){
+      if(!state.active||!state.experimental)return false;
+      if(owner!=='player'){if(state.looseWeapons.some(d=>d.owner===owner))return false;update({looseWeapons:[...state.looseWeapons,{weapon:{...STARTER_WEAPON,id:nextWeaponId(),name:'古炉守卫长刀'},at:[...at],owner}]});return true;}
+      const w=state.runWeapon;if(!w)return false;
+      if(w.id==='starter'){update({runWeapon:null,looseWeapons:[...state.looseWeapons,{weapon:w,at:[...at],owner}]});return true;}
+      // Save loss before hiding the equipped weapon. On storage failure retain it for a safe retry.
+      if(!change(s=>{const stored=s.weapons.find(v=>v.id===w.id);if(!stored)throw Error('未找到装备存档');stored.dropped=[...at];if(s.weaponEquipped===w.id)s.weaponEquipped=null;}))return false;
+      update({runWeapon:null,notice:'武器掉落在倒下的位置，回去靠近即可拾回。'});return true;
+    },
+    recoverWeapons(at:Point,alive:boolean){
+      if(!state.active||!state.experimental||!alive)return false;
+      const near=(p:number[])=>Math.hypot(at[0]-p[0],at[2]-p[2])<2.2&&Math.abs(at[1]-p[1])<2.5;
+      const saved=state.weapons.find(w=>w.dropped&&near(w.dropped));
+      if(saved){if(!change(s=>{const w=s.weapons.find(w=>w.id===saved.id);if(!w?.dropped)throw Error('武器已被拾取');w.dropped=null;if(!state.runWeapon||state.runWeapon.id==='starter')s.weaponEquipped=w.id;}))return false;update({runWeapon:(!state.runWeapon||state.runWeapon.id==='starter')?{...saved,dropped:null}:state.runWeapon,notice:'已拾回 '+saved.name});return true;}
+      const loose=state.looseWeapons.find(d=>near(d.at));if(!loose)return false;
+      if(loose.weapon.id!=='starter'&&!change(s=>{if(s.weapons.length>=40)throw Error('兵器架已满，武器仍在原地');if(!s.weapons.some(w=>w.id===loose.weapon.id))s.weapons.push({...loose.weapon});if(!state.runWeapon||state.runWeapon.id==='starter')s.weaponEquipped=loose.weapon.id;}))return false;
+      update({looseWeapons:state.looseWeapons.filter(d=>d!==loose),runWeapon:!state.runWeapon||state.runWeapon.id==='starter'?loose.weapon:state.runWeapon,notice:'已拾取 '+loose.weapon.name});return true;
+    },
     accept(){if(state.active&&state.experimental&&state.nearby==='camp')update({accepted:true,notice:'石师傅：两处原材就够交差。北边的守卫看着古炉，想多带些材料再去挑战。'});},
     expeditionTick(at:Point,alive:boolean,dt:number){
       if(!state.active||!state.experimental||state.banked)return;

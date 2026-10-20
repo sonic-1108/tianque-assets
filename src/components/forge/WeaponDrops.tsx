@@ -1,0 +1,5 @@
+import React,{useSyncExternalStore} from 'react';
+import {Html} from '@react-three/drei';
+import {adventure} from '../../adventure';
+import {ForgedWeapon} from './WeaponViewer';
+export function WeaponDrops(){const s=useSyncExternalStore(adventure.subscribe,adventure.getSnapshot);if(!s.active||!s.experimental)return null;const drops=[...s.weapons.filter(w=>w.dropped).map(w=>({weapon:w,at:w.dropped})),...s.looseWeapons];return <group>{drops.map(d=><group key={d.weapon.id} position={d.at}><group position={[0,.35,0]} rotation={[0,.5,-1.2]}><ForgedWeapon design={d.weapon}/></group><mesh position={[0,.06,0]} rotation={[-Math.PI/2,0,0]}><ringGeometry args={[.8,.85,40]}/><meshBasicMaterial color="#e9be70"/></mesh><Html center position={[0,2,0]} distanceFactor={15} zIndexRange={[5,0]} style={{pointerEvents:'none'}}><div style={{color:'#f8df9f',background:'#17201de8',padding:'6px 12px',fontSize:12,whiteSpace:'nowrap'}}>遗落兵器 · {d.weapon.name}<br/><small>靠近拾取</small></div></Html></group>)}</group>}
