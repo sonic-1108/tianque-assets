@@ -4,7 +4,7 @@ import {CAREER_HEROES,CAREER_MAPS,CONTRACTS} from '../../shared/career.js';
 import {CLASS_CONFIGS} from './CombatData';
 import {MAPS} from '../maps';
 import './career.css';
-const portraits={Berserker:'berserker',Ranger:'ranger',BuddhistMage:'monk',Shadowblade:'shadowblade',Emperor:'emperor',Trader:'trader',HeavyHealer:'dixian'};
+const portraits={Berserker:'berserker',Ranger:'ranger',BuddhistMage:'monk',Shadowblade:'shadowblade',Emperor:'emperor',Trader:'trader',HeavyHealer:'dixian2'};
 export function CareerHall({name,onClose,onStart}:{name:string;onClose:()=>void;onStart:(hero:any,map:any,kind:string)=>Promise<void>}){
  const root=useRef<HTMLElement>(null);
  const s=useSyncExternalStore(career.subscribe,career.getSnapshot),[hero,setHero]=useState('Berserker'),[map,setMap]=useState('temple'),[kind,setKind]=useState('scout'),[confirm,setConfirm]=useState(false);
