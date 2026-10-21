@@ -804,9 +804,18 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   }, [asset, isPlayer, classId]);
 
   const gl = useThree((st) => st.gl);
+  const cam = useThree((st) => st.camera);
+  const scn = useThree((st) => st.scene);
   useEffect(() => {
-    if (model) preupload(gl, model);
-  }, [gl, model]);
+    if (!model) return;
+    preupload(gl, model);
+    // a model that arrives after the scene's shader warm-up (a 3v3 fetches up to seven) compiles in the background
+    // too, instead of freezing the first frame it's drawn
+    const t = setTimeout(() => {
+      if (!(globalThis as any).__TQ_NOWARM) (gl as any).compileAsync?.(model, cam, scn)?.catch?.(() => {});
+    }, 0);
+    return () => clearTimeout(t);
+  }, [gl, model, cam, scn]);
 
   // Mixer, bones, weapons
   useEffect(() => {

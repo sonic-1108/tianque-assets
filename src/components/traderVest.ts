@@ -293,19 +293,52 @@ function buildCanopy() {
   OUTLINE.forEach(([x, y], i) => (i ? mk.lineTo(...(toPx(x, y) as [number, number])) : mk.moveTo(...(toPx(x, y) as [number, number]))));
   mk.closePath();
   mk.fill();
-  const loft = document.createElement('canvas');
-  loft.width = loft.height = N;
-  const lc = loft.getContext('2d', { willReadFrequently: true })!;
-  lc.filter = 'blur(18px)';
-  lc.drawImage(mask, 0, 0);
-  lc.filter = 'none';
-  lc.globalCompositeOperation = 'multiply';
-  lc.drawImage(mask, 0, 0); // nothing outside the cut
-  const loftPx = lc.getImageData(0, 0, N, N).data;
+  // loft = distance in from the cut edge, worked out on a small grid (a canvas blur here took seconds to read back)
+  const G = 128;
+  // inside test straight on the outline polygon (no canvas readback: that waits on the GPU)
+  const inPoly = (x: number, y: number) => {
+    let c = false;
+    for (let i = 0, j = OUTLINE.length - 1; i < OUTLINE.length; j = i++) {
+      const [xi, yi] = OUTLINE[i], [xj, yj] = OUTLINE[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  const dist = new Float32Array(G * G);
+  for (let gy = 0; gy < G; gy++)
+    for (let gx = 0; gx < G; gx++) {
+      const x = ((gx + 0.5) / G) * 1.12 - 0.56;
+      const y = (1 - (gy + 0.5) / G) * 0.96 - 0.48;
+      dist[gy * G + gx] = inPoly(x, y) ? 1e6 : 0;
+    }
+  // two-pass chamfer distance (cells)
+  for (let y = 0; y < G; y++)
+    for (let x = 0; x < G; x++) {
+      const i = y * G + x;
+      if (!dist[i]) continue;
+      let d = dist[i];
+      if (x > 0) d = Math.min(d, dist[i - 1] + 1);
+      if (y > 0) d = Math.min(d, dist[i - G] + 1);
+      if (x > 0 && y > 0) d = Math.min(d, dist[i - G - 1] + 1.414);
+      if (x < G - 1 && y > 0) d = Math.min(d, dist[i - G + 1] + 1.414);
+      dist[i] = d;
+    }
+  for (let y = G - 1; y >= 0; y--)
+    for (let x = G - 1; x >= 0; x--) {
+      const i = y * G + x;
+      if (!dist[i]) continue;
+      let d = dist[i];
+      if (x < G - 1) d = Math.min(d, dist[i + 1] + 1);
+      if (y < G - 1) d = Math.min(d, dist[i + G] + 1);
+      if (x < G - 1 && y < G - 1) d = Math.min(d, dist[i + G + 1] + 1.414);
+      if (x > 0 && y < G - 1) d = Math.min(d, dist[i + G - 1] + 1.414);
+      dist[i] = d;
+    }
   const inside = (x: number, y: number) => {
     const [px, py] = toPx(x, y);
-    const i = (Math.min(N - 1, Math.max(0, py | 0)) * N + Math.min(N - 1, Math.max(0, px | 0))) * 4;
-    return loftPx[i] / 255;
+    const gx = Math.min(G - 1, Math.max(0, ((px / N) * G) | 0));
+    const gy = Math.min(G - 1, Math.max(0, ((py / N) * G) | 0));
+    return THREE.MathUtils.smoothstep(dist[gy * G + gx], 0, 9);
   };
 
   // shell fabric: orange ripstop, quilted in horizontal baffles, the zip down the middle, chest pocket and label
