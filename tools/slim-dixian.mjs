@@ -1,4 +1,4 @@
-// 地仙's Tripo export: rename his three clips to what the rig looks for (idle / run / walk), then slim like the others
+// 地仙's Tripo export: keep only 小碎步 (as walk; 飘行 and 全真不动 lie him flat in the air, so idle and run are 霍岩's), then slim like the others
 // (tools/slim-model.mjs) but keep the 2K texture: his embroidery is the whole look.
 // node tools/slim-dixian.mjs <src.glb> <dst.glb>
 import { NodeIO } from '@gltf-transform/core';
@@ -7,7 +7,7 @@ import { textureCompress, resample, prune, meshopt, dedup } from '@gltf-transfor
 import { MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
 const [, , src, dst] = process.argv;
-const NAMES = { 全真不动: 'idle', 飘行: 'run', 小碎步: 'walk' };
+const NAMES = { 小碎步: 'walk' };
 await MeshoptEncoder.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 const doc = await io.read(src);

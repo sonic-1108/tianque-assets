@@ -26,7 +26,7 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
   Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
   Emperor: `${import.meta.env.BASE_URL}emperor.glb`,
-  HeavyHealer: `${import.meta.env.BASE_URL}dixian.glb`, // 地仙 青囊翁 (Tripo, Mixamo rig): his own float (idle), glide (run) and small steps (walk); 霍岩's moves for the rest
+  HeavyHealer: `${import.meta.env.BASE_URL}dixian.glb`, // 地仙 青囊翁 (Tripo, Mixamo rig): his own small steps (walk); 霍岩's idle, run and fighting moves
   Trader: `${import.meta.env.BASE_URL}trader.glb`, // 交易员 陈百万 (Tripo, Mixamo rig): his own idle/run/walk, 霍岩's fighting moves
   Guard: `${import.meta.env.BASE_URL}guard.glb`, // 御林军 (until it's uploaded, 霍岩's body in red-and-gold armour) // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
 };
@@ -184,12 +184,12 @@ const EMPEROR_CLIP_PLAN: Record<string, ClipSpec> = {
   skill_4: { match: ['angry_03'], start: 0.3, end: 0.8, fit: true },
   ultimate: { match: ['angry_01'], start: 0.3, end: 0.78, fit: true },
 };
-/** 地仙 overrides: his own float, glide and small steps; borrowed gestures for the casts. skill_1 清风诀 both arms raised to
+/** 地仙 overrides: his own small steps (walk); 霍岩's idle and run (his Tripo float and glide lie him flat); borrowed gestures for the casts. skill_1 清风诀 both arms raised to
  *  call the wind, skill_2 鹤羽护 a nod and an open hand, skill_3 缩地成寸 his glide sped up, skill_4 还魂 a long bow over
  *  the fallen, ultimate 人间不渡 arms flung up to the crane */
 const DIXIAN_CLIP_PLAN: Record<string, ClipSpec> = {
   ...CLIP_PLAN,
-  idle: { match: ['idle'], loop: true },
+  idle: { match: ['standing_relax', 'idle'], loop: true, speed: 0.7 },
   run: { match: ['run'], loop: true },
   walk: { match: ['walk'], loop: true },
   skill_1: { match: ['cheer'], start: 0.0, end: 0.5, fit: true },
@@ -778,6 +778,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife>; left?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife> }>({});
   const traderVestRef = useRef<TraderVest | null>(null);
   const glideBlendRef = useRef(0);
+  const hoverRef = useRef(0);
   const glideGrip = useMemo(() => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), dir: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) }), []);
 
   useEffect(() => {
@@ -930,7 +931,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       right.group.traverse((o: any) => {
         if (o.isMesh) o.visible = false;
       });
-      right.group.add(buildCraneStaff());
+      const staff = buildCraneStaff();
+      staff.rotation.set(Math.PI, 0, 0); // along the hand toward the wrist: the crane head up when the arm hangs
+      staff.position.set(0, 0.36, 0.02); // slid down the fist so the foot of it reaches the ground
+      if (bones.righthand) bones.righthand.add(staff);
+      spearRef.current = staff;
     }
     let spear: THREE.Group | null = null;
     if (classId === 'Guard') {
@@ -939,7 +944,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       spear = buildSpear();
       if (bones.righthand) bones.righthand.add(spear);
     }
-    spearRef.current = spear;
+    if (classId !== 'HeavyHealer') spearRef.current = spear; // (地仙's staff took this slot above)
     let crown: THREE.Group | null = null;
     if (classId === 'Emperor') {
       // 天子剑: one gilded blade (and, only while his own model is missing, a stand-in 冕冠)
@@ -1151,6 +1156,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       backward = lm[1] < -0.35;
       key = backward ? 'walk' : 'run';
     }
+    // 地仙 never runs: he floats along in his standing pose (飘行), see the hover below
+    if (classId === 'HeavyHealer' && (key === 'run' || key === 'walk' || key === 'skill_3')) key = 'idle';
     if (c.swimming && (key === 'idle' || key === 'run' || key === 'walk' || key === 'jump') && actionsRef.current.swim) key = 'swim';
     else if (getupRef.current > 0 && (key === 'idle' || key === 'run' || key === 'walk') && actionsRef.current.getup) key = 'getup';
     else if (c.celebrate && key === 'idle' && actionsRef.current.cheer) key = 'cheer';
@@ -1309,6 +1316,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     let leanZ = 0;
     if (st === 'skill_3' && classId === 'Berserker') leanX = 0.32;
     else if (st === 'skill_3' && classId === 'BuddhistMage') leanX = 0.1;
+    else if (st === 'skill_3' && classId === 'HeavyHealer') leanX = 0.34; // 缩地成寸: shooting forward low over the ground
     else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
     else if (st === 'launched') leanX = -0.45;
     else if (st === 'hitstun') leanX = -0.12;
@@ -1317,12 +1325,25 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       leanX = 0.12; // chest in to the ladder
       leanZ = Math.sin(ladderPhaseRef.current) * 0.06; // hips sway with each step
     } else if (key === 'run' && !backward) leanX = 0.08;
+    else if (classId === 'HeavyHealer' && speed > 0.6 && c.isGrounded && (st === 'idle' || st === 'run')) {
+      // 飘行: lean into the glide, a slow side to side drift like a leaf on the wind
+      leanX = backward ? -0.06 : 0.13;
+      leanZ = Math.sin(performance.now() * 0.0021) * 0.05;
+    }
     leanRef.current.x = THREE.MathUtils.damp(leanRef.current.x, leanX, 10, delta);
     leanRef.current.y = THREE.MathUtils.damp(leanRef.current.y, leanZ, 10, delta);
 
     pose.rotation.set(leanRef.current.x - flipRef.current, strafeYawRef.current + spinRef.current, leanRef.current.y, 'YXZ');
     // 梵音 floats a little off the ground while meditating for 万佛朝宗
-    const levitate = classId === 'BuddhistMage' && st === 'ultimate' ? 0.45 + Math.sin(performance.now() * 0.003) * 0.05 : 0;
+    let levitate = classId === 'BuddhistMage' && st === 'ultimate' ? 0.45 + Math.sin(performance.now() * 0.003) * 0.05 : 0;
+    if (classId === 'HeavyHealer') {
+      // 地仙 floats: a hand's breadth off the ground standing, higher gliding, highest in the step and the crane's call;
+      // he comes down to earth when he's knocked about, climbing, swimming or sitting
+      const down = c.hp <= 0 || st === 'knockdown' || st === 'launched' || st === 'hitstun' || st === 'dead' || st === 'buried' || !!c.swimming || c.treeClimb !== undefined || sitBlendRef.current > 0.3 || !c.isGrounded;
+      const want = down ? 0 : st === 'skill_3' ? 0.38 : st === 'ultimate' ? 0.55 : speed > 0.6 ? 0.26 : 0.16;
+      hoverRef.current = THREE.MathUtils.damp(hoverRef.current, want, down ? 14 : 4, delta);
+      levitate = hoverRef.current * (1 + Math.sin(performance.now() * 0.0019) * 0.25);
+    }
     pose.position.y = HIP_PIVOT + levitate - 0.62 * sitBlendRef.current; // sitting: down onto the cushion
 
     // ---------- hit flash & blood rage ----------
