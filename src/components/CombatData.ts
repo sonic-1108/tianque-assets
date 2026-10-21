@@ -191,9 +191,9 @@ export const ACTION_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPh
 
 /** 暗器 (Ranger): quick, light actions. Merged over ACTION_PHASE_CONFIGS. */
 export const RANGER_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPhaseConfig>> = {
-  attack_1: { totalDuration: 0.34, startup: 0.07, active: 0.15, recovery: 0.12, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
-  attack_2: { totalDuration: 0.34, startup: 0.07, active: 0.15, recovery: 0.12, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
-  attack_3: { totalDuration: 0.42, startup: 0.08, active: 0.1, recovery: 0.24, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
+  attack_1: { totalDuration: 0.42, startup: 0.09, active: 0.17, recovery: 0.16, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  attack_2: { totalDuration: 0.42, startup: 0.09, active: 0.17, recovery: 0.16, canMoveRatio: 0.3, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
+  attack_3: { totalDuration: 0.5, startup: 0.1, active: 0.1, recovery: 0.3, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: false },
   dodge: { totalDuration: 0.42, startup: 0.02, active: 0.3, recovery: 0.1, canMoveRatio: 0, forwardMomentum: 15, cancelableByDodge: false, cancelableBySkill: true, cancelableByJump: false, allowAirCast: true },
   skill_1: { totalDuration: 0.42, startup: 0.12, active: 0.08, recovery: 0.22, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
   skill_2: { totalDuration: 0.36, startup: 0.1, active: 0.08, recovery: 0.18, canMoveRatio: 0, forwardMomentum: 0, cancelableByDodge: true, cancelableBySkill: true, cancelableByJump: true, allowAirCast: true },
@@ -230,6 +230,9 @@ export const SHADOW_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPh
 
 /** every fighter's HP is its class hp times this (rounds were about 25 s, now about twice that). Hero damage is not scaled; map hazards are, so they stay the same share of a health bar. */
 export const HP_SCALE = 2;
+
+/** 狂刃 血怒: 5 s of fast, life-drinking cuts. speed: basic attacks play this much faster; lifesteal: share of each hit's damage healed */
+export const RAGE = { t: 5, dmg: 1.2, lifesteal: 0.35, speed: 1.4, move: 1.15 };
 
 export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
   Berserker: {
@@ -278,7 +281,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
         id: 'blood_rage',
         name: '血怒',
         key: '4',
-        description: '消耗10%当前生命，狂暴8秒：伤害提升35%，每次命中回复伤害15%的生命，移动加快。',
+        description: '消耗10%当前生命，暴怒5秒：普攻出刀快40%，伤害提升20%，每次命中按造成伤害的35%回血，移动加快。',
         mpCost: 0,
         hpCostPct: 10,
         cooldown: 12.0,

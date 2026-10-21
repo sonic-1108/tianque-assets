@@ -5,6 +5,7 @@ import { applyCharacterShading } from './characterShading';
 import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose, fistCentre } from './climbPose';
 import { splitTraderVest, disposeTraderVest, TraderVest } from './traderVest';
 import { TRADER } from '../trader';
+import { RAGE } from './CombatData';
 import { useFrame, useThree } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils, MeshoptDecoder } from 'three-stdlib';
 
@@ -1099,6 +1100,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       cur.setEffectiveTimeScale(backward ? -ts : ts);
     }
     if (cur && currentKeyRef.current === 'skill_3') cur.setEffectiveTimeScale(2.0);
+    // 狂刃 血怒: the swings play as fast as they land
+    if (cur && currentKeyRef.current.startsWith('attack_') && st.startsWith('attack_') && c.buffs.some((b) => b.type === 'blood_rage')) cur.setEffectiveTimeScale(timeScaleFor(currentKeyRef.current, c.stateDuration) * RAGE.speed);
     if (cur && currentKeyRef.current === 'run' && c.treeClimb !== undefined && c.climbMode !== 'ladder') cur.setEffectiveTimeScale(1.9);
     if (cur && currentKeyRef.current === 'swim') cur.setEffectiveTimeScale(speed > 0.6 ? THREE.MathUtils.clamp(speed / 3.5, 0.7, 1.4) : 0.45);
 

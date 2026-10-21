@@ -27,7 +27,7 @@ import { EmpMove, CombatantState, GameState, TargetingState, CharacterActionStat
 import { FX, muteable } from './fxMute';
 import { GameInputSnapshot, InputKeyAction } from './input';
 import { bank } from './wallet';
-import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS, HP_SCALE } from './components/CombatData';
+import { ACTION_PHASE_CONFIGS, RANGER_PHASE_CONFIGS, MONK_PHASE_CONFIGS, SHADOW_PHASE_CONFIGS, CLASS_CONFIGS, HP_SCALE, RAGE } from './components/CombatData';
 import { CharacterRig3D, AnimationDebugInfo, ModelLoadProgress, RigSockets } from './components/CharacterRig3D';
 import { Maps3D } from './components/Maps3D';
 import { useSettings, QUALITY, setSettings, getSettings, AI_LEVELS } from './settings';
@@ -1231,7 +1231,8 @@ function GameImpl({
     for (let i = 0; i < N; i++) {
       const c = fighters[i];
       const cdt = c.hitStopTimer > 0 ? dt * 0.08 : dt;
-      c.stateTimer += cdt;
+      // 血怒: basic swings come out faster
+      c.stateTimer += c.actionState.startsWith('attack_') && c.buffs.some((b) => b.type === 'blood_rage') ? cdt * RAGE.speed : cdt;
       // Buried: stuck in the ground, then blasted up into the air (juggle window)
       if (c.actionState === 'buried') {
         c.vel[0] = 0;
@@ -2272,7 +2273,7 @@ function GameImpl({
           c.cooldowns.skill4 = sk.cooldown;
           start('skill_4');
           c.buffs = c.buffs.filter((b) => b.type !== 'blood_rage');
-          c.buffs.push({ id: `rage_${slot}_${Date.now()}`, type: 'blood_rage', duration: 8, value: 0.35 });
+          c.buffs.push({ id: `rage_${slot}_${Date.now()}`, type: 'blood_rage', duration: RAGE.t, value: RAGE.lifesteal });
           vfx.pillarAt(1.1, sideA(slot) ? '#ff1f1f' : '#1f6bff', slot);
           vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]), c.pos[2]), 2.6, sideA(slot) ? '#ff2a1a' : '#2a8bff', 0.6, 0.14, 0.5);
           vfx.embers(vC.set(c.pos[0], 0.2, c.pos[2]), 45, sideA(slot) ? '#ff3b2a' : '#3b8bff', 0.7, 3.5, 0.08);
@@ -2349,7 +2350,7 @@ function GameImpl({
           if (whirl) mult = 0.45;
           if (rangerThrow) mult = 0.8;
           if (c.actionState === 'block') mult = 0.25;
-          if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= 1.15;
+          if (c.buffs.some((b) => b.type === 'blood_rage')) mult *= RAGE.move;
           if (inZen(c)) mult *= 0.5;
           if (c.swimming) mult *= 0.55;
           else if (map.id === 'forest' && waterDepth(c.pos[0], c.pos[2]) > 0.15 && c.pos[1] < FOREST.waterY) mult *= inSwamp(c.pos[0], c.pos[2]) ? 0.5 : 0.65; // wading (the bog's mud drags worse)
@@ -2818,7 +2819,7 @@ function GameImpl({
       const materialCounter = (att.counterTimer ?? 0) > 0;
       const rage = att.buffs.some((b) => b.type === 'blood_rage');
       // 狂刃 (霍岩): tougher (2000 HP) but hits a little softer
-      let dmg = base * aiLevelDmg(att, def) * ((att.warT ?? 0) > 0 ? WAR.drum.dmg : 1) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.6 : 1.4) : 1) * (rage ? 1.35 : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
+      let dmg = base * aiLevelDmg(att, def) * ((att.warT ?? 0) > 0 ? WAR.drum.dmg : 1) * (att.classId === 'Berserker' ? 0.85 : att.classId === 'Guard' ? 0.7 : isBossFighter(att) ? (att.hp < att.maxHp * 0.35 ? 1.6 : 1.4) : 1) * (rage ? RAGE.dmg : 1) * (att.classId === map.homeClass && !(globalThis as any).__TQ_SIM ? HOME_BONUS : 1) * (map.id === 'desert' && mapRuntime.desert.beaconSide >= 0 && mapRuntime.desert.beaconSide === sideOf(att) ? DESERT.beaconDmg : 1);
       // 禅定结界: the monk standing in his own circle hits 10% harder and takes 10% less
       if (inOwnZen(att)) dmg *= 1.1;
       if (inOwnZen(def)) dmg *= 0.9;
@@ -2952,7 +2953,15 @@ function GameImpl({
       att.comboDamage += dmg;
       att.highestCombo = Math.max(att.highestCombo, att.comboCount);
       att.comboResetTimer = 2.5;
-      if (rage) att.hp = Math.min(att.maxHp, att.hp + Math.round(dmg * 0.15));
+      if (rage) {
+        // 血怒: drink a share of every hit
+        const heal = Math.min(att.maxHp - att.hp, Math.round(dmg * RAGE.lifesteal));
+        if (heal > 0) {
+          att.hp += heal;
+          vfx.damageNumber(vB.set(att.pos[0], att.pos[1] + 2.25, att.pos[2]), `+${heal}`, false, '#4ade80');
+          vfx.embers(vB.set(att.pos[0], att.pos[1] + 1.1, att.pos[2]), 5, '#ff3b3b', 0.35, 2, 0.06);
+        }
+      }
 
       const protectedNow = (def.protectTimer ?? 0) > 0;
       // light darts only make you flinch: they chip HP but never interrupt, so a ranged fighter can't stun-lock
