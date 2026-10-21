@@ -2621,6 +2621,7 @@ function GameImpl({
         base *= 1 + TRADER.compound.per * (att.compound ?? 0);
       }
       if ((def.shortT ?? 0) > 0) base *= TRADER.short.dmg; // 做空: everyone hits a shorted fighter harder
+      if ((att.shortT ?? 0) > 0) base *= TRADER.short.atk; // and a shorted fighter hits softer
       try {
         applyHitInner(slot, att, def, base, oIn);
       } finally {

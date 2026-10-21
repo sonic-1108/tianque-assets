@@ -180,7 +180,7 @@ const TRADER_HOTBAR: HotbarEntry[] = [
     tip: '组队时撒进对面人堆里，他们会自己打起来；一打一时对手乱走，正好接三连。' },
   { id: 'patagonia', key: '3', name: TS[2].name, icon: TS[2].icon, short: '滑翔回血', cdKey: 'skill3', meta: tMeta(2), desc: TS[2].description,
     tip: '被围住或残血时往外飞，8 秒内边滑翔边回血；再按一次 3 收起马甲，也会停止回血。' },
-  { id: 'short_sell', key: '4', name: TS[3].name, icon: TS[3].icon, short: '掉血易伤', cdKey: 'skill4', meta: tMeta(3), desc: TS[3].description,
+  { id: 'short_sell', key: '4', name: TS[3].name, icon: TS[3].icon, short: '防速攻 -20%', cdKey: 'skill4', meta: tMeta(3), desc: TS[3].description,
     tip: '先做空再开大，黑色星期一多三成多伤害，掉的血还给你回血。' },
   { id: 'black_monday', key: 'R', name: TS[4].name, icon: TS[4].icon, short: '红K砸盘', cdKey: 'ultimate', super: true, meta: tMeta(4), desc: TS[4].description,
     tip: '对手被撒的钱滑倒时放，最后那根巨型阴线基本躲不开。' },
