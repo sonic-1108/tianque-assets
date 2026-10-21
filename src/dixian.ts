@@ -5,11 +5,11 @@ export const DIXIAN = {
   /** 悬壶 passive: heals on someone under this share of their HP are stronger */
   mercy: { below: 0.3, mult: 1.5 },
   /** 1 清风诀: stand still and channel, then a big heal on the most hurt ally in range (yourself if nobody else) */
-  breeze: { cast: 1.2, heal: 0.35, range: 16 },
+  breeze: { cast: 0.9, heal: 0.35, range: 16 },
   /** left click: jade qi bolts off the staff, a little homing; the third of the combo is big */
   bolt: { speed: 22, life: 1.0, r: 0.75, home: 2.5, dmg: 50, bigDmg: 95, range: 22 },
   /** 2 损有余: a thread of qi from the nearest enemy to the most hurt ally; their life drains across it */
-  drain: { range: 14, keep: 18, t: 3, rate: 0.07 },
+  drain: { range: 18, keep: 22, t: 3, rate: 0.07 },
   /** 4 缩地成寸 also wraps whoever he reaches (or himself) in 鹤羽: a shield, and a burst that throws enemies off */
   shield: { share: 0.28, t: 6, range: 16, pushR: 3.6, push: 8 },
   /** 3 地脉回春: a ring of earth qi on the ground; allies inside heal every second, an enemy who comes in is caught by

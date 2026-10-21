@@ -99,6 +99,10 @@ function buildCrane() {
   return root;
 }
 
+const vA = new THREE.Vector3();
+const vB = new THREE.Vector3();
+const vC = new THREE.Vector3();
+const UPV = new THREE.Vector3(0, 1, 0);
 const MAXS = 6;
 const MAXK = 3;
 const MAXF = 9;
@@ -133,21 +137,47 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       g.visible = false;
       return g;
     });
-    // 损有余: a glowing pink thread from the enemy to the ally, sagging a little
+    // 损有余: a thick glowing pink beam from the enemy to the ally (bright core in a wide halo), a red ring on the one
+    // drained and a green one on the one fed
+    const unitBeam = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
     const threads = Array.from({ length: 4 }, () => {
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(17 * 3), 3));
-      const l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: '#f472b6', transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
-      l.frustumCulled = false;
-      l.visible = false;
-      return l;
+      const g = new THREE.Group();
+      const core = new THREE.Mesh(unitBeam, new THREE.MeshBasicMaterial({ color: '#fdf2f8', transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending }));
+      core.name = 'core';
+      const halo = new THREE.Mesh(unitBeam, new THREE.MeshBasicMaterial({ color: '#f472b6', transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      halo.name = 'halo';
+      const from = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#f43f5e', transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+      from.name = 'from';
+      const to = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#4ade80', transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+      to.name = 'to';
+      g.add(core, halo, from, to);
+      g.visible = false;
+      g.traverse((o) => (o.frustumCulled = false));
+      return g;
+    });
+    // 魂印: a turning violet circle at the feet and a faint column of light over whoever wears it
+    const souls = Array.from({ length: MAXF }, () => {
+      const g = new THREE.Group();
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.95, 6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#a78bfa', transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+      ring.name = 'ring';
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 2.6, 16, 1, true), new THREE.MeshBasicMaterial({ color: '#c4b5fd', transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+      col.position.y = 1.3;
+      g.add(ring, col);
+      g.visible = false;
+      return g;
+    });
+    // 清风诀 while it's being channelled: a green ring at his feet closing in as the cast fills
+    const winds = Array.from({ length: 4 }, () => {
+      const m = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#86efac', transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+      m.visible = false;
+      return m;
     });
     const shells = Array.from({ length: MAXF }, () => {
       const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mats.shell);
       m.visible = false;
       return m;
     });
-    return { discs, walls, cranes, shells, bolts, threads };
+    return { discs, walls, cranes, shells, bolts, threads, souls, winds };
   }, [mats]);
   const g = useRef<THREE.Group>(null);
   useFrame((st) => {
@@ -201,21 +231,45 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       g.scale.setScalar((b.big ? 1.6 : 1) * (0.9 + 0.15 * Math.sin(time * 30 + k)));
     });
     const fs = fighters.current;
-    parts.threads.forEach((l, k) => {
+    parts.threads.forEach((g, k) => {
       const T = DX.tethers[k];
       const a = T && fs[T.from];
       const b = T && fs[T.to];
-      l.visible = !!(a && b);
+      g.visible = !!(a && b);
       if (!a || !b) return;
-      const arr = (l.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array;
-      for (let i = 0; i <= 16; i++) {
-        const q = i / 16;
-        arr[i * 3] = a.pos[0] + (b.pos[0] - a.pos[0]) * q;
-        arr[i * 3 + 1] = a.pos[1] + 1.2 + (b.pos[1] - a.pos[1]) * q + Math.sin(q * Math.PI) * 0.5 + Math.sin(time * 12 + q * 9) * 0.05;
-        arr[i * 3 + 2] = a.pos[2] + (b.pos[2] - a.pos[2]) * q;
+      vA.set(a.pos[0], a.pos[1] + 1.2, a.pos[2]);
+      vB.set(b.pos[0], b.pos[1] + 1.2, b.pos[2]);
+      const len = vA.distanceTo(vB);
+      const pulse = 1 + 0.25 * Math.sin(time * 14);
+      for (const name of ['core', 'halo']) {
+        const m = g.getObjectByName(name)!;
+        m.position.copy(vA).add(vB).multiplyScalar(0.5);
+        m.quaternion.setFromUnitVectors(UPV, vC.copy(vB).sub(vA).normalize());
+        const w = name === 'core' ? 0.05 : 0.16 * pulse;
+        m.scale.set(w, len, w);
       }
-      l.geometry.attributes.position.needsUpdate = true;
-      (l.material as THREE.LineBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(time * 10);
+      const from = g.getObjectByName('from')!;
+      from.position.set(a.pos[0], a.pos[1] + 0.06, a.pos[2]);
+      from.scale.setScalar(0.9 + 0.2 * Math.sin(time * 8));
+      const to = g.getObjectByName('to')!;
+      to.position.set(b.pos[0], b.pos[1] + 0.06, b.pos[2]);
+      to.scale.setScalar(0.9 + 0.2 * Math.sin(time * 8 + 2));
+    });
+    parts.souls.forEach((g, k) => {
+      const f = fs[k];
+      g.visible = !!f && (f.soulT ?? 0) > 0 && f.hp > 0;
+      if (!g.visible) return;
+      g.position.set(f.pos[0], f.pos[1] + 0.05, f.pos[2]);
+      g.getObjectByName('ring')!.rotation.y = time * 1.5;
+    });
+    parts.winds.forEach((m, k) => {
+      const ch = DX.channels.filter((c) => c.kind === 'breeze')[k];
+      const c = ch && fs[ch.owner];
+      m.visible = !!c;
+      if (!c) return;
+      m.position.set(c.pos[0], c.pos[1] + 0.06, c.pos[2]);
+      m.scale.setScalar(2.4 - 1.7 * Math.min(1, ch.t / ch.dur));
+      m.rotation.y = time * 3;
     });
     // 鹤羽护
     parts.shells.forEach((m, k) => {
@@ -249,6 +303,12 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       ))}
       {parts.threads.map((d, k) => (
         <primitive key={`t${k}`} object={d} />
+      ))}
+      {parts.souls.map((d, k) => (
+        <primitive key={`o${k}`} object={d} />
+      ))}
+      {parts.winds.map((d, k) => (
+        <primitive key={`n${k}`} object={d} />
       ))}
     </group>
   );

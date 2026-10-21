@@ -51,7 +51,9 @@ const { chromium } = require(process.env.PW || 'playwright');
     pin = null; park(ally, 6, 0);
     ally.hp = Math.round(ally.maxHp * 0.4);
     let h0 = ally.hp;
+    T.input.current.actions.forward = true; // walking while casting must not break it
     await press('skill1', 1.6);
+    T.input.current.actions.forward = false;
     out.breeze = { healed: ally.hp - h0, pctOfMax: +((ally.hp - h0) / ally.maxHp).toFixed(2) };
     // 2 损有余: foe 6 m off, ally hurt
     ally.hp = Math.round(ally.maxHp * 0.4); h0 = ally.hp;

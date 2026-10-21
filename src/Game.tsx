@@ -1913,7 +1913,9 @@ function GameImpl({
       const canJump = c.isGrounded && (free || (basic && phase === 'recovery'));
       const hasMove = intent.move.lengthSq() > 0.01;
 
-      if (phase === 'recovery' && progress >= 0.6 && hasMove && cur !== 'dodge' && !free) {
+      // (地仙's channels, 清风诀 and 还魂, are not walked out of: only a hit breaks them)
+      const dxChannel = c.classId === 'HeavyHealer' && DX.channels.some((ch) => fighters[ch.owner] === c);
+      if (phase === 'recovery' && progress >= 0.6 && hasMove && cur !== 'dodge' && !free && !dxChannel) {
         c.actionState = c.isGrounded ? 'run' : 'jump';
         c.stateDuration = 0;
       }
@@ -3491,7 +3493,7 @@ function GameImpl({
               foeT = f;
             }
           }
-          if (!foeT) return say('14米内没有敌人'), h.report('2: 损有余', '14米内没有敌人'), false;
+          if (!foeT) return say('18米内没有敌人'), h.report('2: 损有余', '18米内没有敌人'), false;
           if (!h.paySkill(1, 'skill2', '2')) return false;
           const to = neediest(D.drain.keep);
           h.start('skill_2');
@@ -3501,6 +3503,9 @@ function GameImpl({
           DX.tethers.push({ owner: slot, from: fighters.indexOf(foeT), to: fighters.indexOf(to), t: D.drain.t, acc: 0, shown: 0 });
           title(to === c ? '损有余' : `损有余 → ${to.tag || '队友'}`, '#f472b6');
           vfx.damageNumber(vA.set(foeT.pos[0], foeT.pos[1] + 2.5, foeT.pos[2]), '气血被牵走', true, '#f472b6');
+          vfx.sparkBurst(vB.set(foeT.pos[0], foeT.pos[1] + 1.2, foeT.pos[2]), 30, '#f472b6', 5, 0.08, UP, 1.0);
+          vfx.ring(vB.set(foeT.pos[0], foeT.pos[1] + 0.06, foeT.pos[2]), 2.2, '#f43f5e', 0.6, 0.14, 0.5);
+          vfx.ring(vB.set(to.pos[0], to.pos[1] + 0.06, to.pos[2]), 2.2, '#4ade80', 0.6, 0.14, 0.5);
           gameAudio.playCrispClick();
           return true;
         }
@@ -3635,7 +3640,9 @@ function GameImpl({
             tgt.soulT = D.revive.soulT;
             title(tgt === c ? '还魂 · 魂印' : `还魂 · 魂印 → ${tgt.tag || '队友'}`, '#c4b5fd');
             vfx.ring(vB.set(tgt.pos[0], tgt.pos[1] + 0.06, tgt.pos[2]), 1.6, '#c4b5fd', 0.7, 0.12, 0.6);
-            vfx.embers(vB.set(tgt.pos[0], tgt.pos[1] + 1, tgt.pos[2]), 20, '#ddd6fe', 0.8, 1.5, 0.08);
+            vfx.embers(vB.set(tgt.pos[0], tgt.pos[1] + 1, tgt.pos[2]), 30, '#ddd6fe', 1.0, 2.2, 0.09);
+            vfx.pillarAt(0.05, '#c4b5fd', fighters.indexOf(tgt));
+            vfx.damageNumber(vA.set(tgt.pos[0], tgt.pos[1] + 2.3, tgt.pos[2]), '免死一次 · 8秒', false, '#ddd6fe');
             gameAudio.playGong();
             return true;
           }

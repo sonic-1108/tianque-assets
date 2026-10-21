@@ -462,8 +462,8 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     passiveName: '悬壶',
     passiveDesc: '医者仁心：给生命低于30%的人治疗、转血或加护盾时，效果提升50%。',
     skills: [
-      { id: 'qingfeng', name: '清风诀', key: '1', description: '站定引导1.2秒，一阵青风落在16米内伤得最重的队友身上（没有队友就是自己），回复其35%最大生命。读条中挨打、被控或移动都会打断。', mpCost: 25, cooldown: 7, icon: '🍃' },
-      { id: 'drain_surplus', name: '损有余', key: '2', description: '天之道，损有余而补不足：从14米内最近的敌人身上牵出一道气线，连到伤得最重的队友（没有队友就是自己），3秒内每秒抽走敌人7%最大生命，全部转给队友。拉开18米线就断。', mpCost: 25, cooldown: 11, icon: '🧵' },
+      { id: 'qingfeng', name: '清风诀', key: '1', description: '站定引导0.9秒，一阵青风落在16米内伤得最重的队友身上（没有队友就是自己），回复其35%最大生命。读条中挨打或被控会打断，按方向键不会。', mpCost: 25, cooldown: 7, icon: '🍃' },
+      { id: 'drain_surplus', name: '损有余', key: '2', description: '天之道，损有余而补不足：从18米内最近的敌人身上牵出一道粉色气血光束，连到伤得最重的队友（没有队友就是自己），3秒内每秒抽走敌人7%最大生命，全部转给队友。拉开太远光束就断。', mpCost: 25, cooldown: 11, icon: '🧵' },
       { id: 'earth_spring', name: '地脉回春', key: '3', description: '鹤头杖往地上一点，前方展开半径4.5米的金色地脉法阵，持续8秒。队友在阵里每秒回复5%最大生命（8秒共40%）；敌人一踏进来就被地里钻出的树根缠住1.2秒（每个阵每人一次），之后在阵里走路慢三成。', mpCost: 30, cooldown: 16, icon: '🌿' },
       { id: 'fold_earth', name: '缩地成寸', key: '4', description: '缩地成寸：22米内有队友就一步赶到他身边，没有就向前方瞬行9米，途中短暂无敌。落地时鹤羽护体：给赶到的那个队友（或自己）一层白色护盾，吸收其28%最大生命的伤害，持续6秒，同时羽毛炸开把身边3.6米内的敌人推开。', mpCost: 20, cooldown: 10, icon: '👣' },
       { id: 'mortal_realm', name: '人间不渡', key: 'R', description: '【终极奥义】不入天阙，留守人间：仙鹤从天而降盘旋全场，20米内所有队友（含自己）立刻回复50%最大生命，解除定身、封印、做空等负面状态，并在4秒内不会被击倒、击飞或眩晕。', mpCost: 70, cooldown: 40, icon: '🕊️', isSuper: true },
