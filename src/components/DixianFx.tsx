@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { DX } from '../dixian';
 import { CombatantState } from '../types';
 
-// 地仙's things in the world: the 地脉回春 ring on the ground (a jade circle with a turning ring of glyph marks and
+// 地仙's things in the world: the 地脉回春 ring on the ground (a golden earth circle with a turning ring of glyph marks and
 // leaves of light rising), the white crane of 人间不渡 circling overhead, and a pale feather shell on whoever wears 鹤羽护.
 
 /** the spring's face: a soft jade disc, two rims and eight marks round the edge (drawn once) */
@@ -16,15 +16,15 @@ const springTex = (() => {
     c.width = c.height = 256;
     const g = c.getContext('2d')!;
     const grd = g.createRadialGradient(128, 128, 10, 128, 128, 126);
-    grd.addColorStop(0, 'rgba(134,239,172,0.05)');
-    grd.addColorStop(0.75, 'rgba(74,222,128,0.18)');
-    grd.addColorStop(0.97, 'rgba(187,247,208,0.55)');
-    grd.addColorStop(1, 'rgba(187,247,208,0)');
+    grd.addColorStop(0, 'rgba(242,204,107,0.05)');
+    grd.addColorStop(0.75, 'rgba(214,160,60,0.2)');
+    grd.addColorStop(0.97, 'rgba(250,224,150,0.6)');
+    grd.addColorStop(1, 'rgba(250,224,150,0)');
     g.fillStyle = grd;
     g.beginPath();
     g.arc(128, 128, 126, 0, Math.PI * 2);
     g.fill();
-    g.strokeStyle = 'rgba(220,252,231,0.85)';
+    g.strokeStyle = 'rgba(255,240,200,0.9)';
     g.lineWidth = 3;
     for (const r of [118, 92]) {
       g.beginPath();
@@ -107,7 +107,7 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
     () => ({
       disc: new THREE.MeshBasicMaterial({ map: springTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
       shell: new THREE.MeshBasicMaterial({ color: '#f0fdf4', transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending }),
-      wall: new THREE.MeshBasicMaterial({ color: '#86efac', transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+      wall: new THREE.MeshBasicMaterial({ color: '#e9b949', transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
     }),
     []
   );
@@ -125,12 +125,29 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       return m;
     });
     const cranes = Array.from({ length: MAXK }, () => buildCrane());
+    // 青气弹: a bright core in a soft green halo
+    const bolts = Array.from({ length: 12 }, () => {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), new THREE.MeshBasicMaterial({ color: '#ecfdf5' })));
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), new THREE.MeshBasicMaterial({ color: '#4ade80', transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending })));
+      g.visible = false;
+      return g;
+    });
+    // 损有余: a glowing pink thread from the enemy to the ally, sagging a little
+    const threads = Array.from({ length: 4 }, () => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(17 * 3), 3));
+      const l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: '#f472b6', transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+      l.frustumCulled = false;
+      l.visible = false;
+      return l;
+    });
     const shells = Array.from({ length: MAXF }, () => {
       const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mats.shell);
       m.visible = false;
       return m;
     });
-    return { discs, walls, cranes, shells };
+    return { discs, walls, cranes, shells, bolts, threads };
   }, [mats]);
   const g = useRef<THREE.Group>(null);
   useFrame((st) => {
@@ -176,8 +193,31 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       const flap = Math.sin(time * 9) * 0.55;
       for (const w of cr.userData.wings as THREE.Group[]) w.rotation.z = flap * (w.userData.side as number);
     });
-    // 鹤羽护
+    parts.bolts.forEach((g, k) => {
+      const b = DX.bolts[k];
+      g.visible = !!b;
+      if (!b) return;
+      g.position.set(b.x, b.y, b.z);
+      g.scale.setScalar((b.big ? 1.6 : 1) * (0.9 + 0.15 * Math.sin(time * 30 + k)));
+    });
     const fs = fighters.current;
+    parts.threads.forEach((l, k) => {
+      const T = DX.tethers[k];
+      const a = T && fs[T.from];
+      const b = T && fs[T.to];
+      l.visible = !!(a && b);
+      if (!a || !b) return;
+      const arr = (l.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array;
+      for (let i = 0; i <= 16; i++) {
+        const q = i / 16;
+        arr[i * 3] = a.pos[0] + (b.pos[0] - a.pos[0]) * q;
+        arr[i * 3 + 1] = a.pos[1] + 1.2 + (b.pos[1] - a.pos[1]) * q + Math.sin(q * Math.PI) * 0.5 + Math.sin(time * 12 + q * 9) * 0.05;
+        arr[i * 3 + 2] = a.pos[2] + (b.pos[2] - a.pos[2]) * q;
+      }
+      l.geometry.attributes.position.needsUpdate = true;
+      (l.material as THREE.LineBasicMaterial).opacity = 0.6 + 0.35 * Math.sin(time * 10);
+    });
+    // 鹤羽护
     parts.shells.forEach((m, k) => {
       const f = fs[k];
       if (!f || !(f.craneShield ?? 0) || f.hp <= 0) {
@@ -203,6 +243,12 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       ))}
       {parts.shells.map((d, k) => (
         <primitive key={`s${k}`} object={d} />
+      ))}
+      {parts.bolts.map((d, k) => (
+        <primitive key={`b${k}`} object={d} />
+      ))}
+      {parts.threads.map((d, k) => (
+        <primitive key={`t${k}`} object={d} />
       ))}
     </group>
   );

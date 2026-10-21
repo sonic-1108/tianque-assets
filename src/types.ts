@@ -269,6 +269,7 @@ export interface CombatantState {
   craneShieldT?: number; // seconds left of the shield
   foldT?: number; // 地仙 缩地成寸: seconds left of the step
   foldV?: [number, number]; // its ground velocity
+  soulT?: number; // 地仙 魂印: seconds left of the mark that saves them from one killing blow
   dxSpring?: boolean; // 地仙: this skill_4 is the staff tap of 地脉回春 (not the bow of 还魂)
   lift?: { k: number; from: number; to: number; t: number; x: number; z: number }; // 洛城午后: riding a tower's lift (firm k, from level to level)
   ibWork?: number; // 投行家: seconds left of working the model at the desk
