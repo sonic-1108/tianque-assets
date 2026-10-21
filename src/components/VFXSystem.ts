@@ -1,6 +1,7 @@
 import { MonkFX } from './MonkFX';
 import { EmperorFX } from './EmperorFX';
 import * as THREE from 'three';
+import { SLOT_IDS } from '../constants';
 
 /**
  * 天阙 VFX System
@@ -607,7 +608,7 @@ export class VFXSystem {
   private lights: FlashLight[] = [];
   private crackTex = makeCrackTextures();
   // one whirlwind + one rage pillar per fighter slot (0 = player, 1 = opponent)
-  private slots = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ vortex: makeVortex(), pillar: makePillar(), vLife: 0, vMax: 0, pLife: 0, pMax: 0 }));
+  private slots = SLOT_IDS.map(() => ({ vortex: makeVortex(), pillar: makePillar(), vLife: 0, vMax: 0, pLife: 0, pMax: 0 }));
   private time = 0;
   trails: RibbonTrail[] = [];
 

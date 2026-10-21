@@ -5,7 +5,7 @@ import { applyCharacterShading } from './characterShading';
 import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose, fistCentre } from './climbPose';
 import { splitTraderVest, disposeTraderVest, TraderVest } from './traderVest';
 import { TRADER } from '../trader';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { GLTFLoader, SkeletonUtils, MeshoptDecoder } from 'three-stdlib';
 
 /** the models are meshopt-compressed (tools: gltf-transform meshopt), so every loader needs the decoder */
@@ -530,34 +530,115 @@ const assetPromises = new Map<string, Promise<LoadedAsset>>();
 /** progress listeners per model url, so one fighter's download never drives the other's loading screen */
 const progressListeners = new Set<{ url: string; fn: (p: ModelLoadProgress) => void }>();
 
+/**
+ * A device short on video memory: phones, iPads, small-memory machines, or one whose GPU already dropped the 3D
+ * context this session. There a 3v3's six heroes at full texture size were enough to blank the screen.
+ */
+export const LOW_VRAM = (() => {
+  try {
+    const n = navigator as any;
+    if (sessionStorage.getItem('tq_gpu_lost')) return true;
+    if (/iPhone|iPad|Android|Mobile/i.test(n.userAgent) || (n.platform === 'MacIntel' && n.maxTouchPoints > 1)) return true;
+    return typeof n.deviceMemory === 'number' && n.deviceMemory <= 4;
+  } catch {
+    return false;
+  }
+})();
+
+/** low-memory devices: hero textures bigger than 1024 are halved before they ever reach the GPU */
+function fitTextures(root: THREE.Object3D) {
+  if (!LOW_VRAM) return;
+  const done = new Set<THREE.Texture>();
+  root.traverse((o: any) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) {
+        const t = m?.[k] as THREE.Texture | undefined;
+        const img = t?.image as { width: number; height: number } | undefined;
+        if (!t || done.has(t) || !img || img.width <= 1024) continue;
+        done.add(t);
+        const f = 1024 / Math.max(img.width, img.height);
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * f);
+        c.height = Math.round(img.height * f);
+        c.getContext('2d')!.drawImage(img as CanvasImageSource, 0, 0, c.width, c.height);
+        (img as any).close?.(); // ImageBitmap: free it now
+        t.image = c;
+        t.needsUpdate = true;
+      }
+    }
+  });
+}
+
+/** a failed download is tried again twice (a 3v3 fetches up to seven models; one dropped request used to leave a hero missing) */
 export function loadGLB(url: string): Promise<LoadedAsset> {
   const hit = assetPromises.get(url);
   if (hit) return hit;
-  const p = new Promise<LoadedAsset>((resolve, reject) => {
-    newLoader().load(
-      url,
-      (gltf) => {
-        gltf.scene.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(gltf.scene);
-        const h = Math.max(0.1, box.max.y - box.min.y);
-        const scale = TARGET_HEIGHT / h;
-        const a: LoadedAsset = { scene: gltf.scene, raw: gltf.animations || [], built: {}, unmapped: [], all: (gltf.animations || []).map((c) => c.name), scale, floor: -box.min.y * scale, url };
-        assetCache.set(url, a);
-        resolve(a);
-      },
-      (xhr) => {
-        // compressed transfers can report loaded > total, so clamp
-        const pct = xhr.total > 0 ? Math.min(99, Math.round((xhr.loaded / xhr.total) * 100)) : 50;
-        progressListeners.forEach((l) => l.url === url && l.fn({ loaded: xhr.loaded, total: xhr.total, progress: pct, isLoading: true, error: null }));
-      },
-      (err) => {
-        assetPromises.delete(url);
-        reject(err instanceof Error ? err : new Error('模型加载失败，请检查网络连接'));
-      }
-    );
-  });
+  const once = () =>
+    new Promise<LoadedAsset>((resolve, reject) => {
+      newLoader().load(
+        url,
+        (gltf) => {
+          fitTextures(gltf.scene);
+          gltf.scene.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(gltf.scene);
+          const h = Math.max(0.1, box.max.y - box.min.y);
+          const scale = TARGET_HEIGHT / h;
+          const a: LoadedAsset = { scene: gltf.scene, raw: gltf.animations || [], built: {}, unmapped: [], all: (gltf.animations || []).map((c) => c.name), scale, floor: -box.min.y * scale, url };
+          assetCache.set(url, a);
+          resolve(a);
+        },
+        (xhr) => {
+          // compressed transfers can report loaded > total, so clamp
+          const pct = xhr.total > 0 ? Math.min(99, Math.round((xhr.loaded / xhr.total) * 100)) : 50;
+          progressListeners.forEach((l) => l.url === url && l.fn({ loaded: xhr.loaded, total: xhr.total, progress: pct, isLoading: true, error: null }));
+        },
+        (err) => reject(err instanceof Error ? err : new Error('模型加载失败，请检查网络连接')),
+      );
+    });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const p = once()
+    .catch(() => wait(1500).then(once))
+    .catch(() => wait(4000).then(once))
+    .catch((e) => {
+      assetPromises.delete(url);
+      throw e;
+    });
   assetPromises.set(url, p);
   return p;
+}
+
+/** textures already sent to the GPU (shared by every fighter of a class) */
+const uploaded = new WeakSet<THREE.Texture>();
+/**
+ * Send a hero's textures to the GPU one per idle moment as soon as the model is in, rather than all of them in the
+ * first frame it is drawn: six heroes' worth at once was a long freeze as a 3v3 round began.
+ */
+function preupload(gl: THREE.WebGLRenderer, root: THREE.Object3D) {
+  const list: THREE.Texture[] = [];
+  root.traverse((o: any) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material])
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) {
+        const t = m?.[k] as THREE.Texture | undefined;
+        if (t && !uploaded.has(t) && !list.includes(t)) list.push(t);
+      }
+  });
+  const idle = (fn: () => void) => ((globalThis as any).requestIdleCallback ? (globalThis as any).requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 30));
+  const next = () => {
+    const t = list.shift();
+    if (!t) return;
+    if (!uploaded.has(t)) {
+      uploaded.add(t);
+      try {
+        gl.initTexture(t);
+      } catch {
+        /* context lost: it uploads when drawn */
+      }
+    }
+    idle(next);
+  };
+  idle(next);
 }
 
 /** Load the class model; if it is missing (not uploaded yet), fall back to the berserker model */
@@ -721,6 +802,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (classId === 'Emperor') cloned.scale.multiplyScalar(1.14); // a head taller than anyone on the roofs
     return cloned;
   }, [asset, isPlayer, classId]);
+
+  const gl = useThree((st) => st.gl);
+  useEffect(() => {
+    if (model) preupload(gl, model);
+  }, [gl, model]);
 
   // Mixer, bones, weapons
   useEffect(() => {

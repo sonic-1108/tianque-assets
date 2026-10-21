@@ -1,3 +1,8 @@
+/** fighter slots: up to six heroes, plus 长安上元夜's emperor and his four guards (11), with one spare */
+export const SLOTS = 12;
+/** [0, 1, ... SLOTS - 1] */
+export const SLOT_IDS = Array.from({ length: SLOTS }, (_, k) => k);
+
 export const CONFIG = {
   // Game meta
   title: {

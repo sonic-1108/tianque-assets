@@ -16,7 +16,58 @@ export interface TraderVest {
   mouth: THREE.Group | null;
 }
 
+/** what every 交易员 on the field shares: worked out once per model (reading the texture and the face takes a while) */
+interface VestShared {
+  undressed: THREE.BufferGeometry;
+  shirtGeo: THREE.BufferGeometry;
+  shirtMat: THREE.MeshStandardMaterial;
+  canopy: ReturnType<typeof buildCanopy>;
+  gripGeo: THREE.BufferGeometry;
+  gripMat: THREE.MeshStandardMaterial;
+  mouth: { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial }[];
+}
+const SHARED = new WeakMap<THREE.BufferGeometry, VestShared | null>();
+
 export function splitTraderVest(body: THREE.SkinnedMesh): TraderVest | null {
+  const dressed = body.geometry;
+  let sh = SHARED.get(dressed);
+  if (sh === undefined) {
+    sh = buildShared(body);
+    SHARED.set(dressed, sh);
+  }
+  if (!sh) return null;
+  // own material: the rig fades a fighter's materials (stealth), which must not touch another 交易员
+  const shirt = new THREE.SkinnedMesh(sh.shirtGeo, sh.shirtMat.clone());
+  shirt.name = 'Trader undershirt';
+  shirt.position.copy(body.position);
+  shirt.quaternion.copy(body.quaternion);
+  shirt.scale.copy(body.scale);
+  shirt.bindMode = body.bindMode;
+  shirt.bind(body.skeleton, body.bindMatrix);
+  shirt.frustumCulled = false;
+  shirt.castShadow = shirt.receiveShadow = true;
+  shirt.visible = false;
+  body.parent!.add(shirt);
+  const canopy = new THREE.Group();
+  canopy.name = 'Patagonia vest glider';
+  const top = new THREE.Mesh(sh.canopy.geoTop, sh.canopy.matTop);
+  const bot = new THREE.Mesh(sh.canopy.geoBot, sh.canopy.matBot);
+  top.castShadow = true;
+  bot.receiveShadow = true;
+  canopy.add(top, bot);
+  canopy.visible = false;
+  const grips = sh.canopy.anchors.map(() => {
+    const grip = new THREE.Mesh(sh!.gripGeo, sh!.gripMat);
+    grip.name = 'Vest strap';
+    grip.castShadow = true;
+    grip.visible = false;
+    return grip;
+  });
+  const mouth = attachMouth(body, sh.mouth);
+  return { body, dressed, undressed: sh.undressed, shirt, canopy, grips, anchors: sh.canopy.anchors, mouth };
+}
+
+function buildShared(body: THREE.SkinnedMesh): VestShared | null {
   const material = body.material as THREE.MeshStandardMaterial;
   const texture = material.map;
   const image = texture?.image as CanvasImageSource & { width: number; height: number };
@@ -182,57 +233,30 @@ export function splitTraderVest(body: THREE.SkinnedMesh): TraderVest | null {
       }
     }
   }
-  const shirt = new THREE.SkinnedMesh(shirtGeo, new THREE.MeshStandardMaterial({ color: '#eceff2', roughness: 0.92 }));
-  shirt.name = 'Trader undershirt';
-  shirt.position.copy(body.position);
-  shirt.quaternion.copy(body.quaternion);
-  shirt.scale.copy(body.scale);
-  shirt.bindMode = body.bindMode;
-  shirt.bind(body.skeleton, body.bindMatrix);
-  shirt.frustumCulled = false;
-  shirt.castShadow = shirt.receiveShadow = true;
-  shirt.visible = false;
-  body.parent!.add(shirt);
-
   addFlightFace(undressed, body);
-  const mouth = buildMouth(body);
-  const { canopy, anchors } = buildCanopy();
-  const grips = anchors.map(() => {
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 1, 6), new THREE.MeshStandardMaterial({ color: '#22324a', roughness: 0.85 }));
-    grip.name = 'Vest strap';
-    grip.castShadow = true;
-    grip.visible = false;
-    return grip;
-  });
-  return { body, dressed: source, undressed, shirt, canopy, grips, anchors, mouth };
+  return {
+    undressed,
+    shirtGeo,
+    shirtMat: new THREE.MeshStandardMaterial({ color: '#eceff2', roughness: 0.92 }),
+    canopy: buildCanopy(),
+    gripGeo: new THREE.CylinderGeometry(0.009, 0.009, 1, 6),
+    gripMat: new THREE.MeshStandardMaterial({ color: '#22324a', roughness: 0.85 }),
+    mouth: buildMouthParts(),
+  };
 }
 
+/** take one 交易员's pieces off (the shared geometry and textures stay cached for the next one) */
 export function disposeTraderVest(vest: TraderVest) {
   vest.body.geometry = vest.dressed;
   vest.shirt.removeFromParent();
-  vest.canopy.removeFromParent();
-  vest.undressed.dispose();
-  vest.shirt.geometry.dispose();
   (vest.shirt.material as THREE.Material).dispose();
-  vest.canopy.traverse((o: any) => {
-    if (!o.isMesh) return;
-    o.geometry.dispose();
-    o.material.map?.dispose();
-    o.material.alphaMap?.dispose();
-    o.material.dispose();
-  });
+  vest.canopy.removeFromParent();
+  for (const grip of vest.grips) grip.removeFromParent();
   if (vest.mouth) {
     vest.mouth.removeFromParent();
     vest.mouth.traverse((o: any) => {
-      if (!o.isMesh) return;
-      o.geometry.dispose();
-      o.material.dispose();
+      if (o.isMesh) o.material.dispose();
     });
-  }
-  for (const grip of vest.grips) {
-    grip.removeFromParent();
-    grip.geometry.dispose();
-    (grip.material as THREE.Material).dispose();
   }
 }
 
@@ -370,16 +394,6 @@ function buildCanopy() {
   const matTop = new THREE.MeshStandardMaterial({ map, alphaMap, alphaTest: 0.5, roughness: 0.62, metalness: 0.0 });
   // the underside glows a little: thin nylon with the sky behind it
   const matBot = new THREE.MeshStandardMaterial({ map, alphaMap, alphaTest: 0.5, roughness: 0.8, color: '#e8cdb8', emissive: '#ffffff', emissiveMap: map, emissiveIntensity: 0.32 });
-  const top = new THREE.Mesh(geoTop, matTop);
-  const bot = new THREE.Mesh(geoBot, matBot);
-  top.castShadow = true;
-  bot.receiveShadow = true;
-  top.name = 'Vest glider top';
-  bot.name = 'Vest glider underside';
-  const canopy = new THREE.Group();
-  canopy.name = 'Patagonia vest glider';
-  canopy.add(top, bot);
-  canopy.visible = false;
   // two straps a side: one at the armhole, one at the hem corner, meeting in the fist
   const anchors: { p: THREE.Vector3; hand: 0 | 1 }[] = [];
   for (const side of [-1, 1] as const) {
@@ -389,7 +403,7 @@ function buildCanopy() {
       anchors.push({ p: new THREE.Vector3(x * CANOPY_S, (arch - 0.01) * CANOPY_S, -y * CANOPY_S), hand: side < 0 ? 0 : 1 });
     }
   }
-  return { canopy, anchors };
+  return { geoTop, geoBot, matTop, matBot, anchors };
 }
 
 // ------------------------------------------------------------------ 起飞 face: a delighted open-mouthed laugh
@@ -454,10 +468,8 @@ function addFlightFace(geo: THREE.BufferGeometry, body: THREE.SkinnedMesh) {
   geo.setIndex(keep);
 }
 
-/** dark mouth, upper teeth and a tongue, curved to sit just behind the lips; hung on the head bone */
-function buildMouth(body: THREE.SkinnedMesh): THREE.Group | null {
-  const headBone = body.skeleton.bones.find((b) => /head$/i.test(b.name));
-  if (!headBone) return null;
+/** dark mouth, upper teeth and a tongue, curved to sit just behind the lips (mesh space) */
+function buildMouthParts() {
   // a bowl behind the lips: it curls sharply back past the corners, so from the side you only ever see dark
   const curve = (geo: THREE.BufferGeometry, back: number) => {
     const P = geo.getAttribute('position');
@@ -468,12 +480,20 @@ function buildMouth(body: THREE.SkinnedMesh): THREE.Group | null {
     geo.computeVertexNormals();
     return geo;
   };
-  const inner = new THREE.Mesh(curve(new THREE.PlaneGeometry(0.072, 0.028, 24, 4).translate(FACE.mx, 0.737, 0), 0.008), new THREE.MeshStandardMaterial({ color: '#1e0708', roughness: 1, side: THREE.DoubleSide }));
-  const teeth = new THREE.Mesh(curve(new THREE.PlaneGeometry(0.04, 0.0045, 12, 1).translate(FACE.mx, 0.7445, 0), 0.0055), new THREE.MeshStandardMaterial({ color: '#e9e2d3', roughness: 0.5 }));
-  const tongue = new THREE.Mesh(curve(new THREE.PlaneGeometry(0.032, 0.007, 10, 1).translate(FACE.mx, 0.7315, 0), 0.0065), new THREE.MeshStandardMaterial({ color: '#7d3133', roughness: 0.7 }));
+  return [
+    { geo: curve(new THREE.PlaneGeometry(0.072, 0.028, 24, 4).translate(FACE.mx, 0.737, 0), 0.008), mat: new THREE.MeshStandardMaterial({ color: '#1e0708', roughness: 1, side: THREE.DoubleSide }) },
+    { geo: curve(new THREE.PlaneGeometry(0.04, 0.0045, 12, 1).translate(FACE.mx, 0.7445, 0), 0.0055), mat: new THREE.MeshStandardMaterial({ color: '#e9e2d3', roughness: 0.5 }) },
+    { geo: curve(new THREE.PlaneGeometry(0.032, 0.007, 10, 1).translate(FACE.mx, 0.7315, 0), 0.0065), mat: new THREE.MeshStandardMaterial({ color: '#7d3133', roughness: 0.7 }) },
+  ];
+}
+
+/** hang this 交易员's mouth on his head bone */
+function attachMouth(body: THREE.SkinnedMesh, parts: VestShared['mouth']): THREE.Group | null {
+  const headBone = body.skeleton.bones.find((b) => /head$/i.test(b.name));
+  if (!headBone) return null;
   const g = new THREE.Group();
   g.name = 'Trader mouth';
-  g.add(inner, teeth, tongue);
+  for (const p of parts) g.add(new THREE.Mesh(p.geo, p.mat.clone()));
   // mesh space -> head bone space: a vertex fully weighted to the head is skinned by boneInverse * bindMatrix
   const hi = body.skeleton.bones.indexOf(headBone);
   g.matrixAutoUpdate = false;

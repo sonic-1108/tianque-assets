@@ -21,7 +21,7 @@ import { EffectComposer, Bloom, Vignette, ToneMapping, wrapEffect } from '@react
 import { Effect } from 'postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
-import { getConfig } from './constants';
+import { getConfig, SLOTS, SLOT_IDS } from './constants';
 import { gameAudio } from './utils/helper';
 import { EmpMove, CombatantState, GameState, TargetingState, CharacterActionState, CharacterClassId, FighterSeat } from './types';
 import { FX, muteable } from './fxMute';
@@ -381,12 +381,12 @@ function GameImpl({
   });
 
   /** one group / rig sockets / combatant ref per fighter slot */
-  const groupRefs = useMemo(() => [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
-  const slotRefs = useMemo(() => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
+  const groupRefs = useMemo(() => SLOT_IDS.map(() => React.createRef<THREE.Group>()) as React.MutableRefObject<THREE.Group | null>[], []);
+  const slotRefs = useMemo(() => SLOT_IDS.map((k) => ({ current: fightersRef.current[k] }) as React.MutableRefObject<CombatantState>), [fightersRef]);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const cameraControllerRef = useRef<CameraController | null>(null);
-  const sockets = useMemo(() => [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
+  const sockets = useMemo(() => SLOT_IDS.map(() => ({ current: { rightBase: null, rightTip: null, leftBase: null, leftTip: null, chest: null, leftHand: null } }) as React.MutableRefObject<RigSockets>), []);
 
   const slowMoTimerRef = useRef(0);
   const gameTimeRef = useRef(0);
@@ -409,29 +409,29 @@ function GameImpl({
   const waveRef = useRef({ timer: 7, warn: 0, side: 0, aiBlocks: false, wash: 0, washSide: 0 });
   /** 怒海战船 AI: heading for a crossbow (goal), how long it has manned one, door-routing stage */
   const newShipAi = () => ({ helmWait: 10 + Math.random() * 8, goal: -1, cool: 7, mountedT: 0, outT: 0, edge: '', stage: 0, goalT: 0, y0: 0, lx: 0, lz: 0, stuckT: 0 });
-  const shipNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => newNavState()));
-  const shipAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi));
-  const streetNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newStreetNav));
-  const desertNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav));
-  const plankNavRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(newPlankNav));
+  const shipNavRefs = useRef(SLOT_IDS.map(() => newNavState()));
+  const shipAiRefs = useRef(SLOT_IDS.map(newShipAi));
+  const streetNavRefs = useRef(SLOT_IDS.map(newStreetNav));
+  const desertNavRefs = useRef(SLOT_IDS.map(newDesertNav));
+  const plankNavRefs = useRef(SLOT_IDS.map(newPlankNav));
   /** 大漠玉门关 AI errands: -1 fight, 0 the beacon, 1.. a well */
-  const desertAiRefs = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 })));
+  const desertAiRefs = useRef(SLOT_IDS.map(() => ({ goal: -1, cool: 4, goalT: 0 })));
   const lightningRef = useRef({ timer: 5 });
   const materialHits = useRef(0);
   const ridgeRef = useRef({ timer: 9, warn: 0 });
-  const footLiftRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
-  const visYRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
-  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: [false, false, false, false, false, false, false, false, false] });
+  const footLiftRef = useRef(SLOT_IDS.map(() => 0));
+  const visYRef = useRef(SLOT_IDS.map(() => 0));
+  const avalancheRef = useRef({ timer: 14, warn: 0, z: -999, hit: SLOT_IDS.map(() => false) });
   const bgBase = useMemo(() => new THREE.Color(), []);
   const bgTmp = useMemo(() => new THREE.Color(), []);
-  const wallCdRef = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const wallCdRef = useRef(SLOT_IDS.map(() => 0));
   const ventRef = useRef<{ timer: number; warn: number[] }>({ timer: 3, warn: [] });
   useEffect(() => {
     pendingResetRef.current = true;
   }, [mapId, playerClass, enemyClass, seats]);
   const projRef = useRef<Projectile[]>([]);
   /** 雪岭: ground height each fighter last stood on (for the no-climbing rule) */
-  const takeoffY = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const takeoffY = useRef(SLOT_IDS.map(() => 0));
   /** 六字真言 syllables in flight (host / offline only; the guest sees them through the vfx replay) */
   const glyphRef = useRef<{ idx: number; slot: number; tgt: number; pos: THREE.Vector3; vel: THREE.Vector3; age: number }[]>([]);
   const netSendRef = useRef(0);
@@ -443,8 +443,8 @@ function GameImpl({
   const predRef = useRef({ on: false, x: 0, z: 0, vx: 0, vz: 0, hist: [] as [number, number, number][], lastSnap: null as unknown });
   const guestProjRef = useRef<{ obj: THREE.Object3D; vel: THREE.Vector3; kind: string }[]>([]);
 
-  const auraTimers = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
-  const footTimers = useRef([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const auraTimers = useRef(SLOT_IDS.map(() => 0));
+  const footTimers = useRef(SLOT_IDS.map(() => 0));
   const wasGrounded = useRef([true, true, true, true, true, true, true, true, true]);
   /** team fights: who each AI is after, and which fighters each attack has already hit this move */
   const aiTargetRef = useRef(Array.from({ length: 12 }, () => -1));
@@ -452,7 +452,7 @@ function GameImpl({
   const helmHold = useRef([0, 0]);
   const lockStepRef = useRef({ n: 0 });
   const spectRef = useRef<{ v: CombatantState | null }>({ v: null });
-  const hitMaskRef = useRef([0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ mask: 0, state: '', t: 0 })));
+  const hitMaskRef = useRef(SLOT_IDS.map(() => ({ mask: 0, state: '', t: 0 })));
   const lastReportRef = useRef(0);
   const roundRef = useRef<{ over: boolean; timer: number }>({ over: false, timer: 0 });
   const newAiMem = (): AIMemory => ({ think: 1.0, plan: 'idle', planTimer: 0, strafe: 1, comboLeft: 0, request: null, requestTtl: 0, dodgeDir: 1, airFollow: 0 });
@@ -470,7 +470,7 @@ function GameImpl({
     return v;
   }, []);
   const trails = useMemo<{ right: RibbonTrail; left: RibbonTrail }[]>(
-    () => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
+    () => SLOT_IDS.map((k) => ({ right: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR), left: vfx.createTrail(k % 2 ? ENEMY_COLOR : PLAYER_COLOR) })),
     [vfx]
   );
   useEffect(() => () => vfx.dispose(), [vfx]);
@@ -4939,7 +4939,7 @@ function GameImpl({
       }
       if (controller) controller.yaw = p1.rotY;
       for (const a of aiRefs.current) a.think = 1.2;
-      aiTargetRef.current = [-1, -1, -1, -1, -1, -1, -1, -1, -1];
+      aiTargetRef.current = SLOT_IDS.map(() => -1);
       for (const h of hitMaskRef.current) h.mask = 0;
       mapTimeRef.current = 0;
       mapRuntime.seal = { state: 0, x: 0, y: 0, z: 0, holder: -1, t: 0 };
@@ -4982,12 +4982,12 @@ function GameImpl({
       if (map.id === 'sea') setTimeout(() => onRoundEvent?.({ type: 'toast', text: '船舵在主甲板船尾（金色光圈）：走过去按 F 掌舵，朝敌船推就开过去' }), 1500);
       mapRuntime.ballistae = SEA_BALLISTAE.map((b) => ({ yaw: b.yaw, user: -1, load: 1, kick: 0 }));
       mapRuntime.bolts = [];
-      shipNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => newNavState());
+      shipNavRefs.current = SLOT_IDS.map(() => newNavState());
       if (map.id === 'sea') shipGraph();
-      shipAiRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newShipAi);
-      desertNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newDesertNav);
-      plankNavRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(newPlankNav);
-      desertAiRefs.current = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => ({ goal: -1, cool: 4, goalT: 0 }));
+      shipAiRefs.current = SLOT_IDS.map(newShipAi);
+      desertNavRefs.current = SLOT_IDS.map(newDesertNav);
+      plankNavRefs.current = SLOT_IDS.map(newPlankNav);
+      desertAiRefs.current = SLOT_IDS.map(() => ({ goal: -1, cool: 4, goalT: 0 }));
       {
         // 飞虫沙暴: one round in five, somewhere between half a minute and a minute and a quarter in
         const force = (globalThis as any).__TQ_SWARM;

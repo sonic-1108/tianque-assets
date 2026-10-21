@@ -260,6 +260,9 @@ export default function App() {
   // ---------- online 1v1 ----------
   const [net, setNet] = useState<NetSession | null>(null);
   const [autoDpr, setAutoDpr] = useState<number | null>(null);
+  /** the GPU dropped the 3D context (out of video memory): 'lost' while waiting for it back, 'stuck' if it never came */
+  const [gpuLost, setGpuLost] = useState<'' | 'lost' | 'stuck'>('');
+  const gpuTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const netRef = useRef<NetSession | null>(null);
   const [, setNetTick] = useState(0);
   const [joinCode, setJoinCode] = useState('');
@@ -672,7 +675,7 @@ export default function App() {
   if (!fightersRef.current.includes(dummyRefState.current) || dummyRefState.current === p1RefState.current)
     dummyRefState.current = fightersRef.current.find((c) => (c.side ?? 0) !== (p1RefState.current.side ?? 0)) ?? fightersRef.current[lineup.me === 0 ? 1 : 0];
   // Debug handle (used by automated visual tests; harmless in production)
-  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef, fighters: fightersRef, maps: MapsAll, banker: BankerAll };
+  (globalThis as any).__TQ = { p1: p1RefState, dummy: dummyRefState, input: inputRef, ai: aiEnabledRef, rt: mapRuntime, net: netRef, fighters: fightersRef, maps: MapsAll, banker: BankerAll, setRoom }; // setRoom: tests fill the seats (tools/tests/teamperf.cjs)
   const targetingRefState = useRef<TargetingState>({
     lockedEnemyId: null,
     friendlyTargetId: null,
@@ -1136,6 +1139,23 @@ export default function App() {
             gl={{ antialias: false, powerPreference: 'high-performance' }}
             camera={STATIC_CANVAS_CAMERA}
             className="w-full h-full block"
+            onCreated={({ gl }) => {
+              // three keeps the context restorable (preventDefault); this only tells the player and remembers it, so the
+              // next load keeps textures small (see LOW_VRAM)
+              const el = gl.domElement;
+              el.addEventListener('webglcontextlost', () => {
+                try {
+                  sessionStorage.setItem('tq_gpu_lost', '1');
+                } catch {}
+                setGpuLost('lost');
+                if (gpuTimer.current) clearTimeout(gpuTimer.current);
+                gpuTimer.current = setTimeout(() => setGpuLost((v) => (v ? 'stuck' : v)), 4000);
+              });
+              el.addEventListener('webglcontextrestored', () => {
+                if (gpuTimer.current) clearTimeout(gpuTimer.current);
+                setGpuLost('');
+              });
+            }}
           >
             <Game
               key={careerMode ? `career-${careerRun}` : adventureMode ? `adventure-${adventureRun}` : "competitive"}
@@ -1166,6 +1186,19 @@ export default function App() {
             />
           </Canvas>
         </Suspense>
+        {gpuLost && (
+          <div className="absolute inset-0 z-[90] flex items-center justify-center bg-black/70 pointer-events-auto">
+            <div className="rounded-xl border border-amber-400/50 bg-slate-950/90 px-6 py-5 text-center text-amber-100 shadow-2xl">
+              <div className="text-lg font-black">{gpuLost === 'lost' ? '显卡内存不足，画面恢复中…' : '画面没能恢复'}</div>
+              <div className="mt-1 text-xs text-amber-200/70">重新载入后会自动用较小的贴图，并把画质降一档</div>
+              {gpuLost === 'stuck' && (
+                <button className="mt-3 rounded-lg bg-amber-500 px-4 py-1.5 text-sm font-black text-black" onClick={() => location.reload()}>
+                  重新载入
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 穿云狙 scope: dark ring round a clear circle, crosshair, how long it has been steady */}
         {hudMirror.scope > 0 && (

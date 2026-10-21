@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { SLOTS } from '../constants';
 import { useFrame } from '@react-three/fiber';
 import { TR, TRADER } from '../trader';
 import { CombatantState } from '../types';
@@ -141,14 +142,14 @@ export function TraderFx({ fighters }: { fighters: React.MutableRefObject<Combat
       candle: im(new THREE.BoxGeometry(1, 1, 1), mats.candle, MAXC),
       wick: im(new THREE.BoxGeometry(1, 1, 1), mats.wick, MAXC),
       ring: im(new THREE.RingGeometry(0.85, 1, 40).rotateX(-Math.PI / 2), mats.ring, MAXC),
-      dreams: Array.from({ length: 9 }, () => {
+      dreams: Array.from({ length: SLOTS }, () => {
         const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dreamTex(), depthTest: false, transparent: true }));
         s.scale.set(1.0, 0.8, 1);
         s.visible = false;
         s.renderOrder = 10;
         return s;
       }),
-      shorts: Array.from({ length: 9 }, () => {
+      shorts: Array.from({ length: SLOTS }, () => {
         const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: shortTex(), depthTest: false, transparent: true }));
         s.scale.set(1.1, 0.7, 1);
         s.visible = false;

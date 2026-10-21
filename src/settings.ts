@@ -37,7 +37,20 @@ function load(): Settings {
   return { ...DEFAULTS };
 }
 
-let cur: Settings = load();
+/** the quality as saved (what goes back to storage); `cur` may run a step lower for this session */
+let saved: Quality = 'high';
+let cur: Settings = (() => {
+  const s = load();
+  saved = s.quality;
+  // the GPU ran out of video memory earlier this session (see App's context-loss notice): one step down until the
+  // tab is closed, never written back
+  try {
+    if (sessionStorage.getItem('tq_gpu_lost')) s.quality = s.quality === 'high' ? 'medium' : 'low';
+  } catch {
+    /* no session storage */
+  }
+  return s;
+})();
 const subs = new Set<() => void>();
 
 export function getSettings() {
@@ -45,8 +58,9 @@ export function getSettings() {
 }
 export function setSettings(p: Partial<Settings>) {
   cur = { ...cur, ...p };
+  if (p.quality) saved = p.quality;
   try {
-    localStorage.setItem(KEY, JSON.stringify(cur));
+    localStorage.setItem(KEY, JSON.stringify({ ...cur, quality: saved }));
   } catch {
     /* ignore */
   }
