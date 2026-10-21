@@ -23,7 +23,7 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS matches_ts ON matches (ts)`,
   `CREATE INDEX IF NOT EXISTS players_xp ON players (xp)`,
 ];
-const HEROES = new Set(['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Guard', 'Trader']);
+const HEROES = new Set(['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Guard', 'Trader', 'HeavyHealer']);
 const MODES = { easy: 0.5, normal: 1, hard: 1.5, hell: 2.5, online: 2 };
 
 async function sha(text) {

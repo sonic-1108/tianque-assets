@@ -26,6 +26,7 @@ export const MODEL_URLS: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: `${import.meta.env.BASE_URL}monk.glb`,
   Shadowblade: `${import.meta.env.BASE_URL}shadowblade.glb`,
   Emperor: `${import.meta.env.BASE_URL}emperor.glb`,
+  HeavyHealer: `${import.meta.env.BASE_URL}dixian.glb`, // 地仙 青囊翁 (Tripo, Mixamo rig): his own float (idle), glide (run) and small steps (walk); 霍岩's moves for the rest
   Trader: `${import.meta.env.BASE_URL}trader.glb`, // 交易员 陈百万 (Tripo, Mixamo rig): his own idle/run/walk, 霍岩's fighting moves
   Guard: `${import.meta.env.BASE_URL}guard.glb`, // 御林军 (until it's uploaded, 霍岩's body in red-and-gold armour) // 皇上: rigged on the same Mixamo skeleton; fights with 霍岩's moves
 };
@@ -183,7 +184,23 @@ const EMPEROR_CLIP_PLAN: Record<string, ClipSpec> = {
   skill_4: { match: ['angry_03'], start: 0.3, end: 0.8, fit: true },
   ultimate: { match: ['angry_01'], start: 0.3, end: 0.78, fit: true },
 };
-const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : c === 'Shadowblade' ? SHADOW_CLIP_PLAN : c === 'Emperor' ? EMPEROR_CLIP_PLAN : CLIP_PLAN);
+/** 地仙 overrides: his own float, glide and small steps; borrowed gestures for the casts. skill_1 清风诀 both arms raised to
+ *  call the wind, skill_2 鹤羽护 a nod and an open hand, skill_3 缩地成寸 his glide sped up, skill_4 还魂 a long bow over
+ *  the fallen, ultimate 人间不渡 arms flung up to the crane */
+const DIXIAN_CLIP_PLAN: Record<string, ClipSpec> = {
+  ...CLIP_PLAN,
+  idle: { match: ['idle'], loop: true },
+  run: { match: ['run'], loop: true },
+  walk: { match: ['walk'], loop: true },
+  skill_1: { match: ['cheer'], start: 0.0, end: 0.5, fit: true },
+  skill_2: { match: ['agree'], start: 0.0, end: 0.6, fit: true },
+  skill_3: { match: ['run'], loop: true, speed: 1.8 },
+  skill_4: { match: ['bow'], start: 0.1, end: 0.55, fit: true },
+  d_spring: { match: ['angry_03'], start: 0.3, end: 0.8, fit: true },
+  ultimate: { match: ['cheer'], start: 0.0, end: 0.6, fit: true },
+  cheer: { match: ['bow', 'agree'], start: 0.0, end: 0.9, loop: true, speed: 0.6 },
+};
+const planFor = (c: CharacterClassId) => (c === 'Ranger' ? RANGER_CLIP_PLAN : c === 'BuddhistMage' ? MONK_CLIP_PLAN : c === 'Shadowblade' ? SHADOW_CLIP_PLAN : c === 'Emperor' ? EMPEROR_CLIP_PLAN : c === 'HeavyHealer' ? DIXIAN_CLIP_PLAN : CLIP_PLAN);
 
 interface BuiltClip {
   key: string;
@@ -344,6 +361,48 @@ function buildBriefcase() {
   g.rotation.z = -Math.PI / 2;
   g.position.set(0.005, 0, -0.025);
   g.scale.setScalar(0.85);
+  return g;
+}
+
+/** 地仙's 鹤头杖: gnarled dark wood, a silver crane head on top, a little celadon gourd on a green cord. Laid along +Y
+ *  like a blade (so the swings carry it), gripped a third of the way up */
+export function buildCraneStaff() {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: '#3b2a1e', roughness: 0.85 });
+  const silver = new THREE.MeshStandardMaterial({ color: '#c9ccc8', metalness: 0.85, roughness: 0.35 });
+  const jade = new THREE.MeshStandardMaterial({ color: '#8fbfa4', metalness: 0.05, roughness: 0.3, emissive: new THREE.Color('#0f2a1c') });
+  const cord = new THREE.MeshStandardMaterial({ color: '#2f5a43', roughness: 0.9 });
+  // the shaft, a little crooked: three pieces leaning off true
+  const pts = [new THREE.Vector3(0, -0.55, 0), new THREE.Vector3(0.015, 0.0, 0.01), new THREE.Vector3(-0.012, 0.55, -0.008), new THREE.Vector3(0.01, 1.05, 0.005)];
+  const shaft = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.019, 7, false), wood);
+  shaft.castShadow = true;
+  g.add(shaft);
+  for (const y of [-0.2, 0.35, 0.8]) {
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.027, 8, 6), wood);
+    knot.position.set(0, y, 0);
+    knot.scale.set(1, 0.6, 1);
+    g.add(knot);
+  }
+  // crane head: neck curving forward, the head, a long beak
+  const neck = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.01, 1.03, 0), new THREE.Vector3(0.0, 1.13, 0.0), new THREE.Vector3(0.03, 1.2, 0.0), new THREE.Vector3(0.08, 1.21, 0)]), 12, 0.013, 6, false), silver);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), silver);
+  head.position.set(0.085, 1.215, 0);
+  head.scale.set(1.2, 0.9, 0.85);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.09, 6), silver);
+  beak.rotation.z = -Math.PI / 2;
+  beak.position.set(0.15, 1.21, 0);
+  const crest = new THREE.Mesh(new THREE.SphereGeometry(0.008, 6, 4), new THREE.MeshStandardMaterial({ color: '#b3121b', roughness: 0.5 }));
+  crest.position.set(0.085, 1.24, 0);
+  g.add(neck, head, beak, crest);
+  // the gourd hanging under the head
+  const cordM = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.12, 4), cord);
+  cordM.position.set(0.02, 0.98, 0.03);
+  const g1 = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), jade);
+  g1.position.set(0.02, 0.89, 0.03);
+  const g2 = new THREE.Mesh(new THREE.SphereGeometry(0.021, 10, 8), jade);
+  g2.position.set(0.02, 0.935, 0.03);
+  g.add(cordM, g1, g2);
+  g.position.set(0, -0.05, 0);
   return g;
 }
 
@@ -662,7 +721,7 @@ export function prefetchHeroModels(classes: CharacterClassId[]) {
   const urls = new Set<string>();
   for (const c of classes) {
     urls.add(MODEL_URLS[c] || BERSERKER_MODEL_URL);
-    if (c === 'Emperor' || c === 'Guard' || c === 'Trader') urls.add(BERSERKER_MODEL_URL); // they borrow 霍岩's fighting moves
+    if (c === 'Emperor' || c === 'Guard' || c === 'Trader' || c === 'HeavyHealer') urls.add(BERSERKER_MODEL_URL); // they borrow 霍岩's fighting moves
   }
   urls.add(EXTRA_ANIMS_URL);
   for (const u of urls) loadGLB(u).catch(() => {});
@@ -670,7 +729,7 @@ export function prefetchHeroModels(classes: CharacterClassId[]) {
 
 const normBone = (n: string) => n.toLowerCase().replace(/^mixamorig[:_]?/, '').replace(/[^a-z0-9]/g, '');
 
-const ONE_SHOT = new Set<string>(['r_kick', 'r_flip', 'getup', 'attack_1', 'attack_2', 'attack_3', 'skill_1', 'skill_4', 'dodge', 'hit_a', 'hit_b', 'launched', 'knockdown', 'ult_air', 'ult_slam', 'jump']);
+const ONE_SHOT = new Set<string>(['d_spring', 'r_kick', 'r_flip', 'getup', 'attack_1', 'attack_2', 'attack_3', 'skill_1', 'skill_4', 'dodge', 'hit_a', 'hit_b', 'launched', 'knockdown', 'ult_air', 'ult_slam', 'jump']);
 
 export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, socketsRef, showBoneAxes, onAnimationDebug, onLoadProgress }: CharacterRigProps) {
   const [rawAsset, setRawAsset] = useState<LoadedAsset | null>(null);
@@ -728,7 +787,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)
       // 皇上 brought only a few gestures of his own (angry_01, agree…): every fighting move is borrowed from 霍岩 (same skeleton)
-      .then((a) => ((classId === 'Emperor' || classId === 'Guard' || classId === 'Trader') && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
+      .then((a) => ((classId === 'Emperor' || classId === 'Guard' || classId === 'Trader' || classId === 'HeavyHealer') && !a.fallback ? loadGLB(BERSERKER_MODEL_URL).then((b) => ({ ...a, raw: [...a.raw, ...b.raw] })).catch(() => a) : a))
       .then((a) => (a.raw.some((c) => c.name.toLowerCase().startsWith('swim')) ? a : loadGLB(EXTRA_ANIMS_URL).then((e) => ({ ...a, raw: [...a.raw, ...e.raw] })).catch(() => a)))
       .then((a) => {
         if (!alive) return;
@@ -864,6 +923,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
         if (o.isMesh) o.visible = false;
       });
       right.group.add(buildBriefcase());
+    }
+    if (classId === 'HeavyHealer') {
+      // 鹤头杖: the blades stay hidden (their markers still draw the trail); a gnarled staff with a silver crane head
+      left.group.visible = false;
+      right.group.traverse((o: any) => {
+        if (o.isMesh) o.visible = false;
+      });
+      right.group.add(buildCraneStaff());
     }
     let spear: THREE.Group | null = null;
     if (classId === 'Guard') {
@@ -1055,8 +1122,12 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       climbKickRef.current = kick;
     } else if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
       key = 'r_kick';
+    } else if (st === 'skill_4' && classId === 'HeavyHealer' && c.dxSpring) {
+      key = actionsRef.current.d_spring ? 'd_spring' : 'skill_4';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
+    } else if (st === 'ultimate' && classId === 'HeavyHealer') {
+      key = actionsRef.current.ultimate ? 'ultimate' : 'skill_1';
     } else if (st === 'ultimate' && classId === 'Shadowblade') {
       key = actionsRef.current.s_ult ? 's_ult' : 'attack_3';
     } else if (st === 'ultimate' && classId === 'BuddhistMage') {
@@ -1206,7 +1277,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy && !c.weaponLost && !(c.expeditionWeapon && c.hp<=0);
       // the left hand carries the candle / candle-shade in 青冥古林
-      if (w0.left) w0.left.group.visible = !handsBusy && !c.expeditionWeapon && classId !== 'Ranger' && classId !== 'Trader' && !c.candle && !c.shade;
+      if (w0.left) w0.left.group.visible = !handsBusy && !c.expeditionWeapon && classId !== 'Ranger' && classId !== 'Trader' && classId !== 'HeavyHealer' && !c.candle && !c.shade;
     }
 
     // Face protection (暗器 model): damp neck / head rotation toward rest

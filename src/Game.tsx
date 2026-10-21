@@ -36,6 +36,8 @@ import { GROW, MAPS, MapId, HOME_BONUS, mapRuntime, forestFloor, caveRoofAt, FOR
 import { getIb, ibSet, payCash, IB_NOTIONAL, ibTask, ibDone, ibExpire } from './banker';
 import { TR, TRADER, resetTrader } from './trader';
 import { TraderFx } from './components/TraderFx';
+import { DX, DIXIAN, resetDixian, mercyHeal } from './dixian';
+import { DixianFx } from './components/DixianFx';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
 import { CameraController } from './CameraController';
@@ -628,7 +630,7 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
-    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * ((c.warT ?? 0) > 0 ? WAR.drum.speed : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1) * ((c.shortT ?? 0) > 0 ? TRADER.short.slow : 1);
+    const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * ((c.warT ?? 0) > 0 ? WAR.drum.speed : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1) * ((c.shortT ?? 0) > 0 ? TRADER.short.slow : 1) * dixianSlow(c);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
     const fighters = fightersRef.current;
@@ -1325,7 +1327,7 @@ function GameImpl({
       if (map.id === 'sea') shipWall(i, c, px0, pz0);
       else stepWall(c, px0, pz0, i);
       const free = c.actionState === 'idle' || c.actionState === 'run' || c.actionState === 'jump' || c.actionState === 'block' || c.actionState === 'skill_2';
-      if (!free || c.actionState === 'dodge') {
+      if ((!free || c.actionState === 'dodge') && !((c.foldT ?? 0) > 0)) {
         const k = Math.exp(-4.5 * cdt);
         c.vel[0] *= k;
         c.vel[2] *= k;
@@ -1560,6 +1562,7 @@ function GameImpl({
       const cfg = phasesFor(c)[c.actionState];
       const swinging =
         SWING_STATES.has(c.actionState) &&
+        (c.classId !== 'HeavyHealer' || c.actionState.startsWith('attack_')) &&
         (c.actionState === 'skill_2' ||
           c.actionState === 'skill_3' ||
           (c.actionState === 'ultimate' ? !!c.ultSlamStarted && c.stateTimer < 1.0 : !!cfg && c.stateTimer >= cfg.startup * 0.4 && c.stateTimer <= cfg.startup + cfg.active + 0.05));
@@ -2129,6 +2132,9 @@ function GameImpl({
       if (c.classId === 'Trader' && (req.startsWith('skill') || req === 'ultimate')) {
         return executeTrader(slot, c, foe, intent, req, { start, paySkill });
       }
+      if (c.classId === 'HeavyHealer' && (req.startsWith('skill') || req === 'ultimate')) {
+        return executeDixian(slot, c, intent, req, rooted, { start, paySkill, report });
+      }
       if (c.classId === 'Emperor' && (req.startsWith('skill') || req === 'ultimate' || ((req === 'attack' || req === 'dodge' || req === 'jump') && c.empMove))) {
         return executeEmperor(slot, c, foe, req, { canSkill, paySkill, report });
       }
@@ -2302,6 +2308,12 @@ function GameImpl({
     }
 
     function applyMovement(c: CombatantState, intent: Intent) {
+      if ((c.foldT ?? 0) > 0 && c.foldV) {
+        // 地仙 缩地成寸: the step carries him, the keys don't
+        c.vel[0] = c.foldV[0];
+        c.vel[2] = c.foldV[1];
+        return;
+      }
       if ((c.glide ?? 0) > 0 && !c.isGrounded) {
         // 交易员 under his vest: steer with the keys, sink slowly
         const G = TRADER.glide;
@@ -2332,7 +2344,7 @@ function GameImpl({
         c.actionState = 'block';
         c.stateDuration = 0;
       } else if (st === 'block') c.actionState = 'idle';
-      c.hasSuperArmor = ranger ? c.actionState === 'ultimate' : monk ? c.actionState === 'ultimate' || (c.bellTimer ?? 0) > 0 : ARMOR_STATES.has(c.actionState);
+      c.hasSuperArmor = c.classId === 'HeavyHealer' ? c.actionState === 'ultimate' || c.actionState === 'skill_3' : ranger ? c.actionState === 'ultimate' : monk ? c.actionState === 'ultimate' || (c.bellTimer ?? 0) > 0 : ARMOR_STATES.has(c.actionState);
 
       // local move (x = right, z = forward relative to facing) drives strafe/backpedal animation
       const f = fwdOf(c.rotY);
@@ -2617,6 +2629,7 @@ function GameImpl({
       const m = FX.mute;
       FX.mute = 0;
       const hp0 = def.hp;
+      if (att.classId === 'HeavyHealer') base *= 0.8; // 地仙's staff is lighter than a blade
       if (att.classId === 'Trader') {
         // 复利 and 做空
         base *= 1 + TRADER.compound.per * (att.compound ?? 0);
@@ -2941,6 +2954,15 @@ function GameImpl({
         if(effect.multiplier>1){vfx.sparkBurst(chest,18,w?.blade==='copper'?'#9ee7ed':'#b6a1e9',4,.05,UP,.7);}
       }
       if(att===fighters[ME]&&career.getSnapshot().run&&!career.getSnapshot().run.failed&&career.getSnapshot().path==='edge')dmg=Math.round(dmg*1.08);
+      if ((def.craneShield ?? 0) > 0 && dmg > 0) {
+        // 鹤羽护: the feathers take it first
+        const soak = Math.min(def.craneShield ?? 0, dmg);
+        def.craneShield = (def.craneShield ?? 0) - soak;
+        dmg -= soak;
+        vfx.embers(vA.set(def.pos[0], def.pos[1] + 1.3, def.pos[2]), 6, '#f8fafc', 0.6, 1, 0.07);
+        vfx.damageNumber(vA.set(def.pos[0] + 0.4, def.pos[1] + 2.0, def.pos[2]), `护 -${soak}`, false, '#e2e8f0');
+        if ((def.craneShield ?? 0) <= 0) def.craneShieldT = 0;
+      }
       def.hp = Math.max(0, def.hp - dmg);
       if (def.treeClimb !== undefined) {
         // knocked off the trunk
@@ -3088,6 +3110,7 @@ function GameImpl({
       if (c.hp <= 0) return;
       if (c.classId === 'Emperor' && !c.actionState.startsWith('attack_')) return; // his skills land in updateEmperor
       if (c.classId === 'Trader' && !c.actionState.startsWith('attack_')) return; // his land in updateTrader
+      if (c.classId === 'HeavyHealer' && !c.actionState.startsWith('attack_')) return; // his skills hit nobody: updateDixian
       const fwd = fwdOf(c.rotY).clone();
       // melee can't reach someone standing on a pillar above you (and vice versa)
       // how far up or down a blade reaches: 2.2 m on the flat; on a slope (雪岭) a bit more for each metre across, so
@@ -3291,6 +3314,298 @@ function GameImpl({
     }
 
     /** 天子 as a hero: 1 横扫千军, 2 龙威, 3 御林箭雨, 4 龙颜大怒, R 真龙降世 (the sword combo and block are the shared ones) */
+    /** 地仙's skills: 1 清风诀, 2 鹤羽护, 3 地脉回春, 4 缩地成寸, R 人间不渡, 5 还魂 (the staff combo and block are the shared ones) */
+    function executeDixian(
+      slot: number,
+      c: CombatantState,
+      intent: Intent,
+      req: string,
+      rooted: boolean,
+      h: {
+        start: (next: CharacterActionState, push?: number) => void;
+        paySkill: (idx: number, key: string, label: string) => boolean;
+        report: (attempt: string, result: string) => void;
+      }
+    ): boolean {
+      const D = DIXIAN;
+      const fwd = fwdOf(intent.faceYaw);
+      const side = c.side ?? 0;
+      const reach = (f: CombatantState, r: number) => Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < r && Math.abs(f.pos[1] - c.pos[1]) < 6;
+      const allies = fighters.filter((f) => f.hp > 0 && (f.side ?? 0) === side && f.ballista === undefined);
+      // the most hurt ally in reach by share of HP; himself when nobody else is worse off
+      const neediest = (r: number) => {
+        let best = c;
+        let bs = c.hp / c.maxHp;
+        for (const f of allies) {
+          if (f === c || !reach(f, r)) continue;
+          const s = f.hp / f.maxHp;
+          if (s < bs - 0.001) {
+            bs = s;
+            best = f;
+          }
+        }
+        return best;
+      };
+      const say = (text: string) => slot === ME && vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), text, false, '#a3a3a3');
+      c.dxSpring = false;
+      switch (req) {
+        case 'skill1': {
+          if (!c.isGrounded) return h.report('1: 清风诀', '空中无法引导'), false;
+          if (!h.paySkill(0, 'skill1', '1')) return false;
+          const tgt = neediest(D.breeze.range);
+          h.start('skill_1');
+          c.stateDuration = D.breeze.cast + 0.25;
+          c.vel[0] = c.vel[2] = 0;
+          if (tgt !== c) c.rotY = c.targetRotY = yawTo(c.pos, tgt.pos);
+          DX.channels.push({ owner: slot, kind: 'breeze', target: fighters.indexOf(tgt), t: 0, dur: D.breeze.cast });
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 1.6, '#86efac', 0.5, 0.08, 0.6);
+          gameAudio.playWhirl();
+          return true;
+        }
+        case 'skill2': {
+          if (!h.paySkill(1, 'skill2', '2')) return false;
+          const tgt = neediest(D.shield.range);
+          h.start('skill_2');
+          c.stateDuration = 0.6;
+          if (tgt !== c) c.rotY = c.targetRotY = yawTo(c.pos, tgt.pos);
+          const amt = Math.round(mercyHeal(tgt.maxHp * D.shield.share, tgt.hp, tgt.maxHp));
+          tgt.craneShield = Math.max(tgt.craneShield ?? 0, amt);
+          tgt.craneShieldT = D.shield.t;
+          vfx.ring(vB.set(tgt.pos[0], tgt.pos[1] + 0.06, tgt.pos[2]), 1.5, '#f1f5f9', 0.5, 0.1, 0.5);
+          vfx.embers(vB.set(tgt.pos[0], tgt.pos[1] + 1.3, tgt.pos[2]), 22, '#f8fafc', 0.9, 1.2, 0.08);
+          vfx.damageNumber(vA.set(tgt.pos[0], tgt.pos[1] + 2.5, tgt.pos[2]), `鹤羽护 ${amt}`, true, '#e2e8f0');
+          gameAudio.playPowerupChime();
+          return true;
+        }
+        case 'skill3': {
+          if (!h.paySkill(2, 'skill3', '3')) return false;
+          h.start('skill_4');
+          c.dxSpring = true;
+          c.stateDuration = 0.55;
+          const x = c.pos[0] + fwd.x * D.spring.ahead;
+          const z = c.pos[2] + fwd.z * D.spring.ahead;
+          // one spring each: a new one closes the old
+          for (let k = DX.springs.length - 1; k >= 0; k--) if (DX.springs[k].owner === slot) DX.springs.splice(k, 1);
+          vfx.later(0.22, () => {
+            const y = groundAt(x, z, c.pos[1] + 0.5);
+            DX.springs.push({ owner: slot, x, y, z, r: D.spring.r, t: D.spring.t, age: 0, tick: 0 });
+            vfx.ring(vB.set(x, y + 0.05, z), D.spring.r, '#4ade80', 0.7, 0.14, 0.6);
+            vfx.dustPuff(vB.set(x, y + 0.05, z), 14, 0.6, 2.4, 0.6, '#bbf7d0');
+            gameAudio.playSlam();
+          });
+          return true;
+        }
+        case 'skill4': {
+          if (rooted) return h.report('4: 缩地成寸', '被定身'), false;
+          // toward the most hurt ally in reach (not one already beside him), else where he's heading
+          let ally: CombatantState | null = null;
+          let as = 2;
+          for (const f of allies) {
+            if (f === c || !reach(f, D.step.allyRange)) continue;
+            if (Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]) < 3) continue;
+            const s = f.hp / f.maxHp;
+            if (s < as) {
+              as = s;
+              ally = f;
+            }
+          }
+          if (!h.paySkill(3, 'skill4', '4')) return false;
+          let dx = fwd.x;
+          let dz = fwd.z;
+          let dist = D.step.far;
+          if (ally) {
+            dx = ally.pos[0] - c.pos[0];
+            dz = ally.pos[2] - c.pos[2];
+            const l = Math.hypot(dx, dz) || 1;
+            dist = Math.max(1, l - 1.6);
+            dx /= l;
+            dz /= l;
+          } else if (intent.move.lengthSq() > 0.01) {
+            const l = intent.move.length();
+            dx = intent.move.x / l;
+            dz = intent.move.z / l;
+          }
+          const t = dist / D.step.speed;
+          h.start('skill_3');
+          c.stateDuration = t + 0.12;
+          c.rotY = c.targetRotY = Math.atan2(-dx, -dz);
+          c.foldT = t;
+          c.foldV = [dx * D.step.speed, dz * D.step.speed];
+          c.dodgeIframeTimer = Math.max(c.dodgeIframeTimer, t + D.step.iframe);
+          vfx.dustPuff(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 16, 0.6, 2.2, 0.6, '#d1fae5');
+          vfx.embers(vB.set(c.pos[0], c.pos[1] + 1, c.pos[2]), 14, '#86efac', 0.6, 0.6, 0.08);
+          gameAudio.playDodge();
+          if (ally) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.4, c.pos[2]), '缩地成寸', false, '#86efac');
+          return true;
+        }
+        case 'ultimate': {
+          if (!h.paySkill(4, 'ultimate', 'R')) return false;
+          h.start('ultimate');
+          c.stateDuration = 1.3;
+          c.vel[0] = c.vel[2] = 0;
+          DX.cranes.push({ x: c.pos[0], y: fy(c.pos[0], c.pos[2], c.pos[1]), z: c.pos[2], t: 0 });
+          vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), D.crane.r, '#bbf7d0', 1.2, 0.2, 0.9);
+          vfx.later(0.45, () => {
+            for (const f of allies) {
+              if (f.hp <= 0 || !reach(f, D.crane.r)) continue;
+              healOn(f, mercyHeal(f.maxHp * D.crane.heal, f.hp, f.maxHp));
+              f.protectTimer = Math.max(f.protectTimer ?? 0, D.crane.protect);
+              f.rootTimer = 0;
+              f.silenceTimer = 0;
+              f.shortT = 0;
+              f.dreamT = 0;
+              f.poisonTimer = 0;
+              f.poisonStacks = 0;
+              vfx.ring(vB.set(f.pos[0], f.pos[1] + 0.06, f.pos[2]), 1.8, '#f0fdf4', 0.6, 0.12, 0.6);
+              vfx.pillarAt(0.05, '#bbf7d0', fighters.indexOf(f));
+            }
+          });
+          if (slot === ME) controller?.addShake(0.2);
+          onRoundEvent?.({ type: 'toast', text: '人间不渡：不入天阙，留守人间' });
+          gameAudio.playGong();
+          return true;
+        }
+        case 'skill5': {
+          if (!c.isGrounded) return h.report('5: 还魂', '空中无法引导'), false;
+          let down: CombatantState | null = null;
+          let bd = DIXIAN.revive.range;
+          if (aiOn && !round.over)
+            for (const f of fighters) {
+              if (f === c || (f.side ?? 0) !== side || !revivable(f)) continue;
+              const d = Math.hypot(f.pos[0] - c.pos[0], f.pos[2] - c.pos[2]);
+              if (d < bd && Math.abs(f.pos[1] - c.pos[1]) < 4) {
+                bd = d;
+                down = f;
+              }
+            }
+          if (!down) return say('附近没有倒下的队友'), h.report('5: 还魂', '附近没有倒下的队友'), false;
+          if (!h.paySkill(5, 'skill5', '5')) return false;
+          h.start('skill_4');
+          c.stateDuration = D.revive.cast + 0.25;
+          c.vel[0] = c.vel[2] = 0;
+          c.rotY = c.targetRotY = yawTo(c.pos, down.pos);
+          DX.channels.push({ owner: slot, kind: 'revive', target: fighters.indexOf(down), t: 0, dur: D.revive.cast });
+          vfx.ring(vB.set(down.pos[0], fy(down.pos[0], down.pos[2], down.pos[1]) + 0.05, down.pos[2]), 2.0, '#fde68a', 0.6, 0.1, 0.6);
+          gameAudio.playPowerupChime();
+          return true;
+        }
+      }
+      return false;
+    }
+    /** a heal, shown as a green number. Returns how much it really restored */
+    function healOn(f: CombatantState, amount: number) {
+      if (f.hp <= 0) return 0;
+      const before = f.hp;
+      f.hp = Math.min(f.maxHp, f.hp + Math.round(amount));
+      const got = f.hp - before;
+      if (got > 0) vfx.damageNumber(vA.set(f.pos[0], f.pos[1] + 2.3, f.pos[2]), `+${got}`, false, '#4ade80');
+      return got;
+    }
+    /** 地脉回春: an enemy of the spring's owner standing in it walks slower */
+    function dixianSlow(c: CombatantState) {
+      if (!DX.springs.length) return 1;
+      for (const s of DX.springs) {
+        const o = fighters[s.owner];
+        if (!o || (o.side ?? 0) === (c.side ?? 0)) continue;
+        if (Math.hypot(c.pos[0] - s.x, c.pos[2] - s.z) < s.r && Math.abs(c.pos[1] - s.y) < 2) return DIXIAN.spring.slow;
+      }
+      return 1;
+    }
+    /** 地仙's things in the world: channels finishing or breaking, springs healing, shields and steps wearing off */
+    function updateDixian() {
+      for (const f of fighters) {
+        if ((f.craneShieldT ?? 0) > 0) {
+          f.craneShieldT = (f.craneShieldT ?? 0) - dt;
+          if ((f.craneShieldT ?? 0) <= 0 || f.hp <= 0) {
+            f.craneShieldT = 0;
+            f.craneShield = 0;
+          } else if (Math.random() < dt * 5) vfx.embers(vB.set(f.pos[0], f.pos[1] + 1.2, f.pos[2]), 1, '#f8fafc', 0.5, 0.6, 0.06);
+        }
+        if ((f.foldT ?? 0) > 0) {
+          f.foldT = (f.foldT ?? 0) - dt;
+          if (f.actionState !== 'skill_3' || f.hp <= 0) f.foldT = 0;
+          if ((f.foldT ?? 0) <= 0) {
+            f.foldT = 0;
+            f.vel[0] *= 0.15;
+            f.vel[2] *= 0.15;
+            vfx.dustPuff(vB.set(f.pos[0], fy(f.pos[0], f.pos[2], f.pos[1]) + 0.05, f.pos[2]), 12, 0.5, 2, 0.5, '#d1fae5');
+          } else if (Math.random() < 0.6) vfx.embers(vB.set(f.pos[0], f.pos[1] + 0.9, f.pos[2]), 2, '#a7f3d0', 0.5, 0.3, 0.07);
+        }
+        if (f.dxSpring && f.actionState !== 'skill_4') f.dxSpring = false;
+      }
+      // channels: 清风诀 and 还魂. He has to stay in the cast to the end
+      for (let k = DX.channels.length - 1; k >= 0; k--) {
+        const ch = DX.channels[k];
+        const c = fighters[ch.owner];
+        const want = ch.kind === 'breeze' ? 'skill_1' : 'skill_4';
+        if (!c || c.hp <= 0 || c.actionState !== want || (ch.kind === 'revive' && c.dxSpring)) {
+          if (c && c.hp > 0 && ch.owner === ME) vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), '引导被打断', false, '#fca5a5');
+          DX.channels.splice(k, 1);
+          continue;
+        }
+        ch.t += dt;
+        c.vel[0] = c.vel[2] = 0;
+        const tgt = fighters[ch.target];
+        if (tgt && Math.random() < dt * 14) {
+          const p = Math.random();
+          vfx.embers(vB.set(c.pos[0] + (tgt.pos[0] - c.pos[0]) * p, c.pos[1] + 1.3 + Math.sin(p * Math.PI) * 0.8, c.pos[2] + (tgt.pos[2] - c.pos[2]) * p), 1, ch.kind === 'breeze' ? '#86efac' : '#fde68a', 0.5, 0.4, 0.07);
+        }
+        if (ch.t < ch.dur) continue;
+        DX.channels.splice(k, 1);
+        if (!tgt) continue;
+        if (ch.kind === 'breeze') {
+          if (tgt.hp <= 0) continue;
+          healOn(tgt, mercyHeal(tgt.maxHp * DIXIAN.breeze.heal, tgt.hp, tgt.maxHp));
+          vfx.ring(vB.set(tgt.pos[0], tgt.pos[1] + 0.06, tgt.pos[2]), 1.8, '#4ade80', 0.6, 0.12, 0.5);
+          vfx.embers(vB.set(tgt.pos[0], tgt.pos[1] + 0.4, tgt.pos[2]), 24, '#86efac', 0.9, 2.5, 0.08);
+          gameAudio.playPowerupChime();
+        } else {
+          if (!revivable(tgt) || !aiOn || round.over) continue;
+          tgt.reviveT = 0;
+          tgt.revived = (tgt.revived ?? 0) + 1;
+          tgt.hp = Math.round(tgt.maxHp * DIXIAN.revive.hp);
+          tgt.mp = Math.max(tgt.mp, tgt.maxMp * 0.3);
+          tgt.actionState = 'knockdown';
+          tgt.stateTimer = 0;
+          tgt.stateDuration = 0.5;
+          tgt.vel = [0, 0, 0];
+          tgt.dodgeIframeTimer = 1.6;
+          tgt.celebrate = false;
+          vfx.ring(vB.set(tgt.pos[0], fy(tgt.pos[0], tgt.pos[2], tgt.pos[1]) + 0.05, tgt.pos[2]), 2.4, '#fde68a', 0.7, 0.14, 0.6);
+          vfx.pillarAt(0.05, '#fde68a', ch.target);
+          gameAudio.playPowerupChime();
+          onRoundEvent?.({ type: 'toast', text: ch.target === ME ? `${c.tag || '地仙'}为你还魂` : ch.owner === ME ? `你为${tgt.tag || '队友'}还魂` : `${c.tag || '地仙'}为${tgt.tag || '队友'}还魂` });
+        }
+      }
+      // 地脉回春: once a second, everyone of the owner's side inside heals
+      for (let k = DX.springs.length - 1; k >= 0; k--) {
+        const s = DX.springs[k];
+        s.t -= dt;
+        s.age += dt;
+        const o = fighters[s.owner];
+        if (s.t <= 0 || !o) {
+          DX.springs.splice(k, 1);
+          continue;
+        }
+        if (Math.random() < dt * 10) {
+          const a = Math.random() * Math.PI * 2;
+          const d = Math.sqrt(Math.random()) * s.r;
+          vfx.embers(vB.set(s.x + Math.cos(a) * d, s.y + 0.1, s.z + Math.sin(a) * d), 1, '#86efac', 0.45, 1.6, 0.06);
+        }
+        s.tick += dt;
+        if (s.tick < 1) continue;
+        s.tick -= 1;
+        for (const f of fighters) {
+          if (f.hp <= 0 || (f.side ?? 0) !== (o.side ?? 0) || f.hp >= f.maxHp) continue;
+          if (Math.hypot(f.pos[0] - s.x, f.pos[2] - s.z) > s.r || Math.abs(f.pos[1] - s.y) > 2) continue;
+          healOn(f, mercyHeal(f.maxHp * DIXIAN.spring.heal, f.hp, f.maxHp));
+        }
+      }
+      for (let k = DX.cranes.length - 1; k >= 0; k--) {
+        DX.cranes[k].t += dt;
+        if (DX.cranes[k].t > 4.5) DX.cranes.splice(k, 1);
+      }
+    }
     /** 交易员's skills: the Rolex, the cash, the vest, the short, Black Monday */
     function executeTrader(
       slot: number,
@@ -4833,6 +5148,10 @@ function GameImpl({
         c.shortT = 0;
         c.dreamT = 0;
         c.compound = 0;
+        c.craneShield = 0;
+        c.craneShieldT = 0;
+        c.foldT = 0;
+        c.dxSpring = false;
         c.ibWork = 0;
         c.haul = [];
         c.warT = 0;
@@ -4970,6 +5289,7 @@ function GameImpl({
         const pickSome = (list: [number, number][], n: number) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
         mapRuntime.la = { loot: [], next: 2 };
         resetTrader();
+        resetDixian();
         laBankedRef.current = false;
         mapRuntime.war = { drumT: WAR.drum.first, drumBy: -1, drumHold: 0, shots: [], boulders: [], leverCd: [0, 0], towerCd: [0, 0] };
         mapRuntime.shrine = { own: [-1, -1, -1], prog: [0, 0, 0], busy: [0, 0, 0], score: [0, 0], on: false };
@@ -8071,6 +8391,7 @@ function GameImpl({
       if (map.id === 'wending') updateWar();
       if (map.id === 'losangeles') updateLoot();
       updateTrader();
+      updateDixian();
 
       if (map.id === 'lavacliff' && map.vents) {
         const vs = ventRef.current;
@@ -9697,6 +10018,56 @@ function GameImpl({
           ai.strafe = Math.random() < 0.5 ? -1 : 1;
         }
       }
+      if (ai.think <= 0 && free && !ai.request && me.classId === 'HeavyHealer') {
+        // 地仙: keep the side alive first (shield, wind, spring, a step to whoever's hurt, the crane when it's bad),
+        // pull a fallen teammate back; with nothing to mend he pokes with the staff and stays out of the worst of it
+        ai.think = 0.25 + Math.random() * 0.25;
+        const r = Math.random();
+        const side = me.side ?? 0;
+        const mates = fighters.filter((f) => f.hp > 0 && (f.side ?? 0) === side && f.ballista === undefined);
+        let worst = me;
+        let ws = me.hp / me.maxHp;
+        let far = 0;
+        let low = 0;
+        for (const f of mates) {
+          const d = Math.hypot(f.pos[0] - me.pos[0], f.pos[2] - me.pos[2]);
+          if (f.hp < f.maxHp * 0.45 && d < DIXIAN.crane.r) low++;
+          if (f === me || d > DIXIAN.breeze.range) continue;
+          if (f.hp / f.maxHp < ws) {
+            ws = f.hp / f.maxHp;
+            worst = f;
+            far = d;
+          }
+        }
+        const downed = aiOn && !round.over && fighters.some((f) => f !== me && (f.side ?? 0) === side && revivable(f) && Math.hypot(f.pos[0] - me.pos[0], f.pos[2] - me.pos[2]) < DIXIAN.revive.range);
+        if (downed && ready('skill5') && me.mp >= 50 && (dist > 5 || !foeAttacking)) ask('skill5');
+        else if (foeAttacking && dist < 3.4 && r < 0.5) {
+          if (ready('skill4') && me.mp >= 15 && me.hp < me.maxHp * 0.5) ask('skill4');
+          else if (me.dodgeCooldownTimer <= 0 && (me.stamina ?? 100) >= 25) {
+            ai.dodgeDir = Math.random() < 0.5 ? -1 : 1;
+            ask('dodge');
+          } else {
+            ai.plan = 'guard';
+            ai.planTimer = 0.4;
+          }
+        } else if (ready('ultimate') && me.mp >= 70 && (low >= 2 || me.hp < me.maxHp * 0.3)) ask('ultimate');
+        else if (ready('skill2') && me.mp >= 20 && ws < 0.7 && !(worst.craneShield ?? 0) && r < 0.6) ask('skill2');
+        else if (ready('skill1') && me.mp >= 25 && ws < 0.65 && (dist > 4.5 || worst !== me) && r < 0.65) ask('skill1');
+        else if (ready('skill3') && me.mp >= 30 && (ws < 0.8 || dist < 5) && r < 0.3) ask('skill3');
+        else if (ready('skill4') && me.mp >= 15 && worst !== me && far > 8 && r < 0.3) ask('skill4');
+        else if (dist > 2.4) {
+          ai.plan = r < 0.65 ? 'approach' : 'circle';
+          ai.planTimer = 0.5 + Math.random() * 0.4;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        } else if (r < 0.6) {
+          ask('attack');
+          ai.comboLeft = 2;
+        } else {
+          ai.plan = r < 0.85 ? 'circle' : 'retreat';
+          ai.planTimer = 0.4;
+          ai.strafe = Math.random() < 0.5 ? -1 : 1;
+        }
+      }
       if (ai.think <= 0 && free && !ai.request && me.classId === 'Trader') {
         // 交易员: Rolex from range, cash at their feet, short them, glide in or out, crash the market when it'll land
         ai.think = 0.22 + Math.random() * 0.25;
@@ -9728,7 +10099,7 @@ function GameImpl({
           ai.strafe = Math.random() < 0.5 ? -1 : 1;
         }
       }
-      if (ai.think <= 0 && free && !ai.request && !monkAI && !shadowAI && me.classId !== 'Trader') {
+      if (ai.think <= 0 && free && !ai.request && !monkAI && !shadowAI && me.classId !== 'Trader' && me.classId !== 'HeavyHealer') {
         ai.think = 0.22 + Math.random() * 0.25;
         const r = Math.random();
         if (foe.pos[1] - me.pos[1] > 2) {
@@ -9852,6 +10223,7 @@ function GameImpl({
       <AdventureDrop />
       <WeaponDrops /><CareerBeacon/>
       <TraderFx fighters={fightersRef} />
+      <DixianFx fighters={fightersRef} />
 
       {seats.map((seat, k) => (
         <group key={k} ref={groupRefs[k]} position={[0, 0, k === meSlot ? 0 : -6]}>

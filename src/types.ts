@@ -265,6 +265,11 @@ export interface CombatantState {
   dreamT?: number; // 交易员 撒钱: seconds left of the daydream (turns on their own side)
   glideDive?: boolean; // 交易员: diving out of the glide
   compound?: number; // 交易员 复利: stacks of extra damage from hits in a row
+  craneShield?: number; // 地仙 鹤羽护: damage the feather shield still soaks
+  craneShieldT?: number; // seconds left of the shield
+  foldT?: number; // 地仙 缩地成寸: seconds left of the step
+  foldV?: [number, number]; // its ground velocity
+  dxSpring?: boolean; // 地仙: this skill_4 is the staff tap of 地脉回春 (not the bow of 还魂)
   lift?: { k: number; from: number; to: number; t: number; x: number; z: number }; // 洛城午后: riding a tower's lift (firm k, from level to level)
   ibWork?: number; // 投行家: seconds left of working the model at the desk
   zipW?: { k: number; t: number; dir: 1 | -1 }; // 青冥古林: riding zip line k (t 0..1 from end a to end b)

@@ -185,8 +185,29 @@ const TRADER_HOTBAR: HotbarEntry[] = [
   { id: 'black_monday', key: 'R', name: TS[4].name, icon: TS[4].icon, short: '红K砸盘', cdKey: 'ultimate', super: true, meta: tMeta(4), desc: TS[4].description,
     tip: '对手被撒的钱滑倒时放，最后那根巨型阴线基本躲不开。' },
 ];
-const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR, Emperor: EMPEROR_HOTBAR, Trader: TRADER_HOTBAR };
-const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Trader'];
+const DS = CLASS_CONFIGS.HeavyHealer.skills;
+const dMeta = (i: number) => [`MP ${DS[i].mpCost}`, `冷却 ${DS[i].cooldown}s`];
+const DIXIAN_HOTBAR: HotbarEntry[] = [
+  { id: 'd_attack', key: '左键', name: '鹤头杖', icon: '🦯', short: '杖击三连', basic: true, meta: ['可连按', '第三下击倒'],
+    desc: '拄着鹤头杖点、扫、砸三连，第三下把人打倒。杖比刀轻，伤害比刀客低两成。被动「悬壶」：给生命低于30%的人治疗或加护盾，效果提升50%。',
+    tip: '地仙不靠打人赢：能躲就躲，让队友在前面，你在后面奶。' },
+  { id: 'd_block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'],
+    desc: '按住右键横杖格挡，正面伤害减少60%。看准对手出手的瞬间按下能打出完美格挡。' },
+  { id: 'qingfeng', key: '1', name: DS[0].name, icon: DS[0].icon, short: '读条大奶', cdKey: 'skill1', meta: dMeta(0), desc: DS[0].description,
+    tip: '读条会被打断：先用 4 拉开距离，或者站在队友身后再读。' },
+  { id: 'crane_feather', key: '2', name: DS[1].name, icon: DS[1].icon, short: '吸伤护盾', cdKey: 'skill2', meta: dMeta(1), desc: DS[1].description,
+    tip: '瞬发，看到队友要挨大招时提前给。' },
+  { id: 'earth_spring', key: '3', name: DS[2].name, icon: DS[2].icon, short: '回血减速阵', cdKey: 'skill3', meta: dMeta(2), desc: DS[2].description,
+    tip: '提前放在队友要打架的地方；一打一时放在脚下，对手冲进来会变慢。' },
+  { id: 'fold_earth', key: '4', name: DS[3].name, icon: DS[3].icon, short: '瞬行赶到', cdKey: 'skill4', meta: dMeta(3), desc: DS[3].description,
+    tip: '地仙唯一的位移，被贴身时留着它逃命。' },
+  { id: 'mortal_realm', key: 'R', name: DS[4].name, icon: DS[4].icon, short: '全队回血免控', cdKey: 'ultimate', super: true, meta: dMeta(4), desc: DS[4].description,
+    tip: '对面开大前放，全队四秒不会被击倒，能硬扛过去。' },
+  { id: 'recall_soul', key: '5', name: DS[5].name, icon: DS[5].icon, short: '复活队友', cdKey: 'skill5', meta: dMeta(5), desc: DS[5].description,
+    tip: '组队才用得上：比按 F 扶人快，起来的血也多。' },
+];
+const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR, Emperor: EMPEROR_HOTBAR, Trader: TRADER_HOTBAR, HeavyHealer: DIXIAN_HOTBAR };
+const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Trader', 'HeavyHealer'];
 
 export default function App() {
   const [materialsOpen, setMaterialsOpen] = useState(false);

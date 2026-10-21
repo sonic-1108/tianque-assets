@@ -1,4 +1,4 @@
-export const CAREER_HEROES=['Berserker','Ranger','BuddhistMage','Shadowblade','Emperor','Trader'];
+export const CAREER_HEROES=['Berserker','Ranger','BuddhistMage','Shadowblade','Emperor','Trader','HeavyHealer'];
 export const CAREER_MAPS=['experimental','quarry','losangeles','temple','wending','lavacliff','sea','glacier','forest','desert','rooftop','summit','plankway','coast'];
 export const CONTRACTS={scout:{name:'试锋取证',damage:300,seconds:30,xp:600,detail:'造成300伤害，存活30秒，再返回出发点交付。'},risk:{name:'深入夺契',damage:800,seconds:60,xp:1100,detail:'造成800伤害，存活60秒，再返回出发点交付。失败没有奖励。'}};
 export const careerLevel=xp=>Math.floor(Math.sqrt(Math.max(0,xp)/40))+1;

@@ -152,10 +152,10 @@ export const CONFIG = {
   lightHealerMp: { value: 140, type: 'number', label: '灵雀 Max MP', group: 'LightHealer' },
   lightHealerSpeedRatio: { value: 1.15, type: 'number', label: '灵雀 Move Speed Ratio', group: 'LightHealer' },
 
-  // Class 5: 慈航 (Heavy Healer - 苏慈)
-  heavyHealerHp: { value: 1000, type: 'number', label: '慈航 Max HP', group: 'HeavyHealer' },
-  heavyHealerMp: { value: 150, type: 'number', label: '慈航 Max MP', group: 'HeavyHealer' },
-  heavyHealerSpeedRatio: { value: 0.85, type: 'number', label: '慈航 Move Speed Ratio', group: 'HeavyHealer' },
+  // Class 5: 地仙 (Heavy Healer - 青囊翁)
+  heavyHealerHp: { value: 1150, type: 'number', label: '地仙 Max HP', group: 'HeavyHealer' },
+  heavyHealerMp: { value: 160, type: 'number', label: '地仙 Max MP', group: 'HeavyHealer' },
+  heavyHealerSpeedRatio: { value: 0.85, type: 'number', label: '地仙 Move Speed Ratio', group: 'HeavyHealer' },
 
   // Lighting & Environment
   ambientIntensity: {

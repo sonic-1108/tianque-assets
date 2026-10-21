@@ -17,6 +17,7 @@ const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Shadowblade: './portraits/shadowblade.png',
   Emperor: './portraits/emperor.png',
   Trader: './portraits/trader.png',
+  HeavyHealer: './portraits/dixian.png',
 };
 /** one short line per hero instead of a paragraph */
 const TAG: Partial<Record<CharacterClassId, string>> = {
@@ -25,6 +26,7 @@ const TAG: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: '拳掌 · 护体控场',
   Shadowblade: '双刃 · 刺杀突进',
   Trader: '钱箱 · 撒钱砸盘',
+  HeavyHealer: '鹤杖 · 后排大奶',
 };
 /** each hero's ink accent */
 const ACCENT: Partial<Record<CharacterClassId, string>> = {
@@ -33,6 +35,7 @@ const ACCENT: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: '#a8822e',
   Shadowblade: '#3d4a7a',
   Trader: '#2f6b3f',
+  HeavyHealer: '#5b8a6e',
 };
 
 export interface LobbyProps {
