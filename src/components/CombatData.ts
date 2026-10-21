@@ -537,6 +537,23 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
       { id: 'g5', name: '-', key: '-', description: '-', mpCost: 0, cooldown: 99, icon: '-', isSuper: true },
     ],
   },
+  Wanderer: {
+    id: 'Wanderer',
+    name: '散人',
+    defaultCharacter: '无名客',
+    role: '百家借招 / 不入门派 (Wanderer)',
+    roleType: 'dps',
+    description: '到了30级仍不肯拜入任何一门的江湖散人。没有本命绝学，也没有大招，却从七家各学来一招，自己挑六招带在身上。',
+    hp: 1300,
+    mp: 120,
+    speedRatio: 1.0,
+    attackSpeedRatio: 1.0,
+    staggerPower: 1,
+    passiveName: '百家',
+    passiveDesc: '每一招都借自别家：伤害只有八成，冷却长两成，没有大招。',
+    // filled from the chosen moves by src/wanderer.ts
+    skills: [],
+  },
   Trader: {
     id: 'Trader',
     name: '交易员',

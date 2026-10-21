@@ -833,6 +833,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.metalness = Math.max(m.metalness ?? 0, 0.3);
           m.roughness = Math.min(m.roughness ?? 1, 0.6);
         }
+        if (classId === 'Wanderer') {
+          // 散人's plain first look (until he has a model of his own): 霍岩's body in undyed hemp and grey cloth
+          const lum = m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
+          const skin = m.color.r > m.color.b * 1.25 && m.color.r > 0.35;
+          if (!skin) m.color = new THREE.Color(lum > 0.4 ? '#b9ad94' : '#4e5560').multiplyScalar(0.7 + lum * 0.6);
+          m.metalness = Math.min(m.metalness ?? 0, 0.1);
+          m.roughness = Math.max(m.roughness ?? 1, 0.8);
+        }
         if (classId === 'Emperor' && !asset.fallback) {
           // 皇上's own model: a touch of self-light so his face reads under the night sky
           m.emissive = new THREE.Color('#ffffff');
@@ -925,6 +933,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       });
       right.group.add(buildBriefcase());
     }
+    if (classId === 'Wanderer') left.group.visible = false; // 散人: one plain blade
     if (classId === 'HeavyHealer') {
       // 鹤头杖: the blades stay hidden (their markers still draw the trail); a gnarled staff with a silver crane head
       left.group.visible = false;
@@ -1284,7 +1293,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy && !c.weaponLost && !(c.expeditionWeapon && c.hp<=0);
       // the left hand carries the candle / candle-shade in 青冥古林
-      if (w0.left) w0.left.group.visible = !handsBusy && !c.expeditionWeapon && classId !== 'Ranger' && classId !== 'Trader' && classId !== 'HeavyHealer' && !c.candle && !c.shade;
+      if (w0.left) w0.left.group.visible = !handsBusy && !c.expeditionWeapon && classId !== 'Ranger' && classId !== 'Trader' && classId !== 'HeavyHealer' && classId !== 'Wanderer' && !c.candle && !c.shade;
     }
 
     // Face protection (暗器 model): damp neck / head rotation toward rest

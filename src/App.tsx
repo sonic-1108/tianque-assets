@@ -1,4 +1,5 @@
 import {career} from './career';
+import { borrowedFor, WANDER_SLOTS, WANDER_LABEL } from './wanderer';
 import {CareerHall,CareerHud} from './components/CareerHall';
 import { WeaponForge } from './components/forge/WeaponForge';
 import { MaterialCodex } from './components/materials/MaterialCodex';
@@ -208,6 +209,17 @@ const DIXIAN_HOTBAR: HotbarEntry[] = [
 ];
 const HOTBAR_BY_CLASS: Partial<Record<CharacterClassId, HotbarEntry[]>> = { Berserker: BERSERKER_HOTBAR, Ranger: RANGER_HOTBAR, BuddhistMage: MONK_HOTBAR, Shadowblade: SHADOW_HOTBAR, Emperor: EMPEROR_HOTBAR, Trader: TRADER_HOTBAR, HeavyHealer: DIXIAN_HOTBAR };
 const PLAYABLE: CharacterClassId[] = ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'Trader', 'HeavyHealer'];
+/** 散人's bar: a plain blade, block, and the six moves he chose (src/wanderer.ts), each on its own slot's cooldown */
+function wandererHotbar(): HotbarEntry[] {
+  const W = CLASS_CONFIGS.Wanderer.skills;
+  return [
+    { id: 'w_attack', key: '左键', name: '单刀', icon: '🗡️', short: '刀三连', basic: true, meta: ['可连按', '第三下击倒'],
+      desc: '一把没有名字的刀，三连砍。被动「百家」：每招借自别家，伤害八成、冷却长两成，没有大招。', tip: '散人什么都会一点：看对手是谁，挑合适的六招带上。' },
+    { id: 'w_block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'], desc: '按住右键举刀格挡，正面伤害减少60%。' },
+    ...WANDER_SLOTS.map((slot, k) => ({ id: 'w_' + k, key: WANDER_LABEL[slot], name: W[k]?.name ?? '-', icon: W[k]?.icon ?? '', short: borrowedFor(slot) ? '借自' + CLASS_CONFIGS[borrowedFor(slot)!.cls].name : '', cdKey: slot === 'ultimate' ? 'ultimate' : slot,
+      meta: W[k] ? [`MP ${W[k].mpCost}`, `冷却 ${W[k].cooldown}s`] : [], desc: W[k]?.description ?? '' })),
+  ];
+}
 
 export default function App() {
   const [materialsOpen, setMaterialsOpen] = useState(false);
@@ -269,7 +281,7 @@ export default function App() {
   const [enemyClass, setEnemyClass] = useState<CharacterClassId>('Berserker');
   const playerClassRef = useRef<CharacterClassId>('Berserker');
   playerClassRef.current = playerClass;
-  const HOTBAR_INFO = HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
+  const HOTBAR_INFO = playerClass === 'Wanderer' ? wandererHotbar() : HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
   // generative guzheng score and per-map ambience
   useEffect(() => {
     if (isMusicMuted) gameAudio.stopMusic();

@@ -10,7 +10,8 @@ export type CharacterClassId =
   | 'Shadowblade'
   | 'Emperor'
   | 'Guard'
-  | 'Trader';
+  | 'Trader'
+  | 'Wanderer';
 
 export type CharacterActionState =
   | 'idle'
@@ -270,6 +271,8 @@ export interface CombatantState {
   foldT?: number; // 地仙 缩地成寸: seconds left of the step
   foldV?: [number, number]; // its ground velocity
   soulT?: number; // 地仙 魂印: seconds left of the mark that saves them from one killing blow
+  wanderer?: boolean; // 散人: this fighter's own class is Wanderer (classId is the lender's while a borrowed move plays)
+  borrowState?: CharacterActionState; // the action the borrowed move started; when it ends he is a 散人 again
   dxSpring?: boolean; // 地仙: this skill_4 is the staff tap of 地脉回春 (not the bow of 还魂)
   lift?: { k: number; from: number; to: number; t: number; x: number; z: number }; // 洛城午后: riding a tower's lift (firm k, from level to level)
   ibWork?: number; // 投行家: seconds left of working the model at the desk

@@ -37,6 +37,7 @@ import { getIb, ibSet, payCash, IB_NOTIONAL, ibTask, ibDone, ibExpire } from './
 import { TR, TRADER, resetTrader } from './trader';
 import { TraderFx } from './components/TraderFx';
 import { DX, DIXIAN, resetDixian, mercyHeal } from './dixian';
+import { borrowedFor, WANDER, WANDER_SLOTS, WANDER_LABEL } from './wanderer';
 import { DixianFx } from './components/DixianFx';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
@@ -630,6 +631,8 @@ function GameImpl({
 
     void getConfig;
     const gravity = getConfig('gravity') || 26;
+    /** 散人: true while executeIntent is casting a borrowed move as its owner (the inner call must not be refused) */
+    let castingBorrowed = false;
     const speedOf = (c: CombatantState) => (getConfig('baseMoveSpeed') || 8.5) * (CLASS_CONFIGS[c.classId]?.speedRatio || 0.85) * ((c.stealthT ?? 0) > 0 ? 1.25 : 1) * ((c.burrowT ?? 0) > 0 ? 1.35 : 1) * ((c.hasteT ?? 0) > 0 ? 1.3 : 1) * ((c.warT ?? 0) > 0 ? WAR.drum.speed : 1) * (isBossFighter(c) && c.hp < c.maxHp * 0.35 ? 1.25 : 1) * ((c.shortT ?? 0) > 0 ? TRADER.short.slow : 1) * dixianSlow(c);
     const jumpVel = getConfig('jumpVelocity') || 11;
 
@@ -769,6 +772,11 @@ function GameImpl({
       // 难度: the enemy AI's cooldowns and mana come back faster on the harder levels
       const lvlK = isEnemyAI(c) ? AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal : null;
       const cdDt = dt * (lvlK ? lvlK.cd : 1);
+      // 散人: the borrowed move is over (or he was knocked out of it): back to his own class
+      if (c.wanderer && c.classId !== 'Wanderer' && (c.hp <= 0 || c.actionState !== c.borrowState)) {
+        c.classId = 'Wanderer';
+        c.borrowState = undefined;
+      }
       for (const k of Object.keys(c.cooldowns)) {
         const v = c.cooldowns[k];
         c.cooldowns[k] = typeof v !== 'number' || isNaN(v) ? 0 : Math.max(0, v - cdDt);
@@ -1914,6 +1922,7 @@ function GameImpl({
       if (!req) return false;
 
 
+
       // Soft lock: attacks snap toward a nearby opponent that is roughly in front
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
@@ -1961,6 +1970,46 @@ function GameImpl({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
+      // 散人: a borrowed move plays as its owner for that one action; while it plays only a dodge gets through
+      if (c.wanderer && c.classId !== 'Wanderer' && !castingBorrowed) {
+        if (req !== 'dodge') return false;
+        c.classId = 'Wanderer';
+        c.borrowState = undefined;
+        return executeIntent(slot, c, foe, intent);
+      }
+      if (c.classId === 'Wanderer' && (req.startsWith('skill') || req === 'ultimate')) {
+        const b = borrowedFor(req);
+        const sk = skills[WANDER_SLOTS.indexOf(req as (typeof WANDER_SLOTS)[number])];
+        if (!b || !sk) return false;
+        const label = `${WANDER_LABEL[req]}: ${sk.name}`;
+        if ((c.cooldowns[req] ?? 0) > 0) return report(label, `冷却中 (${(c.cooldowns[req] ?? 0).toFixed(1)}s)`), false;
+        if (!canSkill) return report(label, `被 [${cur} ${phase}] 占用`), false;
+        const saved = c.cooldowns[b.srcKey];
+        c.cooldowns[b.srcKey] = 0;
+        c.wanderer = true;
+        c.classId = b.cls;
+        const sub: Intent = { ...intent, request: b.srcKey as InputKeyAction };
+        let ok = false;
+        castingBorrowed = true;
+        try {
+          ok = executeIntent(slot, c, foe, sub);
+        } finally {
+          castingBorrowed = false;
+          intent.faceYaw = sub.faceYaw;
+          const used = c.cooldowns[b.srcKey] ?? 0;
+          c.cooldowns[b.srcKey] = saved ?? 0;
+          if (ok) {
+            c.cooldowns[req] = used * WANDER.cd;
+            c.borrowState = c.actionState;
+          }
+          // nothing to wait for (a throw that left him standing, or the cast failed): a 散人 again at once
+          if (!ok || c.actionState === 'idle' || c.actionState === 'run') {
+            c.classId = 'Wanderer';
+            c.borrowState = undefined;
+          }
+        }
+        return ok;
+      }
       if (c.zip) return report('出招', '铁索上滑行中'), false;
       if (c.zipW) return report('出招', '滑索上滑行中'), false;
       if (c.lift) return report('出招', '电梯里'), false;
@@ -2629,6 +2678,7 @@ function GameImpl({
       const m = FX.mute;
       FX.mute = 0;
       const hp0 = def.hp;
+      if (att.wanderer && att.classId !== 'Wanderer') base *= WANDER.dmg; // 散人: a borrowed move hits at 80%
       if (att.classId === 'Trader') {
         // 复利 and 做空
         base *= 1 + TRADER.compound.per * (att.compound ?? 0);
@@ -5325,6 +5375,8 @@ function GameImpl({
         const seat = seatsNow[k];
         if (seat) {
           c.classId = seat.cls;
+          c.wanderer = seat.cls === 'Wanderer';
+          c.borrowState = undefined;
           c.side = seat.side;
           c.tag = seat.name;
         }
