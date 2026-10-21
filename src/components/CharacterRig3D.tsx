@@ -1289,7 +1289,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     // Face protection (暗器 model): damp neck / head rotation toward rest
     const rq = restQuats.current;
-    if ((classId === 'Ranger' || classId === 'BuddhistMage') && !asset.fallback) {
+    if ((classId === 'Ranger' || classId === 'BuddhistMage' || classId === 'HeavyHealer') && !asset.fallback) {
       if (rq.neckBone && rq.neck) rq.neckBone.quaternion.slerp(rq.neck, 0.6);
       if (rq.headBone && rq.head) rq.headBone.quaternion.slerp(rq.head, 0.45);
     }
