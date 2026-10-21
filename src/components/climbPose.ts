@@ -56,21 +56,119 @@ const d = new THREE.Vector3();
 const up = new THREE.Vector3(0, 1, 0);
 const right = new THREE.Vector3();
 
-/** Pull the vest off at chest level, then hold its two edges overhead with both hands. */
-export function applyGlidePose(l: Limbs, fwd: THREE.Vector3, lift: number, w: number) {
+/** Pull the vest off at chest level, then hold it overhead by its straps; the legs hang and swing under it. */
+export function applyGlidePose(l: Limbs, fwd: THREE.Vector3, lift: number, w: number, t = 0) {
   right.set(-fwd.z, 0, fwd.x);
   const B = l.bones;
   for (const side of [-1, 1]) {
     const p = side < 0 ? 'left' : 'right';
-    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(-0.15, 0.8, lift)).addScaledVector(fwd, 0.28).addScaledVector(right, side * 0.5).normalize();
+    // arms: a wide V overhead, elbows a touch bent and forward, the way you hang off two straps
+    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(-0.15, 0.82, lift)).addScaledVector(fwd, 0.22).addScaledVector(right, side * 0.52).normalize();
     aim(B[p + 'arm'], B[p + 'forearm'], d, w);
-    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(0.25, 0.9, lift)).addScaledVector(fwd, 0.12).addScaledVector(right, -side * 0.2).normalize();
+    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(0.25, 0.95, lift)).addScaledVector(fwd, 0.1).addScaledVector(right, side * 0.08).normalize();
     aim(B[p + 'forearm'], B[p + 'hand'], d, w);
-    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, 0.2).addScaledVector(right, side * 0.12).normalize();
+    // legs: hanging, knees softly bent, swinging out of step with each other
+    const sw = Math.sin(t * 2.3 + (side < 0 ? 0 : 2.1)) * lift;
+    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, 0.22 + 0.1 * sw).addScaledVector(right, side * 0.1).normalize();
     aim(B[p + 'upleg'], B[p + 'leg'], d, w);
-    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, -0.25).normalize();
+    d.copy(up).multiplyScalar(-1).addScaledVector(fwd, -0.3 - 0.12 * sw * lift).addScaledVector(right, side * 0.04).normalize();
     aim(B[p + 'leg'], B[p + 'foot'], d, w);
+    // toes point down (no ground to stand on)
+    const toe = B[p + 'toebase'];
+    if (toe) {
+      d.copy(up).multiplyScalar(-0.85).addScaledVector(fwd, 0.5).normalize();
+      aim(B[p + 'foot'], toe, d, w * lift);
+    }
   }
+  gripHands(l, w * THREE.MathUtils.smoothstep(lift, 0.15, 0.6));
+}
+
+// ---------------------------------------------------------------- hands closing on a strap
+const FINGERS = ['index', 'middle', 'ring', 'pinky'];
+/** how far each joint folds into a fist (radians): knuckle, middle, tip */
+const FIST = { index: [1.15, 1.45, 0.95], middle: [1.25, 1.55, 1.0], ring: [1.3, 1.6, 1.0], pinky: [1.4, 1.6, 1.0] } as Record<string, number[]>;
+interface GripJoint { bone: THREE.Bone; rest: THREE.Quaternion; axis: THREE.Vector3; ang: number }
+const gripRig = new WeakMap<Limbs, GripJoint[][] | null>();
+const qA = new THREE.Quaternion();
+const qT = new THREE.Quaternion();
+
+/**
+ * Work out, from the bind pose, how each finger joint folds: about the knuckle line, toward the palm (the side the
+ * thumb sits on). The fold axis is kept in each joint's parent frame, so the fist is rebuilt from rest every frame
+ * and nothing accumulates whatever the clip does with the fingers.
+ */
+function gripJoints(l: Limbs): GripJoint[][] | null {
+  if (gripRig.has(l)) return gripRig.get(l)!;
+  const B = l.bones;
+  const out: GripJoint[][] = [];
+  for (const p of ['left', 'right']) {
+    const hand = B[p + 'hand'], idx = B[p + 'handindex1'], pky = B[p + 'handpinky1'], th = B[p + 'handthumb1'];
+    if (!hand || !idx || !pky || !th) { gripRig.set(l, null); return null; }
+    hand.updateWorldMatrix(true, true);
+    const axis = idx.getWorldPosition(new THREE.Vector3()).sub(pky.getWorldPosition(new THREE.Vector3())).normalize();
+    // which way is "into the palm": fold the index finger both ways and keep the one that ends nearer the thumb
+    const i1 = idx.getWorldPosition(new THREE.Vector3());
+    const tip = (B[p + 'handindex4'] ?? B[p + 'handindex3']).getWorldPosition(new THREE.Vector3()).sub(i1);
+    const thumb = th.getWorldPosition(new THREE.Vector3());
+    const reach = (sgn: number) => tip.clone().applyAxisAngle(axis, sgn * 1.2).add(i1).distanceTo(thumb);
+    const sgn = reach(1) < reach(-1) ? 1 : -1;
+    const joints: GripJoint[] = [];
+    for (const f of FINGERS) {
+      for (let j = 1; j <= 3; j++) {
+        const bone = B[p + 'hand' + f + j];
+        if (!bone?.parent) continue;
+        const pq = bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+        joints.push({ bone, rest: bone.quaternion.clone(), axis: axis.clone().applyQuaternion(pq).normalize(), ang: sgn * FIST[f][j - 1] });
+      }
+    }
+    out.push(joints);
+  }
+  gripRig.set(l, out);
+  return out;
+}
+
+const fa = new THREE.Vector3();
+const fb = new THREE.Vector3();
+/** close both hands into fists around the straps; the thumbs wrap over the index fingers */
+export function gripHands(l: Limbs, w: number) {
+  if (w <= 0.001) return;
+  const rig = gripJoints(l);
+  if (!rig) return;
+  const B = l.bones;
+  for (let h = 0; h < 2; h++) {
+    for (const j of rig[h]) {
+      qT.copy(qA.setFromAxisAngle(j.axis, j.ang)).multiply(j.rest);
+      j.bone.quaternion.slerp(qT, w);
+    }
+    const p = h === 0 ? 'left' : 'right';
+    B[p + 'hand'].updateWorldMatrix(true, true);
+    const t2 = B[p + 'handthumb2'], t3 = B[p + 'handthumb3'], t4 = B[p + 'handthumb4'];
+    const i2 = B[p + 'handindex2'], m2 = B[p + 'handmiddle2'];
+    if (t2 && t3 && i2) {
+      d.copy(i2.getWorldPosition(fa)).sub(t2.getWorldPosition(fb)).normalize();
+      aim(t2, t3, d, w * 0.8);
+    }
+    if (t3 && t4 && m2) {
+      d.copy(m2.getWorldPosition(fa)).sub(t3.getWorldPosition(fb)).normalize();
+      aim(t3, t4, d, w * 0.8);
+    }
+  }
+}
+
+/** world point inside the closed fist (between the knuckles and the folded fingertips): where a strap runs through */
+export function fistCentre(l: Limbs, side: 0 | 1, out: THREE.Vector3) {
+  const p = side === 0 ? 'left' : 'right';
+  const B = l.bones;
+  out.set(0, 0, 0);
+  let n = 0;
+  for (const f of FINGERS) {
+    const k = B[p + 'hand' + f + '1'], tip = B[p + 'hand' + f + '3'];
+    if (!k || !tip) continue;
+    out.add(k.getWorldPosition(fa)).add(tip.getWorldPosition(fb));
+    n += 2;
+  }
+  if (!n) return B[p + 'hand'].getWorldPosition(out);
+  return out.divideScalar(n);
 }
 
 /**

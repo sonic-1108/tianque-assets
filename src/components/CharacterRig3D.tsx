@@ -2,7 +2,7 @@ import { buildForgedBlade, disposeWeapon } from './forge/weaponModel';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
-import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose } from './climbPose';
+import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose, fistCentre } from './climbPose';
 import { splitTraderVest, disposeTraderVest, TraderVest } from './traderVest';
 import { TRADER } from '../trader';
 import { useFrame } from '@react-three/fiber';
@@ -1010,26 +1010,36 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     mixer.update(delta);
     if (limbsRef.current && glideBlend > 0.001) {
       const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.55);
-      applyGlidePose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), lift, glideBlend);
+      applyGlidePose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), lift, glideBlend, performance.now() / 1000);
     }
     const vest = traderVestRef.current;
     if (vest) {
       const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.55);
-      const off = glideBlend > 0.15 && c.hp > 0;
+      const off = (glideBlend > 0.15 && c.hp > 0) || !!(globalThis as any).__TQ_UNDRESS; // __TQ_UNDRESS: rig preview only
+      const now = performance.now() / 1000;
       vest.body.geometry = off ? vest.undressed : vest.dressed;
       vest.shirt.visible = off;
       vest.canopy.visible = off;
-      vest.canopy.position.set(0, THREE.MathUtils.lerp(1.2, 2.12, lift) - HIP_PIVOT, -0.05);
-      vest.canopy.scale.setScalar(THREE.MathUtils.lerp(0.35, 1, lift) * glideBlend);
-      vest.canopy.rotation.set((1 - lift) * Math.PI / 2 + Math.sin(performance.now() * 0.004) * 0.035 * lift, 0, Math.sin(performance.now() * 0.003) * 0.045 * lift);
+      // 起飞的笑: the face opens up as the vest fills, and keeps laughing in little bursts
+      if (off) {
+        if (!vest.body.morphTargetInfluences) vest.body.morphTargetInfluences = [0];
+        vest.body.morphTargetInfluences[0] = lift * glideBlend * (0.82 + 0.18 * Math.sin(now * 11) * Math.sin(now * 1.7));
+      }
+      if (vest.mouth) vest.mouth.visible = off;
+      vest.canopy.position.set(0, THREE.MathUtils.lerp(1.2, 2.66, lift) - HIP_PIVOT, -0.05);
+      // the down breathes in the air stream; the cloth rocks a little
+      const breathe = 1 + 0.035 * Math.sin(now * 2.6) * lift;
+      const s0 = THREE.MathUtils.lerp(0.35, 1, lift) * glideBlend;
+      vest.canopy.scale.set(s0, s0 * breathe, s0);
+      vest.canopy.rotation.set((1 - lift) * Math.PI / 2 + Math.sin(now * 4) * 0.035 * lift, 0, Math.sin(now * 3) * 0.045 * lift);
       vest.canopy.updateMatrix();
       for (let k = 0; k < vest.grips.length; k++) {
         const grip = vest.grips[k];
-        const hand = limbsRef.current?.bones[k === 0 ? 'lefthand' : 'righthand'];
-        grip.visible = off && !!hand;
+        const an = vest.anchors[k];
+        grip.visible = off && !!limbsRef.current;
         if (!grip.visible) continue;
-        const a = pose.worldToLocal(hand!.getWorldPosition(glideGrip.a));
-        const b = glideGrip.b.set(k === 0 ? -0.42 : 0.42, 0, 0).applyMatrix4(vest.canopy.matrix);
+        const a = pose.worldToLocal(fistCentre(limbsRef.current!, an.hand, glideGrip.a));
+        const b = glideGrip.b.copy(an.p).applyMatrix4(vest.canopy.matrix);
         const dir = glideGrip.dir.copy(b).sub(a);
         grip.position.copy(a).add(b).multiplyScalar(0.5);
         grip.scale.set(1, dir.length(), 1);
