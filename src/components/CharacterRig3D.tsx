@@ -834,10 +834,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.roughness = Math.min(m.roughness ?? 1, 0.6);
         }
         if (classId === 'Wanderer') {
-          // 散人's plain first look (until he has a model of his own): 霍岩's body in undyed hemp and grey cloth
-          const lum = m.color.r * 0.3 + m.color.g * 0.59 + m.color.b * 0.11;
-          const skin = m.color.r > m.color.b * 1.25 && m.color.r > 0.35;
-          if (!skin) m.color = new THREE.Color(lum > 0.4 ? '#b9ad94' : '#4e5560').multiplyScalar(0.7 + lum * 0.6);
+          // 散人's plain first look (until he has a model of his own): 霍岩's body, the cloth recoloured to undyed hemp
+          // in the shader (applyCharacterShading's hemp), so his gold trim and red robe don't show
           m.metalness = Math.min(m.metalness ?? 0, 0.1);
           m.roughness = Math.max(m.roughness ?? 1, 0.8);
         }
@@ -862,7 +860,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.envMapIntensity = 1.6;
           m.roughness = Math.min(m.roughness ?? 1, 0.85);
         }
-        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU, classId === 'Trader' && asset.fallback);
+        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU, classId === 'Trader' && asset.fallback, classId === 'Wanderer');
         o.material = m;
         mats.push(m);
       }

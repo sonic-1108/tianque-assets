@@ -3594,7 +3594,7 @@ function GameImpl({
           vfx.later(0.45, () => {
             for (const f of allies) {
               if (f.hp <= 0 || !reach(f, D.crane.r)) continue;
-              healOn(f, mercyHeal(f.maxHp * D.crane.heal, f.hp, f.maxHp));
+              healOn(f, mercyHeal(f.maxHp * D.crane.heal, f.hp, f.maxHp), c);
               f.protectTimer = Math.max(f.protectTimer ?? 0, D.crane.protect);
               f.rootTimer = 0;
               f.silenceTimer = 0;
@@ -3654,11 +3654,12 @@ function GameImpl({
       return false;
     }
     /** a heal, shown as a green number. Returns how much it really restored */
-    function healOn(f: CombatantState, amount: number) {
+    function healOn(f: CombatantState, amount: number, by?: CombatantState) {
       if (f.hp <= 0) return 0;
       const before = f.hp;
       f.hp = Math.min(f.maxHp, f.hp + Math.round(amount));
       const got = f.hp - before;
+      if (by && got > 0) by.healingDone = (by.healingDone ?? 0) + got; // 战功 for a 百业 contract
       if (got > 0) vfx.damageNumber(vA.set(f.pos[0], f.pos[1] + 2.3, f.pos[2]), `+${got}`, false, '#4ade80');
       return got;
     }
@@ -3721,7 +3722,7 @@ function GameImpl({
         if (!tgt) continue;
         if (ch.kind === 'breeze') {
           if (tgt.hp <= 0) continue;
-          healOn(tgt, mercyHeal(tgt.maxHp * DIXIAN.breeze.heal, tgt.hp, tgt.maxHp));
+          healOn(tgt, mercyHeal(tgt.maxHp * DIXIAN.breeze.heal, tgt.hp, tgt.maxHp), c);
           vfx.ring(vB.set(tgt.pos[0], tgt.pos[1] + 0.06, tgt.pos[2]), 1.8, '#4ade80', 0.6, 0.12, 0.5);
           vfx.embers(vB.set(tgt.pos[0], tgt.pos[1] + 0.4, tgt.pos[2]), 24, '#86efac', 0.9, 2.5, 0.08);
           gameAudio.playPowerupChime();
@@ -3790,7 +3791,7 @@ function GameImpl({
         T.t -= dt;
         const broken = !from || !to || from.hp <= 1 || to.hp <= 0 || Math.hypot(from.pos[0] - to.pos[0], from.pos[2] - to.pos[2]) > DIXIAN.drain.keep + 6;
         if (T.t <= 0 || broken) {
-          if (to && to.hp > 0 && T.acc > 0) healOn(to, T.acc);
+          if (to && to.hp > 0 && T.acc > 0) healOn(to, T.acc, fighters[T.owner]);
           DX.tethers.splice(k, 1);
           continue;
         }
@@ -3801,7 +3802,7 @@ function GameImpl({
         if (T.shown >= from.maxHp * 0.03) {
           vfx.damageNumber(vA.set(from.pos[0], from.pos[1] + 2.2, from.pos[2]), `-${Math.round(T.shown)}`, false, '#f472b6');
           T.shown = 0;
-          healOn(to, T.acc);
+          healOn(to, T.acc, fighters[T.owner]);
           T.acc = 0;
         }
         if (Math.random() < 0.8) {
@@ -3840,7 +3841,7 @@ function GameImpl({
         for (const f of fighters) {
           if (f.hp <= 0 || (f.side ?? 0) !== (o.side ?? 0) || f.hp >= f.maxHp) continue;
           if (Math.hypot(f.pos[0] - s.x, f.pos[2] - s.z) > s.r || Math.abs(f.pos[1] - s.y) > 2) continue;
-          healOn(f, mercyHeal(f.maxHp * DIXIAN.spring.heal, f.hp, f.maxHp));
+          healOn(f, mercyHeal(f.maxHp * DIXIAN.spring.heal, f.hp, f.maxHp), o);
         }
       }
       for (let k = DX.cranes.length - 1; k >= 0; k--) {

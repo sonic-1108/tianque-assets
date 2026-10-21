@@ -32,6 +32,7 @@ const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Emperor: `${import.meta.env.BASE_URL}portraits/emperor.png`,
   Trader: `${import.meta.env.BASE_URL}portraits/trader.png`,
   HeavyHealer: `${import.meta.env.BASE_URL}portraits/dixian4.png`,
+  Wanderer: `${import.meta.env.BASE_URL}portraits/wanderer.png`,
 };
 
 /** Slanted bar. The bright fill snaps to the new value; a pale "ghost" lingers and drains after a hit. */

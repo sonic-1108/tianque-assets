@@ -24,6 +24,7 @@ export const WANDER_POOL: Borrowed[] = [
 ];
 export const WANDER_SLOTS = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'ultimate'] as const;
 export const WANDER_LABEL: Record<string, string> = { skill1: '1', skill2: '2', skill3: '3', skill4: '4', skill5: '5', ultimate: 'R' };
+/** borrowed moves: share of damage, cooldown factor. 博采 raises the damage, 游刃 takes the cooldown back to the owner's */
 export const WANDER = { dmg: 0.8, cd: 1.2 };
 const DEFAULT = ['rolex_throw', 'pin_dart', 'bull_charge', 'vajra_palm', 'shadow_step', 'qingfeng'];
 const KEY = 'tq_wanderer_loadout';
@@ -48,10 +49,21 @@ function applyToConfig() {
   CLASS_CONFIGS.Wanderer.skills = loadout.map((id, k) => {
     const b = WANDER_POOL.find((x) => x.id === id)!;
     const s = sourceSkill(b);
-    return { ...s, key: WANDER_LABEL[WANDER_SLOTS[k]], cooldown: +(s.cooldown * WANDER.cd).toFixed(1), isSuper: false, description: `借自${CLASS_CONFIGS[b.cls].name}：${s.description}（散人使用：伤害八成，冷却长两成）` };
+    const note = `伤害${WANDER.dmg >= 0.95 ? '九成五' : '八成'}${WANDER.cd > 1 ? '，冷却长两成' : '，冷却与原版相同'}`;
+    return { ...s, key: WANDER_LABEL[WANDER_SLOTS[k]], cooldown: +(s.cooldown * WANDER.cd).toFixed(1), isSuper: false, description: `借自${CLASS_CONFIGS[b.cls].name}：${s.description}（散人使用：${note}）` };
   });
 }
 applyToConfig();
+
+/** the 散人's chosen way (career server state): null, 'broad' 博采 or 'swift' 游刃 */
+export function applyWanderPath(path: string | null) {
+  const dmg = path === 'broad' ? 0.95 : 0.8;
+  const cd = path === 'swift' ? 1.0 : 1.2;
+  if (dmg === WANDER.dmg && cd === WANDER.cd) return;
+  WANDER.dmg = dmg;
+  WANDER.cd = cd;
+  applyToConfig();
+}
 
 export function setLoadout(ids: string[]) {
   if (ids.length !== 6 || new Set(ids).size !== 6 || !ids.every((id) => WANDER_POOL.some((b) => b.id === id))) return false;

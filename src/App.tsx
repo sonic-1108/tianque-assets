@@ -1,4 +1,5 @@
 import {career} from './career';
+import { CAREER_HEROES } from '../shared/career.js';
 import { borrowedFor, WANDER_SLOTS, WANDER_LABEL } from './wanderer';
 import {CareerHall,CareerHud} from './components/CareerHall';
 import { WeaponForge } from './components/forge/WeaponForge';
@@ -958,7 +959,9 @@ export default function App() {
     if(net)return;
     if(!await career.start(hero,map,kind,nickname))return;
     adventure.stop();setAdventureMode(false);setCareerMode(true);setCareerRun(n=>n+1);
-    setPlayerClass(hero);setRoom(defaultRoom(hero,nickname,'Berserker'));setMapId(map);
+    // the contract's opponent: one of the other heroes, a different one each time
+    const foes=CAREER_HEROES.filter(h=>h!==hero);const foe=foes[Math.floor(Math.random()*foes.length)] as CharacterClassId;
+    setPlayerClass(hero);setRoom(defaultRoom(hero,nickname,foe));setMapId(map);
     aiEnabledRef.current=true;setAiEnabled(true);setRoundBanner(null);
     setCareerOpen(false);setIsMapSelectOpen(false);setIsGameMenuOpen(false);requestGameFocus();
   };

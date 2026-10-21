@@ -11,7 +11,7 @@ import type * as THREE from 'three';
 /** 0 normal .. 1 pitch-black night: dims the viewer-side fill and rim so characters vanish into the dark */
 export const TQ_DARK = { value: 0 };
 
-export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: boolean, monkGold: boolean, cut?: { value: number }, suit = false) {
+export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: boolean, monkGold: boolean, cut?: { value: number }, suit = false, hemp = false) {
   const rim = isPlayer ? 'vec3(1.0, 0.82, 0.55) * 0.22' : 'vec3(0.45, 0.68, 1.0) * 0.28';
   m.onBeforeCompile = (sh) => {
     sh.uniforms.tqDark = TQ_DARK;
@@ -39,6 +39,23 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
         metalnessFactor = mix(metalnessFactor, max(metalnessFactor, 0.55), tqSkin);`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += tqSkin * vec3(0.13, 0.08, 0.015) * ${isPlayer ? '1.0' : '0.6'} * (1.0 - tqDark);`);
+    }
+    if (hemp) {
+      // 散人's first look: skin and hair kept, every dyed cloth becomes undyed hemp (light) and faded grey cotton (dark)
+      f = f.replace('#include <map_fragment>', `#include <map_fragment>
+        {
+          vec3 tqC = diffuseColor.rgb;
+          float tqR = max(tqC.r, 1e-4);
+          float tqGR = tqC.g / tqR;
+          float tqBG = tqC.b / max(tqC.g, 1e-4);
+          float tqLum0 = dot(tqC, vec3(0.3, 0.59, 0.11));
+          // lips are redder than the rest of the face: a lower green/red edge, but only where it's bright enough not to be the dark red robe
+          float tqSkin = max(smoothstep(0.15, 0.26, tqGR), smoothstep(0.07, 0.13, tqGR) * smoothstep(0.14, 0.22, tqLum0)) * (1.0 - smoothstep(0.9, 1.0, tqGR)) * smoothstep(0.35, 0.5, tqBG) * (1.0 - smoothstep(0.95, 1.1, tqBG)) * smoothstep(0.06, 0.14, tqC.r);
+          float tqL = dot(tqC, vec3(0.3, 0.59, 0.11));
+          float tqHair = (1.0 - smoothstep(0.03, 0.06, tqL)) * (1.0 - smoothstep(1.6, 2.4, tqR / max(tqC.g, 1e-4)));
+          vec3 tqCloth = mix(vec3(0.16, 0.17, 0.18), vec3(0.47, 0.42, 0.33), smoothstep(0.08, 0.3, tqL)) * (0.7 + tqL * 1.2);
+          diffuseColor.rgb = mix(tqCloth, tqC, max(tqSkin, tqHair));
+        }`);
     }
     if (suit) {
       // 交易员's stand-in: everything but skin and hair becomes a navy suit (the texture's detail kept as shading)
@@ -68,6 +85,6 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
       }`);
     sh.fragmentShader = f;
   };
-  m.customProgramCacheKey = () => 'tq-char-' + (isPlayer ? 'p' : 'e') + (monkGold ? 'g' : '') + (suit ? 's' : '');
+  m.customProgramCacheKey = () => 'tq-char-' + (isPlayer ? 'p' : 'e') + (monkGold ? 'g' : '') + (suit ? 's' : '') + (hemp ? 'h' : '');
   m.needsUpdate = true;
 }

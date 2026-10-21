@@ -1,4 +1,4 @@
-import {careerView,careerLevel,CAREER_HEROES,startContract,finishContract} from '../../shared/career.js';
+import {careerView,careerLevel,CAREER_HEROES,startContract,finishContract,setWanderPath} from '../../shared/career.js';
 export async function careerRoute(path,body,p,q,now){
  await q.run('INSERT INTO careers (player,data,revision) VALUES (?,?,0) ON CONFLICT(player) DO NOTHING',p.id,JSON.stringify(careerView(null)));
  const row=(await q.all('SELECT data,revision FROM careers WHERE player = ?',p.id))[0];
@@ -13,7 +13,8 @@ export async function careerRoute(path,body,p,q,now){
  }else if(path==='/career/path'){
   if(!s.hero||s.mastery<3||!['edge','ward'].includes(body.path)||s.active)throw Error('需要3枚专精印，且当前没有进行中的契约');
   s={...s,path:body.path};
- }else if(path==='/career/start')s=startContract(s,body,now,crypto.randomUUID());
+ }else if(path==='/career/wpath')s=setWanderPath(s,body.path);
+ else if(path==='/career/start')s=startContract(s,body,now,crypto.randomUUID());
  else if(path==='/career/finish')s=finishContract(s,body,now);
  else throw Error('未知操作');
  // Compare-and-swap prevents overlapping tabs from spending/rewarding the same run twice.
