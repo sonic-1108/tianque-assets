@@ -26,7 +26,7 @@ const TAG: Partial<Record<CharacterClassId, string>> = {
   BuddhistMage: '拳掌 · 护体控场',
   Shadowblade: '双刃 · 刺杀突进',
   Trader: '钱箱 · 撒钱砸盘',
-  HeavyHealer: '鹤杖 · 后排大奶',
+  HeavyHealer: '鹤杖 · 治疗师',
 };
 /** each hero's ink accent */
 const ACCENT: Partial<Record<CharacterClassId, string>> = {
