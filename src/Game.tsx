@@ -266,6 +266,8 @@ type RoyalGuard = {
 };
 /** 天子 the neutral boss of 长安 (side 2); a hero 天子 on a team is an ordinary fighter */
 const isBossFighter = (f: CombatantState | undefined) => !!f && f.classId === 'Emperor' && (f.side ?? 0) === 2;
+/** 长安上元夜 剑雨: circle radius, seconds from the red circle to the blades, damage */
+const SWORD_RAIN = { r: 2.2, t: 1.0, dmg: 120 };
 const yawTo = (from: number[], to: number[]) => Math.atan2(-(to[0] - from[0]), -(to[2] - from[2]));
 /** 怒海战船 rogue wave: seconds it rears up before it breaks, then seconds the water stays sloshing on deck */
 const WAVE_WARN = 3.5;
@@ -401,6 +403,8 @@ function GameImpl({
   /** 长安上元夜 emperor: 龙威 / 箭雨 cooldowns, the arrow circles about to be hit, wrath, out-of-fight timer */
     const emperorRef = useRef({ might: 5, arrows: 7, sweep: 3, dragon: 8, charges: [] as { k: number; owner: number; hit: number[] }[], royal: [] as RoyalGuard[], cages: [] as { x: number; y: number; z: number; t: number; owner: number; trapped: number[]; vk: number; prev: ([number, number, number] | null)[]; lims: number[] }[], zones: [] as { x: number; z: number; r: number; t: number; owner: number; dmg: number }[], wrath: false, calm: 0, paradeT: PARADE_START, engaged: 0, lastHp: 0 });
   const forestRef = useRef({ timer: 14 });
+  /** 长安上元夜 剑雨 (see updateSwordRain): started this round, seconds to the next swords */
+  const swordRainRef = useRef({ on: false, t: 0 });
   const bgRain = useMemo(() => new THREE.Color('#4d5862'), []);
   const bgSand = useMemo(() => new THREE.Color('#c08a4e'), []);
   const bgNight = useMemo(() => new THREE.Color('#05070c'), []);
@@ -5543,6 +5547,7 @@ function GameImpl({
         mapRuntime.la = { loot: [], next: 2 };
         resetTrader();
         resetDixian();
+        swordRainRef.current.on = false;
         laBankedRef.current = false;
         mapRuntime.war = { drumT: WAR.drum.first, drumBy: -1, drumHold: 0, shots: [], boulders: [], leverCd: [0, 0], towerCd: [0, 0] };
         mapRuntime.shrine = { own: [-1, -1, -1], prog: [0, 0, 0], busy: [0, 0, 0], score: [0, 0], on: false };
@@ -8500,6 +8505,38 @@ function GameImpl({
     }
 
     /** 长安上元夜: festival fireworks keep raining down on the tallest ridge. Sparks crawl along it first. */
+    /**
+     * 长安上元夜 剑雨: once the emperor is dead and only one side still has anyone standing, swords rain from the sky
+     * without end on whoever is left: a red circle by each of them every little while, the blades a second later. The
+     * last side still has to hold the seal 30 s to win, now while dodging; if the rain cuts them all down it's a draw.
+     */
+    function updateSwordRain() {
+      const empI = fighters.findIndex((f) => isBossFighter(f));
+      const emp = fighters[empI];
+      const up = (sd: number) => fighters.some((f) => (f.side ?? 0) === sd && f.hp > 0);
+      if (!emp || emp.hp > 0 || up(0) === up(1)) return;
+      const swordRain = swordRainRef.current;
+      if (!swordRain.on) {
+        swordRain.on = true;
+        swordRain.t = 1.5;
+        onRoundEvent?.({ type: 'toast', text: '皇上驾崩 · 天降剑雨：守住玉玺，躲开红圈' });
+        gameAudio.playGong();
+      }
+      swordRain.t -= dt;
+      if (swordRain.t > 0) return;
+      swordRain.t = 0.75;
+      for (const f of fighters) {
+        if (f.hp <= 0 || ((f.side ?? 0) !== 0 && (f.side ?? 0) !== 1) || Math.random() > 0.75) continue;
+        // a little ahead of where they're going, or just beside them
+        const a = Math.random() * Math.PI * 2;
+        const d = Math.random() * 2.2;
+        const x = f.pos[0] + f.vel[0] * 0.6 + Math.cos(a) * d;
+        const z = f.pos[2] + f.vel[2] * 0.6 + Math.sin(a) * d;
+        vfx.ring(vB.set(x, terrainHeight(map.id, x, z) + 0.08, z), SWORD_RAIN.r, '#ff4040', 0.6, 0.1, SWORD_RAIN.t);
+        emperorRef.current.zones.push({ x, z, r: SWORD_RAIN.r, t: SWORD_RAIN.t, owner: empI, dmg: SWORD_RAIN.dmg });
+        vfx.emperor.volley(vB.set(x, 0, z), SWORD_RAIN.r, SWORD_RAIN.t, (xx, zz) => terrainHeight(map.id, xx, zz), 26);
+      }
+    }
     function updateRooftop() {
       const R = ridgeRef.current;
       if (round.over) {
@@ -8508,6 +8545,7 @@ function GameImpl({
       }
       updateEmperor();
       updateSeal();
+      updateSwordRain();
       mapRuntime.boltT = Math.max(0, mapRuntime.boltT - dt * 1.6);
       if (R.warn > 0) {
         R.warn -= dt;
