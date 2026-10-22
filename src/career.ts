@@ -1,11 +1,12 @@
 import {mapRuntime,shipOf} from './maps';
 import {ensureAccount,getAccount,onAccount,STATS_API} from './stats';
 import {CONTRACTS} from '../shared/career.js';
-import {applyWanderPath} from './wanderer';
-let state:any={xp:0,level:1,hero:null,path:null,mastery:0,wmastery:0,wpath:null,discovered:[],active:null,receipt:null,ready:false,error:'',busy:false,run:null};
-const listeners=new Set<()=>void>();const update=(p:any)=>{state={...state,...p};if('wpath' in p)applyWanderPath(state.wpath);listeners.forEach(f=>f())};
+import {SKILLS} from './skilltree';
+import {refreshWanderer} from './wanderer';
+let state:any={xp:0,level:1,hero:null,path:null,mastery:0,wmastery:0,skills:{},sp:3,spUsed:0,baibian:false,discovered:[],active:null,receipt:null,ready:false,error:'',busy:false,run:null};
+const listeners=new Set<()=>void>();const update=(p:any)=>{state={...state,...p};if('skills' in p||'level' in p||'hero' in p||'baibian' in p){SKILLS.levels=state.skills||{};SKILLS.baibian=!!state.baibian;SKILLS.hero=state.hero;SKILLS.level=state.level;refreshWanderer();}listeners.forEach(f=>f())};
 let generation=0;
-onAccount(()=>{generation++;update({xp:0,level:1,hero:null,path:null,mastery:0,wmastery:0,wpath:null,discovered:[],active:null,receipt:null,ready:false,error:'',busy:false,run:null})});
+onAccount(()=>{generation++;update({xp:0,level:1,hero:null,path:null,mastery:0,wmastery:0,skills:{},sp:3,spUsed:0,baibian:false,discovered:[],active:null,receipt:null,ready:false,error:'',busy:false,run:null})});
 async function request(action:string,data:any={},name='侠客'){
  if(state.busy)throw Error('请等待上一次请求完成');
  if(!STATS_API)throw Error('百业模式需要账号服务器连接，当前预览未配置服务器。');
@@ -17,11 +18,15 @@ export const career={subscribe:(f:()=>void)=>{listeners.add(f);return()=>{listen
  async load(name:string){try{await request('state',{},name)}catch(e){update({error:e.message})}},
  async abandon(){try{await request('abandon');update({run:null})}catch(e){update({error:e.message})}},
  async path(path:string){try{await request('path',{path})}catch(e){update({error:e.message})}},
- async wpath(path:string){try{await request('wpath',{path})}catch(e){update({error:e.message})}},
+ async learn(skill:string){try{await request('learn',{skill})}catch(e){update({error:e.message})}},
+ async reset(){try{await request('reset')}catch(e){update({error:e.message})}},
  async choose(hero:string){try{await request('choose',{hero});return true}catch(e){update({error:e.message});return false}},
  async start(hero:string,map:string,kind:string,name:string){try{const s=await request('start',{hero,map,kind},name);update({run:{...s.active,seconds:0,damage:0,origin:null,previousDamage:null,ready:false,failed:false,returned:false},receipt:null});return true}catch(e){update({error:e.message});return false}},
  stop(){update({run:null})},
+ /** tests only: pretend a contract is running (tools/tests/wanderertest.cjs) */
+ _testRun(on:boolean){update({run:on?{id:'t',hero:'Wanderer',map:'temple',kind:'scout',seconds:0,damage:0,origin:null,previousDamage:null,ready:false,failed:false,returned:false}:null})},
  tick(p:any,dt:number){const r=state.run;if(!r||r.failed||state.receipt||!p||(p.classId!==r.hero&&!(r.hero==='Wanderer'&&p.wanderer)))return;if(p.hp<=0){update({run:{...r,failed:true},error:'本次契约失败，回大厅重新接取。'});return}const c=CONTRACTS[r.kind],origin=r.origin?[...r.origin]:[...p.pos];const ship=r.map==='sea'?(r.ship??shipOf(p.pos[0])):null;const shipX=ship===null?0:mapRuntime.shipX[ship];if(r.origin&&ship!==null)origin[0]+=shipX-(r.shipX??shipX);const merit=p.totalDamageDealt+(p.healingDone??0);const damage=r.damage+(r.previousDamage===null?0:Math.max(0,merit-r.previousDamage));const seconds=r.seconds+Math.min(dt,1);const ready=damage>=c.damage&&seconds>=c.seconds;const returned=ready&&Math.hypot(p.pos[0]-origin[0],p.pos[2]-origin[2])<4&&Math.abs(p.pos[1]-origin[1])<4;update({run:{...r,origin,ship,shipX,position:[...p.pos],damage,seconds,ready,returned,previousDamage:merit}})},
  fail(){if(state.run)update({run:{...state.run,failed:true},error:'本次契约失败，回大厅重新接取。'})},
  async finish(){const r=state.run;if(!r||r.failed||!r.returned)return;try{await request('finish',{runId:r.id,seconds:r.seconds,damage:r.damage,returned:true,alive:true});update({run:null})}catch(e){update({error:e.message})}}
 };
+(globalThis as any).__TQ_CAREER=career;

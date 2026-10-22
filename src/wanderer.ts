@@ -1,9 +1,11 @@
-// 散人 (Wanderer): from level 30 in 百业试炼 an account that never chose its hero fights as a plain wanderer who has
-// picked up one move from each house. Six of the seven moves below go on the keys 1 2 3 4 5 R; each lands at 80% and
-// cools down 20% slower than in its owner's hands, and there is no ultimate. The game casts a borrowed move by turning
-// the fighter into its owner for that one action (see executeIntent in Game.tsx).
+// 新人 / 散人 (Wanderer): an account that has not 转职'd fights in one plain look with up to six 低阶 skills borrowed
+// from any of the seven houses, on the keys 1 2 3 4 5 R. Each hits by its 百业 skill level (src/skilltree.ts) and
+// keeps its owner's cooldown; there is no 高阶 skill and no ultimate. Changing to another house's weapon takes
+// SWAP_TIME (instant with the 百变兵器). The game casts a borrowed move by turning the fighter into its owner for that
+// one action (see executeIntent in Game.tsx).
 import { CLASS_CONFIGS } from './components/CombatData';
 import type { CharacterClassId, SkillDefinition } from './types';
+import { LOW_SKILLS, SKILL_OWNER, SKILLS, levelOf, skillPower } from './skilltree';
 
 export interface Borrowed {
   id: string;
@@ -11,68 +13,65 @@ export interface Borrowed {
   /** the owner's input key for it, and its place in the owner's skill list */
   srcKey: string;
   idx: number;
-  role: string;
 }
-export const WANDER_POOL: Borrowed[] = [
-  { id: 'rolex_throw', cls: 'Trader', srcKey: 'skill1', idx: 0, role: '远程' },
-  { id: 'pin_dart', cls: 'Ranger', srcKey: 'skill2', idx: 1, role: '控制' },
-  { id: 'bull_charge', cls: 'Berserker', srcKey: 'skill3', idx: 2, role: '突进' },
-  { id: 'vajra_palm', cls: 'BuddhistMage', srcKey: 'skill1', idx: 0, role: '击退' },
-  { id: 'shadow_step', cls: 'Shadowblade', srcKey: 'skill1', idx: 0, role: '位移' },
-  { id: 'jade_seal', cls: 'Emperor', srcKey: 'skill4', idx: 3, role: '范围砸地' },
-  { id: 'qingfeng', cls: 'HeavyHealer', srcKey: 'skill1', idx: 0, role: '回血' },
-];
+/** every hero's 低阶 skills (the first three of its tree), in tree order */
+export const WANDER_POOL: Borrowed[] = LOW_SKILLS.map((id: string) => {
+  const cls = SKILL_OWNER[id] as CharacterClassId;
+  const idx = CLASS_CONFIGS[cls].skills.findIndex((s) => s.id === id);
+  const s = CLASS_CONFIGS[cls].skills[idx];
+  return { id, cls, idx, srcKey: s?.isSuper ? 'ultimate' : `skill${idx + 1}` };
+}).filter((b) => b.idx >= 0);
 export const WANDER_SLOTS = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'ultimate'] as const;
 export const WANDER_LABEL: Record<string, string> = { skill1: '1', skill2: '2', skill3: '3', skill4: '4', skill5: '5', ultimate: 'R' };
-/** borrowed moves: share of damage, cooldown factor. 博采 raises the damage, 游刃 takes the cooldown back to the owner's */
-export const WANDER = { dmg: 0.8, cd: 1.2 };
-const DEFAULT = ['rolex_throw', 'pin_dart', 'bull_charge', 'vajra_palm', 'shadow_step', 'qingfeng'];
 const KEY = 'tq_wanderer_loadout';
+const EMPTY: SkillDefinition = { id: 'none', name: '空', key: '-', description: '这一格还没放技能：在百业试炼里学会低阶技能后放上来。', mpCost: 0, cooldown: 0, icon: '·' };
 
-let loadout: string[] = DEFAULT;
+/** six slots, '' = empty */
+let loadout: string[] = ['', '', '', '', '', ''];
 try {
   const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
-  if (Array.isArray(saved) && saved.length === 6 && saved.every((id) => WANDER_POOL.some((b) => b.id === id)) && new Set(saved).size === 6) loadout = saved;
+  if (Array.isArray(saved)) loadout = WANDER_SLOTS.map((_, k) => (WANDER_POOL.some((b) => b.id === saved[k]) ? saved[k] : ''));
 } catch {
-  /* private window: the default set */
+  /* private window */
 }
 
 export const getLoadout = () => loadout;
+/** the borrowed move on a slot, if it is set and learned */
 export const borrowedFor = (slot: string): Borrowed | null => {
   const k = WANDER_SLOTS.indexOf(slot as (typeof WANDER_SLOTS)[number]);
-  return k < 0 ? null : WANDER_POOL.find((b) => b.id === loadout[k]) ?? null;
+  const id = k < 0 ? '' : loadout[k];
+  if (!id || levelOf(id) <= 0) return null;
+  return WANDER_POOL.find((b) => b.id === id) ?? null;
 };
 export const sourceSkill = (b: Borrowed): SkillDefinition => CLASS_CONFIGS[b.cls].skills[b.idx];
 
-/** the 散人's skill list as the HUD and the game read it: the borrowed moves in slot order, cooldowns 20% longer */
-function applyToConfig() {
-  CLASS_CONFIGS.Wanderer.skills = loadout.map((id, k) => {
-    const b = WANDER_POOL.find((x) => x.id === id)!;
+/** the 新人 / 散人's skill list as the HUD and the game read it: the slotted moves with their levels */
+export function refreshWanderer() {
+  const W = CLASS_CONFIGS.Wanderer;
+  W.name = SKILLS.level >= 30 ? '散人' : '新人';
+  W.skills = WANDER_SLOTS.map((slot, k) => {
+    const b = borrowedFor(slot);
+    if (!b) return { ...EMPTY, key: WANDER_LABEL[slot] };
     const s = sourceSkill(b);
-    const note = `伤害${WANDER.dmg >= 0.95 ? '九成五' : '八成'}${WANDER.cd > 1 ? '，冷却长两成' : '，冷却与原版相同'}`;
-    return { ...s, key: WANDER_LABEL[WANDER_SLOTS[k]], cooldown: +(s.cooldown * WANDER.cd).toFixed(1), isSuper: false, description: `借自${CLASS_CONFIGS[b.cls].name}：${s.description}（散人使用：${note}）` };
+    const lv = levelOf(b.id);
+    return { ...s, key: WANDER_LABEL[slot], isSuper: false, description: `借自${CLASS_CONFIGS[b.cls].name} · Lv ${lv}（伤害 ${Math.round(skillPower(lv) * 100)}%）：${s.description}` };
   });
 }
-applyToConfig();
+refreshWanderer();
 
-/** the 散人's chosen way (career server state): null, 'broad' 博采 or 'swift' 游刃 */
-export function applyWanderPath(path: string | null) {
-  const dmg = path === 'broad' ? 0.95 : 0.8;
-  const cd = path === 'swift' ? 1.0 : 1.2;
-  if (dmg === WANDER.dmg && cd === WANDER.cd) return;
-  WANDER.dmg = dmg;
-  WANDER.cd = cd;
-  applyToConfig();
-}
-
+/** put up to six learned 低阶 skills on the bar (in order; '' leaves a slot empty) */
 export function setLoadout(ids: string[]) {
-  if (ids.length !== 6 || new Set(ids).size !== 6 || !ids.every((id) => WANDER_POOL.some((b) => b.id === id))) return false;
-  loadout = [...ids];
+  const next = WANDER_SLOTS.map((_, k) => (ids[k] && WANDER_POOL.some((b) => b.id === ids[k]) && levelOf(ids[k]) > 0 ? ids[k] : ''));
+  if (new Set(next.filter(Boolean)).size !== next.filter(Boolean).length) return false;
+  loadout = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(loadout));
   } catch {
     /* kept for this session */
   }
-  applyToConfig();
+  refreshWanderer();
   return true;
 }
+
+// tests (tools/tests/wanderertest.cjs): set skill levels / the bar without a career server
+(globalThis as any).__TQ_WANDER = { SKILLS, setLoadout, refreshWanderer };

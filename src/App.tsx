@@ -1,6 +1,7 @@
 import {career} from './career';
 import { CAREER_HEROES } from '../shared/career.js';
 import { borrowedFor, WANDER_SLOTS, WANDER_LABEL } from './wanderer';
+import { levelOf, SKILL_TREE } from './skilltree';
 import {CareerHall,CareerHud} from './components/CareerHall';
 import { WeaponForge } from './components/forge/WeaponForge';
 import { MaterialCodex } from './components/materials/MaterialCodex';
@@ -215,10 +216,10 @@ function wandererHotbar(): HotbarEntry[] {
   const W = CLASS_CONFIGS.Wanderer.skills;
   return [
     { id: 'w_attack', key: '左键', name: '单刀', icon: '🗡️', short: '刀三连', basic: true, meta: ['可连按', '第三下击倒'],
-      desc: '一把没有名字的刀，三连砍。被动「百家」：每招借自别家，伤害八成、冷却长两成，没有大招。', tip: '散人什么都会一点：看对手是谁，挑合适的六招带上。' },
+      desc: '一把没有名字的刀，三连砍。被动「百家」：技能都是七家的低阶招式，伤害看百业技能等级；用别家的招要先换那家的兵器（约半秒，百变兵器瞬间）。没有高阶技能和大招。', tip: '连着用同一家的招不用换兵器：把同一家的两三招排在一起最顺手。' },
     { id: 'w_block', key: '右键', name: '格挡', icon: '🛡️', short: '减伤六成', basic: true, meta: ['按住生效', '移动变慢'], desc: '按住右键举刀格挡，正面伤害减少60%。' },
-    ...WANDER_SLOTS.map((slot, k) => ({ id: 'w_' + k, key: WANDER_LABEL[slot], name: W[k]?.name ?? '-', icon: W[k]?.icon ?? '', short: borrowedFor(slot) ? '借自' + CLASS_CONFIGS[borrowedFor(slot)!.cls].name : '', cdKey: slot === 'ultimate' ? 'ultimate' : slot,
-      meta: W[k] ? [`MP ${W[k].mpCost}`, `冷却 ${W[k].cooldown}s`] : [], desc: W[k]?.description ?? '' })),
+    ...WANDER_SLOTS.map((slot, k) => ({ id: 'w_' + k, key: WANDER_LABEL[slot], name: W[k]?.name ?? '-', icon: W[k]?.icon ?? '', short: borrowedFor(slot) ? CLASS_CONFIGS[borrowedFor(slot)!.cls].name + ' · Lv ' + levelOf(borrowedFor(slot)!.id) : '未放技能', cdKey: slot === 'ultimate' ? 'ultimate' : slot,
+      meta: W[k] && W[k].id !== 'none' ? [`MP ${W[k].mpCost}`, `冷却 ${W[k].cooldown}s`] : [], desc: W[k]?.description ?? '' })),
   ];
 }
 
@@ -282,7 +283,9 @@ export default function App() {
   const [enemyClass, setEnemyClass] = useState<CharacterClassId>('Berserker');
   const playerClassRef = useRef<CharacterClassId>('Berserker');
   playerClassRef.current = playerClass;
-  const HOTBAR_INFO = playerClass === 'Wanderer' ? wandererHotbar() : HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
+  const HOTBAR_BASE = playerClass === 'Wanderer' ? wandererHotbar() : HOTBAR_BY_CLASS[playerClass] || BERSERKER_HOTBAR;
+  // 百业: a 转职'd hero's skills show their level (or that they aren't learned yet)
+  const HOTBAR_INFO = careerMode && playerClass !== 'Wanderer' ? HOTBAR_BASE.map((e) => (e.basic || !(SKILL_TREE[playerClass] ?? []).includes(e.id) ? e : { ...e, short: levelOf(e.id) ? `Lv ${levelOf(e.id)} · ${e.short}` : '未学 · 回百业加点', meta: [...(e.meta ?? [])] })) : HOTBAR_BASE;
   // generative guzheng score and per-map ambience
   useEffect(() => {
     if (isMusicMuted) gameAudio.stopMusic();

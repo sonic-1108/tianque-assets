@@ -37,7 +37,8 @@ import { getIb, ibSet, payCash, IB_NOTIONAL, ibTask, ibDone, ibExpire } from './
 import { TR, TRADER, resetTrader } from './trader';
 import { TraderFx } from './components/TraderFx';
 import { DX, DIXIAN, resetDixian, mercyHeal } from './dixian';
-import { borrowedFor, WANDER, WANDER_SLOTS, WANDER_LABEL } from './wanderer';
+import { borrowedFor, WANDER_SLOTS, WANDER_LABEL } from './wanderer';
+import { SKILLS, levelOf, skillPower, SWAP_TIME } from './skilltree';
 import { DixianFx } from './components/DixianFx';
 import { VFXSystem, RibbonTrail } from './components/VFXSystem';
 import { glyphSteer } from './components/MonkFX';
@@ -313,6 +314,27 @@ function GameImpl({
   const onRoundEvent = (e: RoundEvent) => {
     if (FX.mute > 0) return;
     onRoundEventProp?.(e);
+  };
+  /** 百业: a contract is running for the local player */
+  const careerRunOn = () => {
+    const r = career.getSnapshot().run;
+    return !!r && !r.failed;
+  };
+  /** 百业: which skill (by id) a skill key would cast for this fighter, or null for anything else */
+  const careerSkillOf = (c: CombatantState, req: string | null | undefined): string | null => {
+    if (!req || !(req.startsWith('skill') || req === 'ultimate')) return null;
+    if (c.classId === 'Wanderer') return borrowedFor(req)?.id ?? null;
+    if (c.wanderer) return null; // mid borrowed move
+    const label = req === 'ultimate' ? 'R' : req.slice(5);
+    return CLASS_CONFIGS[c.classId].skills.find((s) => s.key.split(' ')[0] === label)?.id ?? null;
+  };
+  /** a short toast, at most once every 6 s for the same thing */
+  const hintAt = useRef(new Map<string, number>());
+  const hintOnce = (key: string, text: string) => {
+    const now = performance.now();
+    if (now - (hintAt.current.get(key) ?? -1e9) < 6000) return;
+    hintAt.current.set(key, now);
+    onRoundEvent({ type: 'toast', text });
   };
   const seatsRef = useRef(seats);
   seatsRef.current = seats;
@@ -781,6 +803,11 @@ function GameImpl({
         c.classId = 'Wanderer';
         c.borrowState = undefined;
       }
+      // 换兵器: counting down; a hit or a fall drops the move he was changing for
+      if ((c.swapT ?? 0) > 0) {
+        c.swapT = Math.max(0, (c.swapT ?? 0) - dt);
+        if (c.hp <= 0 || c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown') c.swapReq = undefined;
+      }
       for (const k of Object.keys(c.cooldowns)) {
         const v = c.cooldowns[k];
         c.cooldowns[k] = typeof v !== 'number' || isNaN(v) ? 0 : Math.max(0, v - cdDt);
@@ -1193,7 +1220,21 @@ function GameImpl({
       updateBolts(dt);
     }
     for (let i = 0; i < N; i++) {
+      const fc = fighters[i];
+      // 换兵器 done: the move he was changing for goes off now
+      if (fc.swapReq && (fc.swapT ?? 0) <= 0 && !intents[i].request) {
+        intents[i].request = fc.swapReq as InputKeyAction;
+        fc.swapReq = undefined;
+      }
+      // 百业: the local player's skills hit by their level, and a 转职'd hero can't use what he hasn't learned
+      const careerSkill = i === ME && careerRunOn() ? careerSkillOf(fc, intents[i].request) : null;
+      if (careerSkill && fc.classId !== 'Wanderer' && levelOf(careerSkill) <= 0) {
+        if (playerIntent.request) input.consumeBuffer();
+        intents[i].request = null;
+        hintOnce('locked:' + careerSkill, `「${CLASS_CONFIGS[fc.classId].skills.find((s) => s.id === careerSkill)?.name ?? ''}」还没学：回百业试炼用技能点学会`);
+      }
       const ok = executeIntent(i, fighters[i], foes[i], intents[i]);
+      if (ok && careerSkill && fc.actionState !== 'idle') fc.castMult = skillPower(levelOf(careerSkill));
       if (i === ME) {
         if (ok && playerIntent.request) input.consumeBuffer();
       } else if (ok) {
@@ -1983,13 +2024,32 @@ function GameImpl({
         c.borrowState = undefined;
         return executeIntent(slot, c, foe, intent);
       }
+      // 新人 / 散人 changing weapons: no swing and no move until it's in his hands (a roll still gets out)
+      if (c.classId === 'Wanderer' && (c.swapT ?? 0) > 0 && req !== 'dodge' && req !== 'jump') return report('出招', '换兵器中'), false;
       if (c.classId === 'Wanderer' && (req.startsWith('skill') || req === 'ultimate')) {
         const b = borrowedFor(req);
         const sk = skills[WANDER_SLOTS.indexOf(req as (typeof WANDER_SLOTS)[number])];
-        if (!b || !sk) return false;
+        if (!b || !sk) {
+          if (isPlayer) hintOnce('empty:' + req, `${WANDER_LABEL[req]} 键还没放技能：在百业试炼里学低阶技能、放上技能栏`);
+          return false;
+        }
         const label = `${WANDER_LABEL[req]}: ${sk.name}`;
         if ((c.cooldowns[req] ?? 0) > 0) return report(label, `冷却中 (${(c.cooldowns[req] ?? 0).toFixed(1)}s)`), false;
         if (!canSkill) return report(label, `被 [${cur} ${phase}] 占用`), false;
+        // 换兵器: another house's move needs that house's weapon; it takes a moment unless he has the 百变兵器
+        if ((c.weaponForm ?? '') !== b.cls) {
+          const instant = isPlayer && careerRunOn() && SKILLS.baibian;
+          c.weaponForm = b.cls;
+          if (!instant) {
+            c.swapT = SWAP_TIME;
+            c.swapReq = req;
+            vfx.damageNumber(vB.set(c.pos[0], c.pos[1] + 2.2, c.pos[2]), `换兵器 · ${CLASS_CONFIGS[b.cls].name}`, false, '#e5d3a1');
+            vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.1, c.pos[2]), 8, '#e5d3a1', 3, 0.05, undefined, 0.6);
+            report(label, '换兵器');
+            return true;
+          }
+          vfx.sparkBurst(vB.set(c.pos[0], c.pos[1] + 1.1, c.pos[2]), 14, '#ffd36a', 4, 0.05, undefined, 0.6); // 百变: it simply turns into the next weapon
+        }
         const saved = c.cooldowns[b.srcKey];
         c.cooldowns[b.srcKey] = 0;
         c.wanderer = true;
@@ -2005,7 +2065,7 @@ function GameImpl({
           const used = c.cooldowns[b.srcKey] ?? 0;
           c.cooldowns[b.srcKey] = saved ?? 0;
           if (ok) {
-            c.cooldowns[req] = used * WANDER.cd;
+            c.cooldowns[req] = used;
             c.borrowState = c.actionState;
           }
           // nothing to wait for (a throw that left him standing, or the cast failed): a 散人 again at once
@@ -2684,7 +2744,8 @@ function GameImpl({
       const m = FX.mute;
       FX.mute = 0;
       const hp0 = def.hp;
-      if (att.wanderer && att.classId !== 'Wanderer') base *= WANDER.dmg; // 散人: a borrowed move hits at 80%
+      // 百业: a skill hits by its level (the local player's career run only; set when he cast it)
+      if (att.castMult !== undefined && !att.actionState.startsWith('attack_')) base *= att.castMult;
       if (att.classId === 'Trader') {
         // 复利 and 做空
         base *= 1 + TRADER.compound.per * (att.compound ?? 0);
@@ -3302,8 +3363,10 @@ function GameImpl({
           foe.vel[0] += ((c.pos[0] - foe.pos[0]) / dist) * 18 * dt;
           foe.vel[2] += ((c.pos[2] - foe.pos[2]) / dist) * 18 * dt;
         }
-        const t = performance.now();
-        if (t - c.lastHitTick > 200) {
+        // every 0.2 s of the spin itself (it used to be wall-clock time: on a slow frame that was a hit every frame, each
+        // with its hit-stop, and the spin froze in place)
+        const t = c.stateTimer * 1000;
+        if (t - c.lastHitTick >= 200 || t < c.lastHitTick) {
           c.lastHitTick = t;
           vfx.ring(vB.set(c.pos[0], fy(c.pos[0], c.pos[2], c.pos[1]) + 0.05, c.pos[2]), 1.9, color, 0.25, 0.1);
           if (dist < 2.9) applyHit(slot, c, foe, 40, { knock: 1.5, dur: 0.25 });
@@ -5389,6 +5452,10 @@ function GameImpl({
           c.classId = seat.cls;
           c.wanderer = seat.cls === 'Wanderer';
           c.borrowState = undefined;
+          c.weaponForm = undefined;
+          c.swapT = 0;
+          c.swapReq = undefined;
+          c.castMult = undefined;
           c.side = seat.side;
           c.tag = seat.name;
         }

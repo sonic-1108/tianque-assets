@@ -274,6 +274,12 @@ export interface CombatantState {
   healingDone?: number; // healing given to anyone (counts toward a 百业 contract's 战功 with the damage)
   wanderer?: boolean; // 散人: this fighter's own class is Wanderer (classId is the lender's while a borrowed move plays)
   borrowState?: CharacterActionState; // the action the borrowed move started; when it ends he is a 散人 again
+  /** 新人 / 散人: whose weapon is in his hands (a class id), and the 换兵器 countdown and the move waiting on it */
+  weaponForm?: string;
+  swapT?: number;
+  swapReq?: string;
+  /** 百业: the local player's last skill hits at this share (its skill level); undefined everywhere else */
+  castMult?: number;
   dxSpring?: boolean; // 地仙: this skill_4 is the staff tap of 地脉回春 (not the bow of 还魂)
   lift?: { k: number; from: number; to: number; t: number; x: number; z: number }; // 洛城午后: riding a tower's lift (firm k, from level to level)
   ibWork?: number; // 投行家: seconds left of working the model at the desk
