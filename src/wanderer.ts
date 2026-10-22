@@ -24,6 +24,30 @@ export const WANDER_POOL: Borrowed[] = LOW_SKILLS.map((id: string) => {
 export const WANDER_SLOTS = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'ultimate'] as const;
 export const WANDER_LABEL: Record<string, string> = { skill1: '1', skill2: '2', skill3: '3', skill4: '4', skill5: '5', ultimate: 'R' };
 const KEY = 'tq_wanderer_loadout';
+
+// ---------------------------------------------------------------- 外形: a young man or woman in plain undyed clothes
+export type WanderLook = 'm' | 'f';
+const LOOK_KEY = 'tq_wanderer_look';
+let look: WanderLook = 'm';
+try {
+  if (localStorage.getItem(LOOK_KEY) === 'f') look = 'f';
+} catch {
+  /* private window */
+}
+export const getLook = () => look;
+export function setLook(l: WanderLook) {
+  look = l;
+  try {
+    localStorage.setItem(LOOK_KEY, l);
+  } catch {
+    /* this session */
+  }
+}
+/** his / her own model (public/wanderer_m.glb, wanderer_f.glb: Tripo + Mixamo, like the heroes); until it's uploaded a
+ *  young hero's body stands in, its clothes washed to undyed hemp in the shader */
+export const LOOK_MODEL: Record<WanderLook, string> = { m: 'wanderer_m.glb', f: 'wanderer_f.glb' };
+export const LOOK_STANDIN: Record<WanderLook, string> = { m: 'shadowblade.glb', f: 'ranger.glb' };
+export const lookPortrait = (l: WanderLook = look) => `portraits/wanderer_${l}.png`;
 const EMPTY: SkillDefinition = { id: 'none', name: '空', key: '-', description: '这一格还没放技能：在百业试炼里学会低阶技能后放上来。', mpCost: 0, cooldown: 0, icon: '·' };
 
 /** six slots, '' = empty */

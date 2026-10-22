@@ -8,6 +8,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { CharacterRig3D } from '../components/CharacterRig3D';
 import { TRADER } from '../trader';
 import { CharacterClassId } from '../types';
+import { setLook } from '../wanderer';
 
 const q = new URLSearchParams(location.search);
 const cls = (q.get('cls') || 'Trader') as CharacterClassId;
@@ -18,6 +19,7 @@ const cam = v3(q.get('cam'), '0,1.5,3.4');
 const look = v3(q.get('look'), '0,1.2,0');
 const yaw = parseFloat(q.get('yaw') || '0');
 if (q.get('undress')) (globalThis as any).__TQ_UNDRESS = true;
+if (q.get('sex')) setLook(q.get('sex') === 'f' ? 'f' : 'm');
 
 function makeFighter(): any {
   return {
@@ -61,12 +63,12 @@ function Stage() {
 }
 
 createRoot(document.getElementById('r')!).render(
-  <Canvas shadows dpr={1} gl={{ preserveDrawingBuffer: true, antialias: true }}>
-    <color attach="background" args={['#262b35']} />
+  <Canvas shadows dpr={1} gl={{ preserveDrawingBuffer: true, antialias: true, alpha: !!q.get('alpha') }}>
+    {!q.get('alpha') && <color attach="background" args={[q.get('bg') || '#262b35']} />}
     <hemisphereLight args={['#e8eefc', '#3a3026', 1.1]} />
     <directionalLight position={[2.5, 5, 4]} intensity={2.6} castShadow />
     <directionalLight position={[-3, 2, -2]} intensity={0.8} color="#9fb6ff" />
-    <mesh rotation-x={-Math.PI / 2} receiveShadow>
+    <mesh rotation-x={-Math.PI / 2} receiveShadow visible={!q.get('alpha')}>
       <circleGeometry args={[4, 48]} />
       <meshStandardMaterial color="#4a4f5a" />
     </mesh>

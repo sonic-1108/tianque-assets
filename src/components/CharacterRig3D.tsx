@@ -5,6 +5,7 @@ import { applyCharacterShading } from './characterShading';
 import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose, fistCentre } from './climbPose';
 import { splitTraderVest, disposeTraderVest, TraderVest } from './traderVest';
 import { buildUmbrella, Umbrella } from './umbrella';
+import { getLook, LOOK_MODEL, LOOK_STANDIN } from '../wanderer';
 import { TRADER } from '../trader';
 import { RAGE } from './CombatData';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -585,6 +586,8 @@ interface LoadedAsset {
   floor: number;
   url: string;
   fallback?: boolean;
+  /** 新人 / 散人 wearing a hero's body until his own model is uploaded */
+  standin?: boolean;
 }
 const assetCache = new Map<string, LoadedAsset>();
 const assetPromises = new Map<string, Promise<LoadedAsset>>();
@@ -658,9 +661,11 @@ export function loadGLB(url: string): Promise<LoadedAsset> {
       );
     });
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // a file that isn't there (404, or the dev server's page instead of a model) is not tried again
+  const missing = (e: any) => /404|not found|unexpected|json|magic|glTF/i.test(String(e?.message ?? e));
   const p = once()
-    .catch(() => wait(1500).then(once))
-    .catch(() => wait(4000).then(once))
+    .catch((e) => (missing(e) ? Promise.reject(e) : wait(1500).then(once)))
+    .catch((e) => (missing(e) ? Promise.reject(e) : wait(4000).then(once)))
     .catch((e) => {
       assetPromises.delete(url);
       throw e;
@@ -703,7 +708,18 @@ function preupload(gl: THREE.WebGLRenderer, root: THREE.Object3D) {
 }
 
 /** Load the class model; if it is missing (not uploaded yet), fall back to the berserker model */
-function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallback: boolean }> {
+/** the model file a class wears (新人 / 散人: the chosen look) */
+export function modelUrlFor(classId: CharacterClassId) {
+  if (classId === 'Wanderer') return `${import.meta.env.BASE_URL}${LOOK_MODEL[getLook()]}`;
+  return MODEL_URLS[classId] || BERSERKER_MODEL_URL;
+}
+function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallback: boolean; standin?: boolean }> {
+  if (classId === 'Wanderer') {
+    // his own model if it's been uploaded, otherwise the young stand-in (never 霍岩)
+    return loadGLB(modelUrlFor(classId))
+      .then((a) => ({ ...a, fallback: false, standin: false }))
+      .catch(() => loadGLB(`${import.meta.env.BASE_URL}${LOOK_STANDIN[getLook()]}`).then((a) => ({ ...a, fallback: false, standin: true })));
+  }
   const url = MODEL_URLS[classId] || BERSERKER_MODEL_URL;
   return loadGLB(url)
     .then((a) => ({ ...a, fallback: false }))
@@ -721,7 +737,7 @@ function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallba
 export function prefetchHeroModels(classes: CharacterClassId[]) {
   const urls = new Set<string>();
   for (const c of classes) {
-    urls.add(MODEL_URLS[c] || BERSERKER_MODEL_URL);
+    urls.add(modelUrlFor(c));
     if (c === 'Emperor' || c === 'Guard' || c === 'Trader' || c === 'HeavyHealer') urls.add(BERSERKER_MODEL_URL); // they borrow 霍岩's fighting moves
   }
   urls.add(EXTRA_ANIMS_URL);
@@ -786,7 +802,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
   useEffect(() => {
     let alive = true;
-    const listener = { url: MODEL_URLS[classId] || BERSERKER_MODEL_URL, fn: (p: ModelLoadProgress) => onLoadProgress?.(p) };
+    const listener = { url: modelUrlFor(classId), fn: (p: ModelLoadProgress) => onLoadProgress?.(p) };
     progressListeners.add(listener);
     onLoadProgress?.({ loaded: 0, total: 100, progress: 5, isLoading: true, error: null });
     loadAssetFor(classId)
@@ -836,7 +852,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.metalness = Math.max(m.metalness ?? 0, 0.3);
           m.roughness = Math.min(m.roughness ?? 1, 0.6);
         }
-        if (classId === 'Wanderer') {
+        if (classId === 'Wanderer' && asset.standin) {
           // 散人's plain first look (until he has a model of his own): 霍岩's body, the cloth recoloured to undyed hemp
           // in the shader (applyCharacterShading's hemp), so his gold trim and red robe don't show
           m.metalness = Math.min(m.metalness ?? 0, 0.1);
@@ -863,7 +879,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.envMapIntensity = 1.6;
           m.roughness = Math.min(m.roughness ?? 1, 0.85);
         }
-        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU, classId === 'Trader' && asset.fallback, classId === 'Wanderer');
+        applyCharacterShading(m, isPlayer, classId === 'BuddhistMage' && !asset.fallback, cutU, classId === 'Trader' && asset.fallback, classId === 'Wanderer' && !!asset.standin);
         o.material = m;
         mats.push(m);
       }
@@ -1323,7 +1339,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     // Face protection (暗器 model): damp neck / head rotation toward rest
     const rq = restQuats.current;
-    if ((classId === 'Ranger' || classId === 'BuddhistMage' || classId === 'HeavyHealer') && !asset.fallback) {
+    if ((classId === 'Ranger' || classId === 'BuddhistMage' || classId === 'HeavyHealer' || classId === 'Wanderer') && !asset.fallback) {
       if (rq.neckBone && rq.neck) rq.neckBone.quaternion.slerp(rq.neck, 0.6);
       if (rq.headBone && rq.head) rq.headBone.quaternion.slerp(rq.head, 0.45);
     }

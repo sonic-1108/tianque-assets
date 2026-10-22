@@ -52,7 +52,9 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
           // lips are redder than the rest of the face: a lower green/red edge, but only where it's bright enough not to be the dark red robe
           float tqSkin = max(smoothstep(0.15, 0.26, tqGR), smoothstep(0.07, 0.13, tqGR) * smoothstep(0.14, 0.22, tqLum0)) * (1.0 - smoothstep(0.9, 1.0, tqGR)) * smoothstep(0.35, 0.5, tqBG) * (1.0 - smoothstep(0.95, 1.1, tqBG)) * smoothstep(0.06, 0.14, tqC.r);
           float tqL = dot(tqC, vec3(0.3, 0.59, 0.11));
-          float tqHair = (1.0 - smoothstep(0.03, 0.06, tqL)) * (1.0 - smoothstep(1.6, 2.4, tqR / max(tqC.g, 1e-4)));
+          float tqChroma = max(tqC.r, max(tqC.g, tqC.b)) - min(tqC.r, min(tqC.g, tqC.b));
+          // hair is dark and nearly colourless (a dark dyed vest is dark too, but it still has its colour)
+          float tqHair = (1.0 - smoothstep(0.03, 0.06, tqL)) * (1.0 - smoothstep(1.6, 2.4, tqR / max(tqC.g, 1e-4))) * (1.0 - smoothstep(0.012, 0.03, tqChroma) * step(tqC.r, tqC.b));
           vec3 tqCloth = mix(vec3(0.16, 0.17, 0.18), vec3(0.47, 0.42, 0.33), smoothstep(0.08, 0.3, tqL)) * (0.7 + tqL * 1.2);
           diffuseColor.rgb = mix(tqCloth, tqC, max(tqSkin, tqHair));
         }`);
