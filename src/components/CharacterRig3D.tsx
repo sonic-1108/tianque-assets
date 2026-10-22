@@ -894,6 +894,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     });
     materialsRef.current = mats;
     if (classId === 'Emperor') cloned.scale.multiplyScalar(1.14); // a head taller than anyone on the roofs
+    if (classId === 'Wanderer' && !asset.standin && getLook() === 'm') {
+      // 少年's own model came out a little stocky in his loose hemp: 10% narrower and thinner, same height
+      cloned.scale.x *= 0.9;
+      cloned.scale.z *= 0.9;
+    }
     return cloned;
   }, [asset, isPlayer, classId]);
 
