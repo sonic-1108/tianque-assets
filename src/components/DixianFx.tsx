@@ -103,6 +103,25 @@ const vA = new THREE.Vector3();
 const vB = new THREE.Vector3();
 const vC = new THREE.Vector3();
 const UPV = new THREE.Vector3(0, 1, 0);
+const FWD = new THREE.Vector3(0, 0, 1);
+/** a soft round glow (white centre fading out), shared by every halo and tail puff */
+const softTex = (() => {
+  let t: THREE.Texture | null = null;
+  return () => {
+    if (t) return t;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grd.addColorStop(0, 'rgba(255,255,255,1)');
+    grd.addColorStop(0.25, 'rgba(255,255,255,0.65)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 64, 64);
+    t = new THREE.CanvasTexture(c);
+    return t;
+  };
+})();
 const MAXS = 6;
 const MAXK = 3;
 const MAXF = 9;
@@ -130,12 +149,54 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
     });
     const cranes = Array.from({ length: MAXK }, () => buildCrane());
     // 青气弹: a bright core in a soft green halo
+    // 青玉罡气: a faceted jade crystal with a white-hot heart, two crossed rings turning round it like an armillary
+    // sphere, a soft halo and a fading comet tail; the big third bolt also has three crane feathers circling it
+    const add = (o: THREE.Mesh) => ((o.material as THREE.Material).depthWrite = false, o);
+    const glowMat = (color: string, opacity: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending });
+    const jade = new THREE.MeshStandardMaterial({ color: '#9ee6c0', emissive: '#2fbf7a', emissiveIntensity: 1.3, roughness: 0.15, metalness: 0.1, flatShading: true });
+    const featherShape = new THREE.Shape();
+    featherShape.moveTo(0, 0);
+    featherShape.quadraticCurveTo(0.07, 0.12, 0.02, 0.32);
+    featherShape.quadraticCurveTo(-0.05, 0.14, 0, 0);
+    const featherGeo = new THREE.ShapeGeometry(featherShape, 8);
     const bolts = Array.from({ length: 12 }, () => {
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), new THREE.MeshBasicMaterial({ color: '#ecfdf5' })));
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), new THREE.MeshBasicMaterial({ color: '#4ade80', transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending })));
-      g.visible = false;
-      return g;
+      const spin = new THREE.Group();
+      spin.name = 'spin';
+      g.add(spin);
+      spin.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), jade));
+      spin.add(add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), glowMat('#ffffff', 1))));
+      const ringA = add(new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.011, 6, 40), glowMat('#b9f8d6', 0.9)));
+      ringA.name = 'ringA';
+      const ringB = add(new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.008, 6, 40), glowMat('#6ee7b7', 0.75)));
+      ringB.name = 'ringB';
+      g.add(ringA, ringB);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex(), color: '#5ee6a8', transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }));
+      halo.scale.setScalar(0.95);
+      g.add(halo);
+      const feathers = new THREE.Group();
+      feathers.name = 'feathers';
+      for (let k = 0; k < 3; k++) {
+        const f = new THREE.Mesh(featherGeo, new THREE.MeshBasicMaterial({ color: '#f8fafc', transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+        const a = (k / 3) * Math.PI * 2;
+        f.position.set(Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0);
+        f.scale.setScalar(0.7);
+        f.rotation.z = a - Math.PI / 2;
+        feathers.add(f);
+      }
+      g.add(feathers);
+      // the tail: a row of glows shrinking and fading behind, laid out each frame along the flight
+      const tail = new THREE.Group();
+      tail.name = 'tail';
+      for (let k = 0; k < 16; k++) {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: softTex(), color: k < 4 ? '#c8fbe1' : '#3ddc97', transparent: true, opacity: 0.45 * (1 - k / 16), depthWrite: false, blending: THREE.AdditiveBlending }));
+        tail.add(sp);
+      }
+      const root = new THREE.Group();
+      root.add(g, tail);
+      root.visible = false;
+      root.traverse((o) => (o.frustumCulled = false));
+      return root;
     });
     // 损有余: a thick glowing pink beam from the enemy to the ally (bright core in a wide halo), a red ring on the one
     // drained and a green one on the one fed
@@ -223,12 +284,31 @@ export function DixianFx({ fighters }: { fighters: React.MutableRefObject<Combat
       const flap = Math.sin(time * 9) * 0.55;
       for (const w of cr.userData.wings as THREE.Group[]) w.rotation.z = flap * (w.userData.side as number);
     });
-    parts.bolts.forEach((g, k) => {
+    parts.bolts.forEach((root, k) => {
       const b = DX.bolts[k];
-      g.visible = !!b;
+      root.visible = !!b;
       if (!b) return;
+      const [g, tail] = root.children as THREE.Group[];
+      const size = b.big ? 1.7 : 1;
       g.position.set(b.x, b.y, b.z);
-      g.scale.setScalar((b.big ? 1.6 : 1) * (0.9 + 0.15 * Math.sin(time * 30 + k)));
+      g.scale.setScalar(size * (0.95 + 0.08 * Math.sin(time * 24 + k)));
+      // face along the flight so the feathers trail round it
+      vC.set(b.vx, b.vy, b.vz);
+      const sp = vC.length() || 1;
+      vC.divideScalar(sp);
+      g.quaternion.setFromUnitVectors(FWD, vC);
+      const spin = g.getObjectByName('spin')!;
+      spin.rotation.set(time * 5, time * 7, 0);
+      g.getObjectByName('ringA')!.rotation.set(time * 6, 0, time * 2);
+      g.getObjectByName('ringB')!.rotation.set(0, time * 5, time * -3);
+      const fe = g.getObjectByName('feathers')!;
+      fe.visible = b.big;
+      fe.rotation.z = time * 9;
+      tail.children.forEach((m, i) => {
+        const back = (i + 1) * 0.07 * size;
+        m.position.set(b.x - vC.x * back, b.y - vC.y * back, b.z - vC.z * back);
+        m.scale.setScalar(size * 0.5 * (1 - i / 18) * (0.9 + 0.15 * Math.sin(time * 30 + i)));
+      });
     });
     const fs = fighters.current;
     parts.threads.forEach((g, k) => {
