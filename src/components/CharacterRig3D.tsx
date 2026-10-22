@@ -852,6 +852,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
           m.metalness = Math.max(m.metalness ?? 0, 0.3);
           m.roughness = Math.min(m.roughness ?? 1, 0.6);
         }
+        if (classId === 'Wanderer' && asset.standin && o.isSkinnedMesh && !o.geometry.getAttribute('tqHead')) {
+          // which vertices ride the head (their colours are kept: see applyCharacterShading's hemp)
+          const g = o.geometry as THREE.BufferGeometry, si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight');
+          const heads = new Set(o.skeleton.bones.map((b: THREE.Bone, k: number) => (/head/i.test(b.name) ? k : -1)).filter((k: number) => k >= 0));
+          const w = new Float32Array(si.count);
+          for (let i = 0; i < si.count; i++) for (let k = 0; k < 4; k++) if (heads.has(si.getComponent(i, k))) w[i] += sw.getComponent(i, k);
+          g.setAttribute('tqHead', new THREE.BufferAttribute(w, 1));
+        }
         if (classId === 'Wanderer' && asset.standin) {
           // 散人's plain first look (until he has a model of his own): 霍岩's body, the cloth recoloured to undyed hemp
           // in the shader (applyCharacterShading's hemp), so his gold trim and red robe don't show

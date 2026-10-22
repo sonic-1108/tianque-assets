@@ -20,6 +20,7 @@ const look = v3(q.get('look'), '0,1.2,0');
 const yaw = parseFloat(q.get('yaw') || '0');
 if (q.get('undress')) (globalThis as any).__TQ_UNDRESS = true;
 if (q.get('sex')) setLook(q.get('sex') === 'f' ? 'f' : 'm');
+if (q.get('alpha')) for (const el of [document.documentElement, document.body, document.getElementById('r')!]) el.style.background = 'transparent';
 
 function makeFighter(): any {
   return {
@@ -68,7 +69,7 @@ createRoot(document.getElementById('r')!).render(
     <hemisphereLight args={['#e8eefc', '#3a3026', 1.1]} />
     <directionalLight position={[2.5, 5, 4]} intensity={2.6} castShadow />
     <directionalLight position={[-3, 2, -2]} intensity={0.8} color="#9fb6ff" />
-    <mesh rotation-x={-Math.PI / 2} receiveShadow visible={!q.get('alpha')}>
+    <mesh rotation-x={-Math.PI / 2} receiveShadow visible={!q.get('alpha') && !q.get('nofloor')}>
       <circleGeometry args={[4, 48]} />
       <meshStandardMaterial color="#4a4f5a" />
     </mesh>

@@ -41,7 +41,12 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
         totalEmissiveRadiance += tqSkin * vec3(0.13, 0.08, 0.015) * ${isPlayer ? '1.0' : '0.6'} * (1.0 - tqDark);`);
     }
     if (hemp) {
-      // 散人's first look: skin and hair kept, every dyed cloth becomes undyed hemp (light) and faded grey cotton (dark)
+      // 散人's first look: skin and hair kept, every dyed cloth becomes undyed hemp (light) and faded grey cotton (dark).
+      // tqHead (per vertex, how much it rides the head bone: face, hair, earrings) keeps its own colours outright
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float tqHead;\nvarying float vTqHead;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvTqHead = tqHead;');
+      f = f.replace('uniform float tqDark;', 'uniform float tqDark;\nvarying float vTqHead;');
       f = f.replace('#include <map_fragment>', `#include <map_fragment>
         {
           vec3 tqC = diffuseColor.rgb;
@@ -56,7 +61,7 @@ export function applyCharacterShading(m: THREE.MeshStandardMaterial, isPlayer: b
           // hair is dark and nearly colourless (a dark dyed vest is dark too, but it still has its colour)
           float tqHair = (1.0 - smoothstep(0.03, 0.06, tqL)) * (1.0 - smoothstep(1.6, 2.4, tqR / max(tqC.g, 1e-4))) * (1.0 - smoothstep(0.012, 0.03, tqChroma) * step(tqC.r, tqC.b));
           vec3 tqCloth = mix(vec3(0.16, 0.17, 0.18), vec3(0.47, 0.42, 0.33), smoothstep(0.08, 0.3, tqL)) * (0.7 + tqL * 1.2);
-          diffuseColor.rgb = mix(tqCloth, tqC, max(tqSkin, tqHair));
+          diffuseColor.rgb = mix(tqCloth, tqC, max(max(tqSkin, tqHair), smoothstep(0.08, 0.3, vTqHead)));
         }`);
     }
     if (suit) {

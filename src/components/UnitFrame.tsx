@@ -1,3 +1,4 @@
+import { lookPortrait } from '../wanderer';
 import React from 'react';
 import type { CharacterClassId } from '../types';
 
@@ -32,8 +33,9 @@ const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Emperor: `${import.meta.env.BASE_URL}portraits/emperor.png`,
   Trader: `${import.meta.env.BASE_URL}portraits/trader.png`,
   HeavyHealer: `${import.meta.env.BASE_URL}portraits/dixian4.png`,
-  Wanderer: `${import.meta.env.BASE_URL}portraits/wanderer.png`,
 };
+/** 新人 / 散人: the chosen look's face */
+const portraitOf = (c: CharacterClassId) => (c === 'Wanderer' ? `${import.meta.env.BASE_URL}${lookPortrait()}` : PORTRAIT[c]);
 
 /** Slanted bar. The bright fill snaps to the new value; a pale "ghost" lingers and drains after a hit. */
 function Bar({ value, max, height, fill, ghost, track = 'rgba(0,0,0,0.55)' }: { value: number; max: number; height: number; fill: string; ghost?: string; track?: string }) {
@@ -74,8 +76,8 @@ export function UnitFrame({ s, me }: { s: UnitStats; me: boolean }) {
             boxShadow: me ? '0 0 0 1.5px #d4a74a, 0 0 0 3px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.5)' : '0 0 0 1.5px rgba(255,255,255,0.35), 0 0 0 3px rgba(0,0,0,0.6)',
           }}
         >
-          {PORTRAIT[s.classId] ? (
-            <img src={PORTRAIT[s.classId]} alt="" className="w-full h-full object-cover" draggable={false} />
+          {portraitOf(s.classId) ? (
+            <img src={portraitOf(s.classId)} alt="" className="w-full h-full object-cover" draggable={false} />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-amber-200 font-black" style={{ fontSize: size * 0.45, fontFamily: '"Noto Serif SC", "Songti SC", serif', textShadow: '0 0 8px rgba(251,191,36,0.6)' }}>
               {s.className.slice(0, 1)}

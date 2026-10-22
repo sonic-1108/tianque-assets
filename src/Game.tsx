@@ -4921,14 +4921,16 @@ function GameImpl({
         // flies out on a curve to the right, swings around the target and comes back on the left
         const tgt = o.target ?? from.clone().addScaledVector(dir, 10);
         const f = new THREE.Vector3(tgt.x - from.x, 0, tgt.z - from.z);
-        const L = THREE.MathUtils.clamp(f.length() + 1.5, 6, 12);
+        // the far point of the loop is the target itself (it used to be 1.5 m past it, at least 6 m out: the curve then
+        // went by a standing target 1.5 to 2 m to the side and never touched it); a short throw makes a narrower loop
+        const L = THREE.MathUtils.clamp(f.length(), 3, 12);
         f.normalize();
         p.path = {
           o: from.clone(),
           f,
           s: new THREE.Vector3(-f.z, 0, f.x).multiplyScalar(-1),
           L,
-          W: 4.2,
+          W: Math.min(4.2, L * 0.55),
           y0: from.y,
           ty: THREE.MathUtils.clamp(tgt.y, 0.6, 7),
           u: 0,

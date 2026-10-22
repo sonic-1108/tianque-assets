@@ -9,6 +9,7 @@ import { StatsPanel } from './StatsPanel';
 import { MAPS, MAP_ORDER, MapId } from '../../maps';
 import { CLASS_CONFIGS } from '../CombatData';
 import { CharacterClassId } from '../../types';
+import { lookPortrait } from '../../wanderer';
 
 const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Berserker: './portraits/berserker.png',
@@ -18,8 +19,8 @@ const PORTRAIT: Partial<Record<CharacterClassId, string>> = {
   Emperor: './portraits/emperor.png',
   Trader: './portraits/trader.png',
   HeavyHealer: './portraits/dixian4.png',
-  Wanderer: './portraits/wanderer.png',
 };
+const portraitOf = (c: CharacterClassId) => (c === 'Wanderer' ? './' + lookPortrait() : PORTRAIT[c]);
 /** one short line per hero instead of a paragraph */
 const TAG: Partial<Record<CharacterClassId, string>> = {
   Berserker: '重刃 · 近战压制',
@@ -146,7 +147,7 @@ export function Lobby(p: LobbyProps) {
                 <button key={cid} className={`tq-hero ${on ? 'on' : ''}`} style={{ ['--acc' as any]: ACCENT[cid] ?? '#a3402b' }} onClick={() => p.onPlayerClass(cid)}>
                   <div className="tq-hero-art">
                     <div className="tq-hero-wash" />
-                    {PORTRAIT[cid] && <img src={PORTRAIT[cid]} alt="" draggable={false} />}
+                    {portraitOf(cid) && <img src={portraitOf(cid)} alt="" draggable={false} />}
                   </div>
                   <div className="tq-hero-name">{cc.name}</div>
                   <div className="tq-hero-who">{cc.defaultCharacter}</div>
@@ -191,7 +192,7 @@ export function Lobby(p: LobbyProps) {
                           onClick={() => p.onSeat(k, { cls: next(st.cls) })}
                           title={st.kind === 'ai' && p.canEdit ? '点击换侠客' : CLASS_CONFIGS[st.cls].name}
                         >
-                          {PORTRAIT[st.cls] ? <img src={PORTRAIT[st.cls]} alt="" draggable={false} /> : CLASS_CONFIGS[st.cls].name.slice(0, 1)}
+                          {portraitOf(st.cls) ? <img src={portraitOf(st.cls)} alt="" draggable={false} /> : CLASS_CONFIGS[st.cls].name.slice(0, 1)}
                         </button>
                         <span className="tq-seat-n">
                           {mine ? '你' : st.kind === 'ai' ? 'AI' : st.name || '侠客'}

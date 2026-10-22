@@ -69,6 +69,18 @@ short, no dashes in prose, deploy quickly when asked, and say plainly what was n
 - Quest `src/banker.ts` (`IB_STEPS`, localStorage `tq_ib`), HUD `QuestHud.tsx`. The market is `marketPx(sym, t)`.
 - The AI does not use lifts.
 
+## 百业 (career) the 荣耀 way, 新人 / 散人 (latest)
+
+- Rules in `shared/career.js` (server and client): `SKILL_TREE` (first three of each hero = 低阶), `spTotal`, `skillCap`,
+  `learnSkill`, `chooseHero` (转职 at `TRANSFER_LEVEL` 30), 百家印 → 百变兵器 (`BAIBIAN`). Server routes in
+  `relay/src/career.js` (`/career/learn`, `/career/reset`, `/career/choose`). Tests: `node --test tools/tests/career.test.mjs`.
+- Client: `src/skilltree.ts` (levels, `skillPower`), `src/wanderer.ts` (the 21-move pool, six-slot bar, looks m / f),
+  Game.tsx sets `castMult` on the career player's casts and runs 换兵器 (`swapT` / `swapReq`). Hall: `CareerHall.tsx`.
+- The 新人 / 散人 models `public/wanderer_m.glb` / `wanderer_f.glb` are not uploaded yet: 夜无痕 / 沈惊鸿 stand in
+  (hemp shader, head-bone vertices keep their colours). Once uploaded, slim their maps with `tools/slim-maps.mjs` and
+  rerender `portraits/wanderer_*.png` with `rig-preview.html?cls=Wanderer&sex=m&alpha=1`.
+- `tools/tests/wanderertest.cjs`: all 21 borrowed moves, 换兵器, 百变兵器, levels. `src/preview/rig.tsx`: one hero on a stage.
+
 ## Open threads
 
 - Code split of `Game.tsx` (never started).
