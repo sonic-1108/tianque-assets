@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { applyCharacterShading } from './characterShading';
 import { collectLimbs, applyClimbPose, applySitPose, Limbs, applyDrinkPose, applyGlidePose, fistCentre } from './climbPose';
 import { splitTraderVest, disposeTraderVest, TraderVest } from './traderVest';
+import { buildUmbrella, Umbrella } from './umbrella';
 import { TRADER } from '../trader';
 import { RAGE } from './CombatData';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -777,6 +778,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const faceLight = useRef<THREE.PointLight>(null);
   const weaponsRef = useRef<{ right?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife>; left?: ReturnType<typeof buildCleaver> | ReturnType<typeof buildKnife> }>({});
   const traderVestRef = useRef<TraderVest | null>(null);
+  /** 新人 / 散人: his weapon opened into an oil-paper umbrella when he glides (a borrowed Patagonia 起飞) */
+  const umbrellaRef = useRef<Umbrella | null>(null);
   const glideBlendRef = useRef(0);
   const hoverRef = useRef(0);
   const glideGrip = useMemo(() => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), dir: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) }), []);
@@ -898,6 +901,10 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     actionsRef.current = actions;
     limbsRef.current = collectLimbs(model);
+    if (classId === 'Wanderer') {
+      umbrellaRef.current = buildUmbrella();
+      poseRootRef.current?.add(umbrellaRef.current.group);
+    }
     if (classId === 'Trader' && !asset.fallback) {
       model.traverse((o) => {
         if (!(o as THREE.SkinnedMesh).isSkinnedMesh || traderVestRef.current) return;
@@ -1023,6 +1030,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       mixer.stopAllAction();
       if (traderVestRef.current) disposeTraderVest(traderVestRef.current);
       traderVestRef.current = null;
+      umbrellaRef.current?.group.removeFromParent();
+      umbrellaRef.current = null;
       glideBlendRef.current = 0;
       right.group.removeFromParent();
       left.group.removeFromParent();
@@ -1109,7 +1118,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
 
     const st = c.actionState;
-    const gliding = classId === 'Trader' && (c.glide ?? 0) > 0 && c.hp > 0 && !c.isGrounded;
+    const gliding = (classId === 'Trader' || classId === 'Wanderer') && (c.glide ?? 0) > 0 && c.hp > 0 && !c.isGrounded;
     glideBlendRef.current = THREE.MathUtils.damp(glideBlendRef.current, gliding ? 1 : 0, 12, rawDelta);
     const glideBlend = glideBlendRef.current;
     const speed = Math.hypot(c.vel[0], c.vel[2]);
@@ -1193,7 +1202,25 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     mixer.update(delta);
     if (limbsRef.current && glideBlend > 0.001) {
       const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.55);
-      applyGlidePose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), lift, glideBlend, performance.now() / 1000);
+      applyGlidePose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), lift, glideBlend, performance.now() / 1000, classId === 'Wanderer' ? 0.14 : 0.52);
+    }
+    const umb = umbrellaRef.current;
+    if (umb) {
+      // the blade springs open into the umbrella as he lifts off; both fists on the shaft, the canopy above them
+      const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.5);
+      const on = glideBlend > 0.15 && c.hp > 0 && !!limbsRef.current;
+      umb.group.visible = on;
+      if (on) {
+        const a = pose.worldToLocal(fistCentre(limbsRef.current!, 0, glideGrip.a));
+        const b = pose.worldToLocal(fistCentre(limbsRef.current!, 1, glideGrip.b));
+        const now = performance.now() / 1000;
+        umb.group.position.copy(a).add(b).multiplyScalar(0.5);
+        umb.group.position.y += 0.9;
+        umb.group.rotation.set(Math.sin(now * 3.6) * 0.05 * lift, 0, Math.sin(now * 2.7) * 0.06 * lift);
+        // folded (a long narrow bundle) -> open dome
+        umb.canopy.scale.set(THREE.MathUtils.lerp(0.1, 1, lift), THREE.MathUtils.lerp(2.4, 1, lift), THREE.MathUtils.lerp(0.1, 1, lift));
+        umb.shaft.scale.set(1, 1.08, 1);
+      }
     }
     const vest = traderVestRef.current;
     if (vest) {

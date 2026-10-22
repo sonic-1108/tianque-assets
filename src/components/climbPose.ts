@@ -57,15 +57,18 @@ const up = new THREE.Vector3(0, 1, 0);
 const right = new THREE.Vector3();
 
 /** Pull the vest off at chest level, then hold it overhead by its straps; the legs hang and swing under it. */
-export function applyGlidePose(l: Limbs, fwd: THREE.Vector3, lift: number, w: number, t = 0) {
+/** spread: how far apart the hands are (0.52 for the vest's two straps; small for one umbrella shaft) */
+export function applyGlidePose(l: Limbs, fwd: THREE.Vector3, lift: number, w: number, t = 0, spread = 0.52) {
   right.set(-fwd.z, 0, fwd.x);
   const B = l.bones;
   for (const side of [-1, 1]) {
     const p = side < 0 ? 'left' : 'right';
     // arms: a wide V overhead, elbows a touch bent and forward, the way you hang off two straps
-    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(-0.15, 0.82, lift)).addScaledVector(fwd, 0.22).addScaledVector(right, side * 0.52).normalize();
+    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(-0.15, 0.82, lift)).addScaledVector(fwd, 0.22).addScaledVector(right, side * spread).normalize();
     aim(B[p + 'arm'], B[p + 'forearm'], d, w);
-    d.copy(up).multiplyScalar(THREE.MathUtils.lerp(0.25, 0.95, lift)).addScaledVector(fwd, 0.1).addScaledVector(right, side * 0.08).normalize();
+    if (spread > 0.3) d.copy(up).multiplyScalar(THREE.MathUtils.lerp(0.25, 0.95, lift)).addScaledVector(fwd, 0.1).addScaledVector(right, side * 0.08).normalize();
+    // one shaft: the forearms close in so the fists meet on it, the right hand a little above the left
+    else d.copy(up).multiplyScalar(THREE.MathUtils.lerp(0.25, side > 0 ? 0.9 : 0.62, lift)).addScaledVector(fwd, 0.12).addScaledVector(right, -side * 0.62).normalize();
     aim(B[p + 'forearm'], B[p + 'hand'], d, w);
     // legs: hanging, knees softly bent, swinging out of step with each other
     const sw = Math.sin(t * 2.3 + (side < 0 ? 0 : 2.1)) * lift;
