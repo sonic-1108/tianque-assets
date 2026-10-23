@@ -127,6 +127,8 @@ const SLOT_SIDE = [0, 1, 0, 1, 2, 2, 2, 2, 2];
 const PARADE_START = 35.5;
 const GUARD_SLOTS: [number, number][] = [[-1.7, 1.6], [1.7, 1.6], [-1.7, -1.9], [1.7, -1.9]];
 const SEAL_HOLD = 30;
+/** seconds R must be held before any hero's ultimate goes off */
+const ULT_CHARGE = 0.8;
 const sideA = (slot: number) => (SLOT_SIDE[slot] ?? 1) === 0;
 const colorFor = (slot: number, c: CombatantState) =>
   c.classId === 'Shadowblade'
@@ -1221,6 +1223,9 @@ function GameImpl({
     }
     for (let i = 0; i < N; i++) {
       const fc = fighters[i];
+      // 蓄力 full: the ultimate goes off now
+      if (fc.ultGo) intents[i].request = 'ultimate' as InputKeyAction;
+      if (fc.ultCharge !== undefined) intents[i].move.set(0, 0, 0);
       // 换兵器 done: the move he was changing for goes off now
       if (fc.swapReq && (fc.swapT ?? 0) <= 0 && !intents[i].request) {
         intents[i].request = fc.swapReq as InputKeyAction;
@@ -1259,10 +1264,34 @@ function GameImpl({
       intents[i].move.set(0, 0, 0);
     }
 
-    // every ultimate is channelled: let go of R and it stops (the cooldown is spent either way)
+    // 大招蓄力: hold R, take no hit, and it fills; otherwise it's gone (nothing spent)
     for (let i = 0; i < N; i++) {
       const c = fighters[i];
-      if (c.actionState !== 'ultimate' || c.hp <= 0 || intents[i].ultHeld !== false || c.stateTimer < 0.2) continue;
+      if (c.ultGo && c.actionState === 'ultimate') c.ultGo = false;
+      if (c.ultCharge === undefined) continue;
+      const remote = seatsNow[i]?.ctl === 'remote';
+      const held = i === ME || remote ? intents[i].ultHeld !== false : true; // the AI keeps holding
+      const hit = c.hp < (c.ultChargeHp ?? c.hp) - 0.5 || c.actionState === 'hitstun' || c.actionState === 'launched' || c.actionState === 'knockdown' || c.actionState === 'buried';
+      if (!held || hit || c.hp <= 0 || round.over) {
+        c.ultCharge = undefined;
+        vfx.damageNumber(vA.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), hit ? '蓄力被打断' : '松开了 R', false, '#e5e7eb');
+        if (i === ME) onRoundEvent?.({ type: 'toast', text: hit ? '挨打了，大招蓄力被打断' : '松开了 R，大招蓄力中断 · 要一直按住' });
+        continue;
+      }
+      c.ultCharge += dt;
+      c.vel[0] = c.vel[2] = 0;
+      if (Math.random() < dt * 14) vfx.embers(vB.set(c.pos[0], c.pos[1] + 0.2, c.pos[2]), 2, colorFor(i, c), 0.6, 3, 0.07);
+      if (c.ultCharge >= ULT_CHARGE) {
+        c.ultCharge = undefined;
+        c.ultGo = true;
+        c.ultChargeHp = c.hp;
+      }
+    }
+    // every ultimate is channelled: let go of R, or take a hit, and it stops (the cooldown is spent either way)
+    for (let i = 0; i < N; i++) {
+      const c = fighters[i];
+      const struck = c.actionState === 'ultimate' && c.hp < (c.ultChargeHp ?? c.hp) - 0.5 && !isBossFighter(c);
+      if (c.actionState !== 'ultimate' || c.hp <= 0 || (intents[i].ultHeld !== false && !struck) || c.stateTimer < 0.2) continue;
       if (c.classId === 'Berserker' && c.ultSlamStarted) continue; // already crashing down: that lands regardless
       if (c.classId === 'Emperor') continue; // the dragon is already loosed: letting go of R changes nothing
       c.actionState = c.isGrounded ? 'idle' : 'jump';
@@ -2017,6 +2046,31 @@ function GameImpl({
         report(`${label}: ${sk.name}`, '成功施放 (Cast)');
         return true;
       };
+      // 大招蓄力: every hero's ultimate needs R held for ULT_CHARGE first; letting go or taking a hit throws it away
+      if (c.classId !== 'Wanderer' && !castingBorrowed) {
+        if (c.ultCharge !== undefined) {
+          if (req === 'ultimate') return false; // still charging
+          if (req !== 'dodge') return report('R', '蓄力中'), false;
+          c.ultCharge = undefined; // a roll breaks it off
+        } else if (req === 'ultimate' && !c.ultGo) {
+          const ui = skills.findIndex((s) => s.isSuper);
+          const sk = skills[ui];
+          if (!sk) return false;
+          if ((c.cooldowns.ultimate ?? 0) > 0) return report(`R: ${sk.name}`, `冷却中 (${(c.cooldowns.ultimate ?? 0).toFixed(1)}s)`), false;
+          if ((c.silenceTimer ?? 0) > 0) return report(`R: ${sk.name}`, '被封印'), false;
+          if (c.mp < sk.mpCost) return report(`R: ${sk.name}`, `MP不足 (需 ${sk.mpCost})`), false;
+          if (!canSkill || !c.isGrounded) return report(`R: ${sk.name}`, `被 [${cur} ${phase}] 占用`), false;
+          c.ultCharge = 0;
+          c.ultChargeHp = c.hp;
+          c.vel[0] = c.vel[2] = 0;
+          c.rotY = c.targetRotY = intent.faceYaw;
+          vfx.ring(vB.set(c.pos[0], c.pos[1] + 0.06, c.pos[2]), 1.6, colorFor(slot, c), 0.6, 0.1, ULT_CHARGE);
+          if (isPlayer) vfx.damageNumber(vC.set(c.pos[0], c.pos[1] + 2.3, c.pos[2]), '蓄力 · 按住 R', false, '#fde68a');
+          report(`R: ${sk.name}`, '蓄力');
+          return true;
+        }
+        if (req === 'ultimate') c.ultGo = false;
+      }
       // 散人: a borrowed move plays as its owner for that one action; while it plays only a dodge gets through
       if (c.wanderer && c.classId !== 'Wanderer' && !castingBorrowed) {
         // once the borrowed move is into its recovery he can cut it short with anything (like any hero), not only a roll

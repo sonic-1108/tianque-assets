@@ -3,25 +3,25 @@
 
 export const DIXIAN = {
   /** 悬壶 passive: heals on someone under this share of their HP are stronger */
-  mercy: { below: 0.3, mult: 1.5 },
+  mercy: { below: 0.3, mult: 1.2 },
   /** 1 清风诀: stand still and channel, then a big heal on the most hurt ally in range (yourself if nobody else) */
-  breeze: { cast: 0.9, heal: 0.35, range: 16 },
+  breeze: { cast: 0.9, heal: 0.18, range: 16 },
   /** left click: jade qi bolts off the staff, a little homing; the third of the combo is big */
   bolt: { speed: 22, life: 1.0, r: 0.75, home: 2.5, dmg: 50, bigDmg: 95, range: 22 },
   /** 2 损有余: a thread of qi from the nearest enemy to the most hurt ally; their life drains across it */
-  drain: { range: 18, keep: 22, t: 3, rate: 0.07 },
+  drain: { range: 18, keep: 22, t: 3, rate: 0.035 },
   /** 4 缩地成寸 also wraps whoever he reaches (or himself) in 鹤羽: a shield, and a burst that throws enemies off */
-  shield: { share: 0.28, t: 6, range: 16, pushR: 3.6, push: 8 },
+  shield: { share: 0.16, t: 6, range: 16, pushR: 3.6, push: 8 },
   /** 3 地脉回春: a ring of earth qi on the ground; allies inside heal every second, an enemy who comes in is caught by
    *  roots for a moment (once per ring) and walks slower while inside */
-  spring: { r: 4.5, t: 8, heal: 0.05, slow: 0.7, ahead: 3, root: 1.2 },
+  spring: { r: 4.5, t: 8, heal: 0.02, slow: 0.7, ahead: 3, root: 1.2 },
   /** 4 缩地成寸: fold the ground and arrive. Toward an ally if one is in reach, else straight ahead */
   step: { speed: 30, far: 9, allyRange: 22, iframe: 0.35 },
   /** 5 还魂: channel over a downed ally, they stand up with this share of HP. With nobody down: 魂印 on the most hurt
    *  ally (or himself): the next blow that would cut them down leaves them standing with `soulHp` instead */
-  revive: { cast: 2.5, hp: 0.5, range: 12, soulT: 8, soulHp: 0.45 },
+  revive: { cast: 2.5, hp: 0.35, range: 12, soulT: 8, soulHp: 0.25 },
   /** R 人间不渡: the crane comes down; every ally near him heals, shakes off control and can't be controlled a while */
-  crane: { r: 20, heal: 0.5, protect: 4 },
+  crane: { r: 20, heal: 0.25, protect: 4 },
 };
 
 export interface Spring {

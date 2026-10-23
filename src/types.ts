@@ -188,6 +188,9 @@ export interface CombatantState {
   localMove?: [number, number];
   /** Ultimate: whether the downward slam has started */
   ultSlamStarted?: boolean;
+  ultCharge?: number; // 蓄力: seconds R has been held so far (undefined: not charging)
+  ultChargeHp?: number; // HP when the charge (or the ultimate) began: any hit breaks it
+  ultGo?: boolean; // the charge is full: the ultimate goes off on the next frame
   /** air hits taken since last landing (juggle decay) */
   juggleCount?: number;
   /** game time when the current block started (perfect-block window) */

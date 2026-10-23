@@ -81,6 +81,13 @@ short, no dashes in prose, deploy quickly when asked, and say plainly what was n
   rerender `portraits/wanderer_*.png` with `rig-preview.html?cls=Wanderer&sex=m&alpha=1`.
 - `tools/tests/wanderertest.cjs`: all 21 borrowed moves, 换兵器, 百变兵器, levels. `src/preview/rig.tsx`: one hero on a stage.
 
+## Ultimates are charged (owner's rule)
+
+- Every hero's R needs R held for `ULT_CHARGE` (0.8 s, Game.tsx) before it goes off: rooted, letting go or any hit
+  (HP drop / hitstun / knockdown) throws the charge away with nothing spent (`c.ultCharge`, `c.ultGo`). During the
+  ultimate itself, letting go or a hit also ends it (cooldown spent). The AI always "holds"; hits still break it.
+- Heals were cut on the owner's word: 狂刃 血怒 lifesteal 12% (`RAGE`), 地仙 numbers in `src/dixian.ts` (`DIXIAN`).
+
 ## Open threads
 
 - Code split of `Game.tsx` (never started).

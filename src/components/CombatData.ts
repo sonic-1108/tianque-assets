@@ -232,7 +232,7 @@ export const SHADOW_PHASE_CONFIGS: Partial<Record<CharacterActionState, ActionPh
 export const HP_SCALE = 2;
 
 /** 狂刃 血怒: 5 s of fast, life-drinking cuts. speed: basic attacks play this much faster; lifesteal: share of each hit's damage healed */
-export const RAGE = { t: 5, dmg: 1.2, lifesteal: 0.35, speed: 1.4, move: 1.15 };
+export const RAGE = { t: 5, dmg: 1.2, lifesteal: 0.12, speed: 1.4, move: 1.15 };
 
 export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
   Berserker: {
@@ -281,7 +281,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
         id: 'blood_rage',
         name: '血怒',
         key: '4',
-        description: '消耗10%当前生命，暴怒5秒：普攻出刀快40%，伤害提升20%，每次命中按造成伤害的35%回血，移动加快。',
+        description: '消耗10%当前生命，暴怒5秒：普攻出刀快40%，伤害提升20%，每次命中按造成伤害的12%回血，移动加快。',
         mpCost: 0,
         hpCostPct: 10,
         cooldown: 12.0,
@@ -460,14 +460,14 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     attackSpeedRatio: 0.85,
     staggerPower: 1.0,
     passiveName: '悬壶',
-    passiveDesc: '医者仁心：给生命低于30%的人治疗、转血或加护盾时，效果提升50%。',
+    passiveDesc: '医者仁心：给生命低于30%的人治疗、转血或加护盾时，效果提升20%。',
     skills: [
-      { id: 'qingfeng', name: '清风诀', key: '1', description: '站定引导0.9秒，一阵青风落在16米内伤得最重的队友身上（没有队友就是自己），回复其35%最大生命。读条中挨打或被控会打断，按方向键不会。', mpCost: 25, cooldown: 7, icon: '🍃' },
-      { id: 'drain_surplus', name: '损有余', key: '2', description: '天之道，损有余而补不足：从18米内最近的敌人身上牵出一道粉色气血光束，连到伤得最重的队友（没有队友就是自己），3秒内每秒抽走敌人7%最大生命，全部转给队友。拉开太远光束就断。', mpCost: 25, cooldown: 11, icon: '🧵' },
-      { id: 'earth_spring', name: '地脉回春', key: '3', description: '鹤头杖往地上一点，前方展开半径4.5米的金色地脉法阵，持续8秒。队友在阵里每秒回复5%最大生命（8秒共40%）；敌人一踏进来就被地里钻出的树根缠住1.2秒（每个阵每人一次），之后在阵里走路慢三成。', mpCost: 30, cooldown: 16, icon: '🌿' },
-      { id: 'fold_earth', name: '缩地成寸', key: '4', description: '缩地成寸：22米内有队友就一步赶到他身边，没有就向前方瞬行9米，途中短暂无敌。落地时鹤羽护体：给赶到的那个队友（或自己）一层白色护盾，吸收其28%最大生命的伤害，持续6秒，同时羽毛炸开把身边3.6米内的敌人推开。', mpCost: 20, cooldown: 10, icon: '👣' },
-      { id: 'mortal_realm', name: '人间不渡', key: 'R', description: '【终极奥义】不入天阙，留守人间：仙鹤从天而降盘旋全场，20米内所有队友（含自己）立刻回复50%最大生命，解除定身、封印、做空等负面状态，并在4秒内不会被击倒、击飞或眩晕。', mpCost: 70, cooldown: 40, icon: '🕊️', isSuper: true },
-      { id: 'recall_soul', name: '还魂', key: '5', description: '有队友倒在12米内：引导2.5秒把他拉起来，带50%生命（扶起只有30%），读条中挨打会断。没人倒下时：给伤得最重的队友（或自己）种下紫金魂印8秒，期间受到致命一击不会倒下，反而回到45%生命。', mpCost: 45, cooldown: 45, icon: '🕯️' },
+      { id: 'qingfeng', name: '清风诀', key: '1', description: '站定引导0.9秒，一阵青风落在16米内伤得最重的队友身上（没有队友就是自己），回复其18%最大生命。读条中挨打或被控会打断，按方向键不会。', mpCost: 25, cooldown: 7, icon: '🍃' },
+      { id: 'drain_surplus', name: '损有余', key: '2', description: '天之道，损有余而补不足：从18米内最近的敌人身上牵出一道粉色气血光束，连到伤得最重的队友（没有队友就是自己），3秒内每秒抽走敌人3.5%最大生命，全部转给队友。拉开太远光束就断。', mpCost: 25, cooldown: 11, icon: '🧵' },
+      { id: 'earth_spring', name: '地脉回春', key: '3', description: '鹤头杖往地上一点，前方展开半径4.5米的金色地脉法阵，持续8秒。队友在阵里每秒回复2%最大生命（8秒共16%）；敌人一踏进来就被地里钻出的树根缠住1.2秒（每个阵每人一次），之后在阵里走路慢三成。', mpCost: 30, cooldown: 16, icon: '🌿' },
+      { id: 'fold_earth', name: '缩地成寸', key: '4', description: '缩地成寸：22米内有队友就一步赶到他身边，没有就向前方瞬行9米，途中短暂无敌。落地时鹤羽护体：给赶到的那个队友（或自己）一层白色护盾，吸收其16%最大生命的伤害，持续6秒，同时羽毛炸开把身边3.6米内的敌人推开。', mpCost: 20, cooldown: 10, icon: '👣' },
+      { id: 'mortal_realm', name: '人间不渡', key: 'R', description: '【终极奥义】不入天阙，留守人间：仙鹤从天而降盘旋全场，20米内所有队友（含自己）立刻回复25%最大生命，解除定身、封印、做空等负面状态，并在4秒内不会被击倒、击飞或眩晕。', mpCost: 70, cooldown: 40, icon: '🕊️', isSuper: true },
+      { id: 'recall_soul', name: '还魂', key: '5', description: '有队友倒在12米内：引导2.5秒把他拉起来，带35%生命（扶起只有30%），读条中挨打会断。没人倒下时：给伤得最重的队友（或自己）种下紫金魂印8秒，期间受到致命一击不会倒下，反而回到25%生命。', mpCost: 45, cooldown: 45, icon: '🕯️' },
     ],
   },
   Ranger: {
