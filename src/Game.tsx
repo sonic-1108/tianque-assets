@@ -793,6 +793,11 @@ function GameImpl({
     p1RefState.current = p1;
     dummyRefState.current = en;
     const input = inputRef.current;
+    {
+      // F3: what the GPU drew last frame (to tell a heavy map from a heavy effect when the frame rate drops)
+      const ri = (gl as any).info;
+      (input.debug as any).gpu = ri ? `${ri.render.calls} 次绘制 · ${Math.round(ri.render.triangles / 1000)}k 三角面 · ${ri.programs?.length ?? '?'} 套着色器 · ${ri.memory.textures} 张贴图` : '';
+    }
     const actions = input.actions;
     const just = input.justPressed;
     const controller = cameraControllerRef.current;
@@ -2019,7 +2024,8 @@ function GameImpl({
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
         // 新人 / 散人 borrow moves made for other bodies: they turn to face anyone within 12 m, whichever way he looks
-        const wide = !!c.wanderer || c.classId === 'Wanderer';
+        // (skills only: a plain swing turning him toward someone 12 m off sent him lunging about on his own)
+        const wide = (!!c.wanderer || c.classId === 'Wanderer') && (req.startsWith('skill') || req === 'ultimate');
         const range = wide ? Math.max(12, ranger ? 22 : 0) : ranger ? 22 : c.classId === 'BuddhistMage' ? 5.5 : c.classId === 'Shadowblade' ? 6 : 4.2;
         if (fd < range && foe.hp > 0) {
           const ty = yawTo(c.pos, foe.pos);

@@ -1653,6 +1653,7 @@ export default function App() {
             <span className="text-[10px] text-emerald-400 font-bold">
               FPS: {inputRef.current.debug.fps}
             </span>
+            <span className="text-[10px] text-sky-300">{(inputRef.current.debug as any).gpu}</span>
           </div>
 
           <div className="flex flex-col gap-1.5 text-[11px]">
