@@ -331,6 +331,36 @@ export function buildSpear() {
 }
 
 export const buildBriefcaseForPreview = () => buildBriefcase();
+/** 散人's own weapon before he takes up another house's: a plain iron 剑, cloth-wrapped grip (blade along +Y) */
+function buildJian() {
+  const g = new THREE.Group();
+  const blade = new THREE.Shape();
+  blade.moveTo(-0.019, 0);
+  blade.lineTo(0.019, 0);
+  blade.lineTo(0.016, 0.66);
+  blade.lineTo(0, 0.74);
+  blade.lineTo(-0.016, 0.66);
+  blade.closePath();
+  const geo = new THREE.ExtrudeGeometry(blade, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.005, bevelSegments: 2 });
+  geo.translate(0, 0, -0.003);
+  const steel = new THREE.MeshStandardMaterial({ color: '#b9bec4', metalness: 0.9, roughness: 0.32, envMapIntensity: 1.2 });
+  const b = new THREE.Mesh(geo, steel);
+  b.position.y = 0.11;
+  b.castShadow = true;
+  const iron = new THREE.MeshStandardMaterial({ color: '#4a4741', metalness: 0.7, roughness: 0.5 });
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.022, 0.03), iron);
+  guard.position.y = 0.1;
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.017, 0.16, 10), new THREE.MeshStandardMaterial({ color: '#d8ccb0', roughness: 0.95 }));
+  grip.position.y = 0.01;
+  const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.021, 10, 8), iron);
+  pommel.position.y = -0.08;
+  // a short hemp tassel off the pommel
+  const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.012, 0.09, 6), new THREE.MeshStandardMaterial({ color: '#cbb994', roughness: 1 }));
+  tassel.position.y = -0.135;
+  g.add(b, guard, grip, pommel, tassel);
+  return g;
+}
+
 /** 交易员's weapon: a silver attaché case stuffed with cash, the handle in the fist, the case along the swing */
 function buildBriefcase() {
   const g = new THREE.Group();
@@ -798,6 +828,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const traderVestRef = useRef<TraderVest | null>(null);
   /** 新人 / 散人: his weapon opened into an oil-paper umbrella when he glides (a borrowed Patagonia 起飞) */
   const umbrellaRef = useRef<Umbrella | null>(null);
+  /** 新人 / 散人: one weapon per house in the right hand, shown by his weaponForm ('' = his own plain 剑) */
+  const formsRef = useRef<{ forms: Record<string, THREE.Object3D>; staff: THREE.Object3D | null; scaled: boolean } | null>(null);
   const glideBlendRef = useRef(0);
   const hoverRef = useRef(0);
   const glideGrip = useMemo(() => ({ a: new THREE.Vector3(), b: new THREE.Vector3(), dir: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) }), []);
@@ -969,7 +1001,29 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       });
       right.group.add(buildBriefcase());
     }
-    if (classId === 'Wanderer') left.group.visible = false; // 散人: one plain blade
+    if (classId === 'Wanderer') {
+      // 散人: his own plain 剑 to begin with; another house's move puts that house's weapon in his hand (换兵器)
+      left.group.visible = false;
+      right.group.traverse((o: any) => {
+        if (o.isMesh) o.visible = false;
+      });
+      const forms: Record<string, THREE.Object3D> = {
+        '': buildJian(),
+        Berserker: buildCleaver(glow).group,
+        Ranger: buildKnife(glow).group,
+        Shadowblade: buildDagger(glow).group,
+        Emperor: buildImperialSword(new THREE.Color('#ffd36a')).group,
+        Trader: buildBriefcase(),
+      };
+      for (const f of Object.values(forms)) right.group.add(f);
+      // 地仙's staff rides on the hand bone itself (its own grip), like his
+      const staff = buildCraneStaff();
+      staff.rotation.set(Math.PI, 0, 0);
+      staff.position.set(0, 0.36, 0.02);
+      staff.visible = false;
+      if (bones.righthand) bones.righthand.add(staff);
+      formsRef.current = { forms, staff, scaled: false };
+    } else formsRef.current = null;
     if (classId === 'HeavyHealer') {
       // 鹤头杖: the blades stay hidden (their markers still draw the trail); a gnarled staff with a silver crane head
       left.group.visible = false;
@@ -1348,6 +1402,24 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (classId !== 'BuddhistMage') {
       const w0 = weaponsRef.current;
       if (w0.right) w0.right.group.visible = !handsBusy && !c.weaponLost && !(c.expeditionWeapon && c.hp<=0);
+      const F = formsRef.current;
+      if (F) {
+        // 散人: the weapon of the house whose move he's on (梵音's are bare fists)
+        const form = c.weaponForm ?? '';
+        const key = form in F.forms ? form : form === 'BuddhistMage' || form === 'HeavyHealer' ? '-' : '';
+        for (const [k, o] of Object.entries(F.forms)) o.visible = k === key;
+        if (F.staff) {
+          F.staff.visible = form === 'HeavyHealer' && !handsBusy && !c.weaponLost;
+          if (!F.scaled && F.staff.parent) {
+            const ss = new THREE.Vector3();
+            F.staff.parent.getWorldScale(ss);
+            if (ss.x > 0.0001) {
+              F.staff.scale.setScalar(1 / ss.x);
+              F.scaled = true;
+            }
+          }
+        }
+      }
       // the left hand carries the candle / candle-shade in 青冥古林
       if (w0.left) w0.left.group.visible = !handsBusy && !c.expeditionWeapon && classId !== 'Ranger' && classId !== 'Trader' && classId !== 'HeavyHealer' && classId !== 'Wanderer' && !c.candle && !c.shade;
     }
