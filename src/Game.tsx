@@ -2002,13 +2002,15 @@ function GameImpl({
       // Soft lock: attacks snap toward a nearby opponent that is roughly in front
       {
         const fd = Math.hypot(foe.pos[0] - c.pos[0], foe.pos[2] - c.pos[2]);
-        const range = ranger ? 22 : c.classId === 'BuddhistMage' ? 5.5 : c.classId === 'Shadowblade' ? 6 : 4.2;
+        // 新人 / 散人 borrow moves made for other bodies: they turn to face anyone within 12 m, whichever way he looks
+        const wide = !!c.wanderer || c.classId === 'Wanderer';
+        const range = wide ? Math.max(12, ranger ? 22 : 0) : ranger ? 22 : c.classId === 'BuddhistMage' ? 5.5 : c.classId === 'Shadowblade' ? 6 : 4.2;
         if (fd < range && foe.hp > 0) {
           const ty = yawTo(c.pos, foe.pos);
           let dd = ty - intent.faceYaw;
           while (dd > Math.PI) dd -= Math.PI * 2;
           while (dd < -Math.PI) dd += Math.PI * 2;
-          if (Math.abs(dd) < (ranger && fd > 4.2 ? 0.4 : 1.25)) intent.faceYaw = ty;
+          if (wide || Math.abs(dd) < (ranger && fd > 4.2 ? 0.4 : 1.25)) intent.faceYaw = ty;
         }
       }
       const start = (next: CharacterActionState, push = 0) => {

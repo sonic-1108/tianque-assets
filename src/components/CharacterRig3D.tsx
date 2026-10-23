@@ -786,6 +786,13 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const asset = useMemo(() => {
     if (!rawAsset) return null;
     const { built, unmapped } = buildClips(rawAsset.raw, planFor(classId));
+    if (classId === 'Wanderer') {
+      // 散人 borrows each house's moves: give him each house's way of moving for them too ("Ranger|skill_1" ...)
+      for (const owner of ['Berserker', 'Ranger', 'BuddhistMage', 'Shadowblade', 'Emperor', 'HeavyHealer', 'Trader'] as CharacterClassId[]) {
+        const b = buildClips(rawAsset.raw, planFor(owner)).built;
+        for (const [k, v] of Object.entries(b)) built[`${owner}|${k}`] = { ...v, key: `${owner}|${k}` };
+      }
+    }
     return { ...rawAsset, built, unmapped } as LoadedAsset;
   }, [rawAsset, classId]);
   const restQuats = useRef<{ neck?: THREE.Quaternion; head?: THREE.Quaternion; neckBone?: THREE.Bone; headBone?: THREE.Bone }>({});
@@ -1023,6 +1030,18 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       staff.visible = false;
       if (bones.righthand) bones.righthand.add(staff);
       formsRef.current = { forms, staff, scaled: false };
+      // compile every weapon's material now (each shown for the moment the compile collects them), so the first
+      // 换兵器 to a house doesn't freeze the frame while its weapon's shaders build
+      if (!(globalThis as any).__TQ_NOWARM) {
+        const all = [...Object.values(forms), staff];
+        const was = all.map((o) => o.visible);
+        all.forEach((o) => (o.visible = true));
+        try {
+          (gl as any).compileAsync?.(model, cam, scn)?.catch?.(() => {});
+        } finally {
+          all.forEach((o, k) => (o.visible = was[k]));
+        }
+      }
     } else formsRef.current = null;
     if (classId === 'HeavyHealer') {
       // 鹤头杖: the blades stay hidden (their markers still draw the trail); a gnarled staff with a silver crane head
@@ -1159,6 +1178,8 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
   useFrame((_, rawDelta) => {
     const c = combatantRef.current;
+    /** whose moves these are right now: a 散人 mid borrowed move moves like its owner */
+    const ec: CharacterClassId = classId === 'Wanderer' && c && c.classId !== 'Wanderer' ? c.classId : classId;
     const mixer = mixerRef.current;
     const pose = poseRootRef.current;
     if (!c || !mixer || !pose || !asset) return;
@@ -1226,19 +1247,19 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       const kick = Math.min(2, Math.floor(((c.climbT ?? 0) / 1.0) * 3));
       key = kick === 2 && (c.climbT ?? 0) > 0.72 && actionsRef.current.r_flip ? 'r_flip' : actionsRef.current.run ? 'run' : 'jump';
       climbKickRef.current = kick;
-    } else if (classId === 'Ranger' && st === 'attack_3' && c.backSlash) {
+    } else if (ec === 'Ranger' && st === 'attack_3' && c.backSlash) {
       key = 'r_kick';
-    } else if (st === 'skill_4' && classId === 'HeavyHealer' && c.dxSpring) {
+    } else if (st === 'skill_4' && ec === 'HeavyHealer' && c.dxSpring) {
       key = actionsRef.current.d_spring ? 'd_spring' : 'skill_4';
     } else if (st === 'attack_1' || st === 'attack_2' || st === 'attack_3' || st === 'skill_1' || st === 'skill_2' || st === 'skill_3' || st === 'skill_4' || st === 'dodge' || st === 'block') {
       key = st;
-    } else if (st === 'ultimate' && classId === 'HeavyHealer') {
+    } else if (st === 'ultimate' && ec === 'HeavyHealer') {
       key = actionsRef.current.ultimate ? 'ultimate' : 'skill_1';
-    } else if (st === 'ultimate' && classId === 'Shadowblade') {
+    } else if (st === 'ultimate' && ec === 'Shadowblade') {
       key = actionsRef.current.s_ult ? 's_ult' : 'attack_3';
-    } else if (st === 'ultimate' && classId === 'BuddhistMage') {
+    } else if (st === 'ultimate' && ec === 'BuddhistMage') {
       key = actionsRef.current.m_ult ? 'm_ult' : 'idle';
-    } else if (st === 'ultimate' && classId === 'Ranger') {
+    } else if (st === 'ultimate' && ec === 'Ranger') {
       key = c.stateTimer < 0.45 ? 'jump' : 'r_rain';
     } else if (st === 'ultimate') {
       key = c.vel[1] > -1 && !c.isGrounded && c.stateTimer < 0.55 ? 'ult_air' : 'ult_slam';
@@ -1258,13 +1279,14 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
       key = backward ? 'walk' : 'run';
     }
     // 地仙 never runs: he floats along in his standing pose (飘行), see the hover below
-    if (classId === 'HeavyHealer' && (key === 'run' || key === 'walk' || key === 'skill_3')) key = 'idle';
+    if (ec === 'HeavyHealer' && (key === 'run' || key === 'walk' || key === 'skill_3')) key = 'idle';
     if (c.swimming && (key === 'idle' || key === 'run' || key === 'walk' || key === 'jump') && actionsRef.current.swim) key = 'swim';
     else if (getupRef.current > 0 && (key === 'idle' || key === 'run' || key === 'walk') && actionsRef.current.getup) key = 'getup';
     else if (c.celebrate && key === 'idle' && actionsRef.current.cheer) key = 'cheer';
+    if (ec !== classId && actionsRef.current[`${ec}|${key}`]) key = `${ec}|${key}`;
     if (!actionsRef.current[key]) key = actionsRef.current.idle ? 'idle' : Object.keys(actionsRef.current)[0];
 
-    const isOneShot = ONE_SHOT.has(key);
+    const isOneShot = ONE_SHOT.has(key.split('|').pop()!);
     const needRestart = key !== currentKeyRef.current || (isOneShot && restarted && key !== 'jump');
     if (needRestart) {
       const fade = key === 'idle' && currentKeyRef.current === 'knockdown' ? 0.4 : isOneShot ? 0.08 : 0.18;
@@ -1440,7 +1462,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     }
     strafeYawRef.current = THREE.MathUtils.damp(strafeYawRef.current, targetYaw, 12, delta);
 
-    if (st === 'skill_2' && classId === 'Berserker') spinRef.current -= delta * 15;
+    if (st === 'skill_2' && ec === 'Berserker') spinRef.current -= delta * 15;
     else spinRef.current = THREE.MathUtils.damp(spinRef.current, Math.round(spinRef.current / (Math.PI * 2)) * Math.PI * 2, 14, delta);
 
     // Ultimate: forward somersault on the way up
@@ -1451,9 +1473,9 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     let leanX = 0;
     let leanZ = 0;
-    if (st === 'skill_3' && classId === 'Berserker') leanX = 0.32;
-    else if (st === 'skill_3' && classId === 'BuddhistMage') leanX = 0.1;
-    else if (st === 'skill_3' && classId === 'HeavyHealer') leanX = 0.34; // 缩地成寸: shooting forward low over the ground
+    if (st === 'skill_3' && ec === 'Berserker') leanX = 0.32;
+    else if (st === 'skill_3' && ec === 'BuddhistMage') leanX = 0.1;
+    else if (st === 'skill_3' && ec === 'HeavyHealer') leanX = 0.34; // 缩地成寸: shooting forward low over the ground
     else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
     else if (st === 'launched') leanX = -0.45;
     else if (st === 'hitstun') leanX = -0.12;

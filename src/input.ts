@@ -68,7 +68,7 @@ export const createEmptyActions = (): Record<InputKeyAction, boolean> => ({
   interact: false,
 });
 
-const bufferMs = () => ((globalThis as any).__TQ_BUFFER_MS as number) || 150;
+const bufferMs = () => ((globalThis as any).__TQ_BUFFER_MS as number) || 300; // a press held over through the end of a move
 
 export function useGameInput(options: {
   enabled?: boolean;
