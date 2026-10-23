@@ -1,7 +1,8 @@
 /** Flight is a deliberate recovery/reposition action, before offensive skill selection. */
 export function shouldTraderTakeoff({grounded,glide=0,cooldown=0,mp,hp,maxHp,distance,threat=false}) {
   if(!grounded||glide>0||cooldown>0||mp<20||hp<=0||maxHp<=0)return false;
-  return (hp/maxHp<=.8 && distance<18) || (threat && distance<4.5) || (distance>=14 && distance<=32);
+  // only to get out of trouble: low on health with someone close, or cornered (no more flying about to heal up)
+  return (hp/maxHp<=.4 && distance<10) || (threat && distance<4.5 && hp/maxHp<=.6);
 }
 /** Keep separation while healing, orbit at medium range, close distant gaps. */
 export function traderFlightDirection(dx,dz,strafe=1) {
