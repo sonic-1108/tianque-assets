@@ -1233,7 +1233,14 @@ function GameImpl({
     for (let i = 0; i < N; i++) {
       const fc = fighters[i];
       // 蓄力 full: the ultimate goes off now
-      if (fc.ultGo) intents[i].request = 'ultimate' as InputKeyAction;
+      if (fc.ultGo) {
+        // one try only: if it can't go off now (he became something else, or got knocked about) it's simply gone
+        fc.ultGo = false;
+        if (!fc.wanderer && fc.classId !== 'Wanderer') {
+          intents[i].request = 'ultimate' as InputKeyAction;
+          fc.ultFire = true;
+        }
+      }
       if (fc.ultCharge !== undefined) intents[i].move.set(0, 0, 0);
       // 换兵器 done: the move he was changing for goes off now
       if (fc.swapReq && (fc.swapT ?? 0) <= 0 && !intents[i].request) {
@@ -1276,7 +1283,7 @@ function GameImpl({
     // 大招蓄力: hold R, take no hit, and it fills; otherwise it's gone (nothing spent)
     for (let i = 0; i < N; i++) {
       const c = fighters[i];
-      if (c.ultGo && c.actionState === 'ultimate') c.ultGo = false;
+      c.ultFire = false; // a charged ultimate gets the one frame it was handed, no more
       if (c.ultCharge === undefined) continue;
       const remote = seatsNow[i]?.ctl === 'remote';
       const held = i === ME || remote ? intents[i].ultHeld !== false : true; // the AI keeps holding
@@ -2064,7 +2071,7 @@ function GameImpl({
           if (req === 'ultimate') return false; // still charging
           if (req !== 'dodge') return report('R', '蓄力中'), false;
           c.ultCharge = undefined; // a roll breaks it off
-        } else if (req === 'ultimate' && !c.ultGo) {
+        } else if (req === 'ultimate' && !c.ultFire) {
           const ui = skills.findIndex((s) => s.isSuper);
           const sk = skills[ui];
           if (!sk) return false;
@@ -2081,7 +2088,7 @@ function GameImpl({
           report(`R: ${sk.name}`, '蓄力');
           return true;
         }
-        if (req === 'ultimate') c.ultGo = false;
+        if (req === 'ultimate') c.ultFire = false;
       }
       // 散人: a borrowed move plays as its owner for that one action; while it plays only a dodge gets through
       if (c.wanderer && c.classId !== 'Wanderer' && !castingBorrowed) {
