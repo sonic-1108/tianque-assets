@@ -1,7 +1,7 @@
 // 新人 / 散人 in a real 1v1 (draws stubbed). Every 低阶 skill of every house (21) is put on the bar six at a time and
 // pressed by the player: it must change weapons first (換兵器, ~0.2 s) when it's another house's, then cast as its
 // owner, land / heal / move, and leave him a 新人 again with the cooldown on his own slot. Then the same with the
-// 百变兵器 (no change time), and skill levels: Lv 1 hits at 80%, Lv 10 at 125% (inside a contract only).
+// 百变兵器 (no change time), and skill levels: Lv 1 hits at 89%, Lv 10 at 125% (inside a contract only).
 //   npx vite build --outDir /tmp/b --base / && npx vite preview --outDir /tmp/b --port 4180
 //   URL=http://127.0.0.1:4180/ node tools/tests/wanderertest.cjs
 const { chromium } = require(process.env.PW || 'playwright');

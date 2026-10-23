@@ -2019,9 +2019,15 @@ function GameImpl({
       };
       // 散人: a borrowed move plays as its owner for that one action; while it plays only a dodge gets through
       if (c.wanderer && c.classId !== 'Wanderer' && !castingBorrowed) {
-        if (req !== 'dodge') return false;
+        // once the borrowed move is into its recovery he can cut it short with anything (like any hero), not only a roll
+        if (req !== 'dodge' && phaseOf(c).phase !== 'recovery') return false;
         c.classId = 'Wanderer';
         c.borrowState = undefined;
+        if (req !== 'dodge') {
+          c.actionState = c.isGrounded ? 'idle' : 'jump';
+          c.stateTimer = 0;
+          c.stateDuration = 0;
+        }
         return executeIntent(slot, c, foe, intent);
       }
       // 新人 / 散人 changing weapons: no swing and no move until it's in his hands (a roll still gets out)
