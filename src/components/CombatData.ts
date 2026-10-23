@@ -454,7 +454,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     role: '后排阵地奶 / 起死回生 (Earth Immortal Healer)',
     roleType: 'healer',
     description: '修成了仙却不入天阙、留在人间行医的老神仙。拄鹤头杖，读条慢但一口奶量极大，能在地上布阵、缩地成寸赶到队友身边，还能把倒下的人拉回来。',
-    hp: 1150,
+    hp: 850,
     mp: 160,
     speedRatio: 0.85,
     attackSpeedRatio: 0.85,
@@ -462,7 +462,7 @@ export const CLASS_CONFIGS: Record<CharacterClassId, ClassConfig> = {
     passiveName: '悬壶',
     passiveDesc: '医者仁心：给生命低于30%的人治疗、转血或加护盾时，效果提升20%。',
     skills: [
-      { id: 'qingfeng', name: '清风诀', key: '1', description: '站定引导0.9秒，一阵青风落在16米内伤得最重的队友身上（没有队友就是自己），回复其18%最大生命。读条中挨打或被控会打断，按方向键不会。', mpCost: 25, cooldown: 7, icon: '🍃' },
+      { id: 'qingfeng', name: '清风诀', key: '1', description: '站定引导0.9秒，一阵青风落在16米内伤得最重的队友身上（没有队友就是自己），回复其18%最大生命。读条中挨打或被控会打断，按方向键不会。', mpCost: 25, cooldown: 11, icon: '🍃' },
       { id: 'drain_surplus', name: '损有余', key: '2', description: '天之道，损有余而补不足：从18米内最近的敌人身上牵出一道粉色气血光束，连到伤得最重的队友（没有队友就是自己），3秒内每秒抽走敌人3.5%最大生命，全部转给队友。拉开太远光束就断。', mpCost: 25, cooldown: 11, icon: '🧵' },
       { id: 'earth_spring', name: '地脉回春', key: '3', description: '鹤头杖往地上一点，前方展开半径4.5米的金色地脉法阵，持续8秒。队友在阵里每秒回复2%最大生命（8秒共16%）；敌人一踏进来就被地里钻出的树根缠住1.2秒（每个阵每人一次），之后在阵里走路慢三成。', mpCost: 30, cooldown: 16, icon: '🌿' },
       { id: 'fold_earth', name: '缩地成寸', key: '4', description: '缩地成寸：22米内有队友就一步赶到他身边，没有就向前方瞬行9米，途中短暂无敌。落地时鹤羽护体：给赶到的那个队友（或自己）一层白色护盾，吸收其16%最大生命的伤害，持续6秒，同时羽毛炸开把身边3.6米内的敌人推开。', mpCost: 20, cooldown: 10, icon: '👣' },
