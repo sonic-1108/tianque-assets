@@ -717,6 +717,8 @@ function loadAssetFor(classId: CharacterClassId): Promise<LoadedAsset & { fallba
   if (classId === 'Wanderer') {
     // his own model if it's been uploaded, otherwise the young stand-in (never 霍岩)
     return loadGLB(modelUrlFor(classId))
+      // his own model came rigged but without moves: borrow the stand-in's (the same Mixamo skeleton)
+      .then((a) => (a.raw.length ? a : loadGLB(`${import.meta.env.BASE_URL}${LOOK_STANDIN[getLook()]}`).then((b) => ({ ...a, raw: b.raw, all: b.all })).catch(() => a)))
       .then((a) => ({ ...a, fallback: false, standin: false }))
       .catch(() => loadGLB(`${import.meta.env.BASE_URL}${LOOK_STANDIN[getLook()]}`).then((a) => ({ ...a, fallback: false, standin: true })));
   }
