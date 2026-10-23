@@ -2058,7 +2058,8 @@ function GameImpl({
         return true;
       };
       // 大招蓄力: every hero's ultimate needs R held for ULT_CHARGE first; letting go or taking a hit throws it away
-      if (c.classId !== 'Wanderer' && !castingBorrowed) {
+      // (not for a 新人 / 散人: his R is one of his six borrowed moves, even while he's mid-way through another house's)
+      if (c.classId !== 'Wanderer' && !c.wanderer && !castingBorrowed) {
         if (c.ultCharge !== undefined) {
           if (req === 'ultimate') return false; // still charging
           if (req !== 'dodge') return report('R', '蓄力中'), false;
@@ -5543,6 +5544,8 @@ function GameImpl({
         c.lift = undefined;
         c.glide = 0;
         c.glideDive = false;
+        c.ultCharge = undefined;
+        c.ultGo = false;
         c.shortT = 0;
         c.dreamT = 0;
         c.compound = 0;
