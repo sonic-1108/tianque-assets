@@ -318,6 +318,15 @@ function GameImpl({
     onRoundEventProp?.(e);
   };
   /** 百业: a contract is running for the local player */
+  /** the enemy AI's level: the lobby's choice, except in a 百业 contract, where it grows with the account
+   *  (below 15 easy, below 30 normal, then at most the lobby's choice) */
+  const aiLevelNow = (): string => {
+    const pick = getSettings().aiLevel;
+    if (!careerRunOn()) return pick;
+    const order = ['easy', 'normal', 'hard', 'hell'];
+    const cap = SKILLS.level < 15 ? 'easy' : SKILLS.level < 30 ? 'normal' : 'hell';
+    return order[Math.min(order.indexOf(pick), order.indexOf(cap))] ?? pick;
+  };
   const careerRunOn = () => {
     const r = career.getSnapshot().run;
     return !!r && !r.failed;
@@ -798,7 +807,7 @@ function GameImpl({
     // ---------- shared timers ----------
     for (const c of fighters) {
       // 难度: the enemy AI's cooldowns and mana come back faster on the harder levels
-      const lvlK = isEnemyAI(c) ? AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal : null;
+      const lvlK = isEnemyAI(c) ? AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal : null;
       const cdDt = dt * (lvlK ? lvlK.cd : 1);
       // 散人: the borrowed move is over (or he was knocked out of it): back to his own class
       if (c.wanderer && c.classId !== 'Wanderer' && (c.hp <= 0 || c.actionState !== c.borrowState)) {
@@ -2839,7 +2848,7 @@ function GameImpl({
     }
     /** 难度: the enemy AI hits harder / takes less (or the other way) by level; allies and online play are untouched */
     function aiLevelDmg(att: CombatantState, def: CombatantState) {
-      const L = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      const L = AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal;
       return (isEnemyAI(att) ? L.out : 1) * (isEnemyAI(def) ? L.in : 1);
     }
     /**
@@ -2849,7 +2858,7 @@ function GameImpl({
      */
     function aiReflex(i: number, c: CombatantState, foe: CombatantState, it: Intent) {
       if (!isEnemyAI(c) || !foe || foe.hp <= 0 || c.hp <= 0) return;
-      const L = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      const L = AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal;
       if (L.reflex <= 0) return;
       const A = aiRefs.current[i] as any;
       const st = c.actionState;
@@ -2983,7 +2992,7 @@ function GameImpl({
       if (att !== def && (att.side ?? 0) === (def.side ?? 0) && !((att.dreamT ?? 0) > 0)) return; // no friendly fire (except in a 撒钱 daydream)
       const o = { ...oIn };
       // 难度: your stuns don't hold a hard or hell AI as long
-      if (o.dur && isEnemyAI(def)) o.dur *= (AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal).cc;
+      if (o.dur && isEnemyAI(def)) o.dur *= (AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal).cc;
       const attackerIsPlayer = slot === ME;
       const hitDir = vC.set(def.pos[0] - att.pos[0], 0, def.pos[2] - att.pos[2]).normalize();
       const chest = vB.set(def.pos[0], def.pos[1] + 1.15, def.pos[2]).addScaledVector(hitDir, -0.35);
@@ -5387,7 +5396,7 @@ function GameImpl({
       const side = new THREE.Vector3(-toFoe.z, 0, toFoe.x);
       out.faceYaw = yawTo(me.pos, foe.pos);
 
-      const lvl = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      const lvl = AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal;
       ai.think -= dt2 * lvl.think; // 难度: a harder AI makes up its mind sooner
       ai.planTimer -= dt2;
       if (ai.request) {
@@ -10300,7 +10309,7 @@ function GameImpl({
       const side = new THREE.Vector3(-toFoe.z, 0, toFoe.x);
       out.faceYaw = yawTo(me.pos, foe.pos);
 
-      const lvl = AI_LEVELS[getSettings().aiLevel] ?? AI_LEVELS.normal;
+      const lvl = AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal;
       ai.think -= dt2 * lvl.think; // 难度: a harder AI makes up its mind sooner
       ai.planTimer -= dt2;
       if (ai.request) {
