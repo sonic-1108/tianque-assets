@@ -2849,7 +2849,9 @@ function GameImpl({
     /** 难度: the enemy AI hits harder / takes less (or the other way) by level; allies and online play are untouched */
     function aiLevelDmg(att: CombatantState, def: CombatantState) {
       const L = AI_LEVELS[aiLevelNow()] ?? AI_LEVELS.normal;
-      return (isEnemyAI(att) ? L.out : 1) * (isEnemyAI(def) ? L.in : 1);
+      // 百业: a low-level account's contract opponents hit softer (70% below Lv 15, 85% below 30)
+      const soft = careerRunOn() && isEnemyAI(att) ? (SKILLS.level < 15 ? 0.7 : SKILLS.level < 30 ? 0.85 : 1) : 1;
+      return (isEnemyAI(att) ? L.out * soft : 1) * (isEnemyAI(def) ? L.in : 1);
     }
     /**
      * 难度 困难/地狱: a reflex layer over whatever the AI decided. A swing coming at it gets blocked or sidestepped on
@@ -10289,6 +10291,16 @@ function GameImpl({
     }
 
     function runAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
+      // 百业: the contract's goals are met: the opponent concedes and backs off, so he can walk back and hand it in
+      if (foe === fighters[ME] && careerRunOn() && career.getSnapshot().run?.ready) {
+        const dx = me.pos[0] - foe.pos[0];
+        const dz = me.pos[2] - foe.pos[2];
+        const d = Math.hypot(dx, dz) || 1;
+        out.move.set(d < 14 ? dx / d : 0, 0, d < 14 ? dz / d : 0);
+        out.request = null;
+        out.block = d < 4;
+        return;
+      }
       if ((me.dreamT ?? 0) > 0 && (foe.side ?? 0) !== (me.side ?? 0)) {
         // 白日梦 with no teammate to turn on: wander about in a daze
         const t = gt * 1.3 + slotOf(me);
