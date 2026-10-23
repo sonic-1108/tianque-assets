@@ -1,5 +1,5 @@
 // 新人 / 散人 in a real 1v1 (draws stubbed). Every 低阶 skill of every house (21) is put on the bar six at a time and
-// pressed by the player: it must change weapons first (換兵器, ~0.45 s) when it's another house's, then cast as its
+// pressed by the player: it must change weapons first (換兵器, ~0.2 s) when it's another house's, then cast as its
 // owner, land / heal / move, and leave him a 新人 again with the cooldown on his own slot. Then the same with the
 // 百变兵器 (no change time), and skill levels: Lv 1 hits at 80%, Lv 10 at 125% (inside a contract only).
 //   npx vite build --outDir /tmp/b --base / && npx vite preview --outDir /tmp/b --port 4180
@@ -51,7 +51,7 @@ const ALL = process.env.ONLY ? process.env.ONLY.split(',') : ['earth_cleave', 'w
       T.input.current.buffer.push({ action: slot, timestamp: performance.now() + 3000 });
       let sawAs = '', swapSeen = 0, castAt = -1; const g0 = globalThis.__TQ_GT;
       const trace = [];
-      for (let t = 0; t < 14; t++) { await waitG(0.2); if (globalThis.__TQ_TRACE) trace.push([me.classId, me.actionState, +me.stateTimer.toFixed(2), foe.hp, T.input.current.debug?.lastSkillResult, +Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]).toFixed(1), foe.actionState, (me.stealthT ?? 0) > 0 ? 'stealth' : '']); if ((me.swapT ?? 0) > 0) swapSeen++; if (me.classId !== 'Wanderer' && !sawAs) { sawAs = me.classId; castAt = +(globalThis.__TQ_GT - g0).toFixed(2); } }
+      for (let t = 0; t < 28; t++) { await waitG(0.1); if (globalThis.__TQ_TRACE) trace.push([me.classId, me.actionState, +me.stateTimer.toFixed(2), foe.hp, T.input.current.debug?.lastSkillResult, +Math.hypot(foe.pos[0] - me.pos[0], foe.pos[2] - me.pos[2]).toFixed(1), foe.actionState, (me.stealthT ?? 0) > 0 ? 'stealth' : '']); if ((me.swapT ?? 0) > 0) swapSeen++; if (me.classId !== 'Wanderer' && !sawAs) { sawAs = me.classId; castAt = +(globalThis.__TQ_GT - g0).toFixed(2); } }
       T.input.current.buffer.length = 0;
       await waitG(1.2);
       return { castAs: sawAs, castAt, swapSeen, form0, form: me.weaponForm, backTo: me.classId, mpSpent: Math.round(mp0 - me.mp), slotCd: +(me.cooldowns[slot] ?? 0).toFixed(1), foeLost: hp0 - foe.hp, meHealed: me.hp - mh0, moved: +Math.hypot(me.pos[0] - x0, me.pos[2] - z0).toFixed(1), mult: me.castMult, trace: globalThis.__TQ_TRACE ? trace : undefined };
