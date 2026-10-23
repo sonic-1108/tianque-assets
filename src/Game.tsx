@@ -2098,6 +2098,11 @@ function GameImpl({
       }
       // 散人: a borrowed move plays as its owner for that one action; while it plays only a dodge gets through
       if (c.wanderer && c.classId !== 'Wanderer' && !castingBorrowed) {
+        // under the borrowed vest: any skill key folds it and he drops
+        if ((c.glide ?? 0) > 0 && !c.isGrounded && (req.startsWith('skill') || req === 'ultimate')) {
+          c.glide = 0;
+          return true;
+        }
         // once the borrowed move is into its recovery he can cut it short with anything (like any hero), not only a roll
         if (req !== 'dodge' && phaseOf(c).phase !== 'recovery') return false;
         c.classId = 'Wanderer';
@@ -2517,13 +2522,15 @@ function GameImpl({
       if ((c.glide ?? 0) > 0 && !c.isGrounded) {
         // 交易员 under his vest: steer with the keys, sink slowly
         const G = TRADER.glide;
-        let dx = -Math.sin(c.rotY);
-        let dz = -Math.cos(c.rotY);
-        if (intent.move.lengthSq() > 0.01) {
-          const l = intent.move.length();
-          dx = intent.move.x / l;
-          dz = intent.move.z / l;
+        // no keys: he hangs there and slows down (he used to fly on by himself)
+        if (intent.move.lengthSq() <= 0.01) {
+          c.vel[0] = THREE.MathUtils.damp(c.vel[0], 0, 2.5, dt);
+          c.vel[2] = THREE.MathUtils.damp(c.vel[2], 0, 2.5, dt);
+          return;
         }
+        const l = intent.move.length();
+        const dx = intent.move.x / l;
+        const dz = intent.move.z / l;
         c.vel[0] = THREE.MathUtils.damp(c.vel[0], dx * G.speed, 3.5, dt);
         c.vel[2] = THREE.MathUtils.damp(c.vel[2], dz * G.speed, 3.5, dt);
         c.rotY = c.targetRotY = Math.atan2(-dx, -dz);
@@ -4143,6 +4150,8 @@ function GameImpl({
           if (f.hp <= 0) f.glide = 0;
           else if (f.isGrounded && (f.glide ?? 0) < G.t - 0.4) {
             f.glide = 0;
+            f.vel[0] = 0; // landed: the glide's speed stays in the air
+            f.vel[2] = 0;
             vfx.dustPuff(vB.set(f.pos[0], f.pos[1], f.pos[2]), 10, 0.4, 2, 0.5);
           } else {
             if (!f.isGrounded && !round.over) {
