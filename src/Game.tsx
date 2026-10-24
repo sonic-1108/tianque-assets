@@ -8248,7 +8248,8 @@ function GameImpl({
       }
       for (let ei = 0; ei < N; ei++) {
         const e = fighters[ei];
-        if (e.classId !== 'Emperor') continue;
+        // a 散人 is a 新人 again a moment after a borrowed 皇帝 move: his move still has to run out (and free his legs)
+        if (e.classId !== 'Emperor' && !e.empMove) continue;
         const boss = isBossFighter(e);
         if (!boss) {
           vfx.emperor.imperial.preload(); // the spectral guards' model, once
@@ -8261,7 +8262,7 @@ function GameImpl({
         if (!M) continue;
         M.t += dt;
         e.vel[0] = e.vel[2] = 0;
-        if (e.hp <= 0 || e.actionState === 'launched' || e.actionState === 'knockdown' || e.actionState === 'hitstun') {
+        if (M.t > 4 || e.hp <= 0 || e.actionState === 'launched' || e.actionState === 'knockdown' || e.actionState === 'hitstun') {
           // knocked out of it (a hero can be interrupted; the boss is never launched)
           e.empMove = undefined;
           continue;
