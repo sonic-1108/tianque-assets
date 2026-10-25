@@ -10339,15 +10339,15 @@ function GameImpl({
         const dx = me.pos[0] - foe.pos[0];
         const dz = me.pos[2] - foe.pos[2];
         const d = Math.hypot(dx, dz) || 1;
-        out.move.set(d < 14 ? dx / d : 0, 0, d < 14 ? dz / d : 0);
+        // he simply stops where he is (walking off was suspected of the black screens)
+        void d;
+        out.move.set(0, 0, 0);
         out.request = null;
         out.block = false;
-        // turn round and walk off (facing the player while backing away looked like a bug)
-        if (d < 14) out.faceYaw = Math.atan2(-dx, -dz);
         const rid = career.getSnapshot().run?.id;
         if (rid && concedeToast !== rid) {
           concedeToast = rid;
-          onRoundEvent?.({ type: 'toast', text: '契约条件已完成：对手认输后撤，回到出发点交付' });
+          onRoundEvent?.({ type: 'toast', text: '契约条件已完成：对手认输停手，回到出发点交付' });
         }
         return;
       }
