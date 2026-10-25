@@ -10316,6 +10316,7 @@ function GameImpl({
       if (out.move.lengthSq() > 0.01) out.move.normalize();
     }
 
+    let concedeToast: string | undefined;
     function runAI(me: CombatantState, foe: CombatantState, out: Intent, dt2: number) {
       // 百业: the contract's goals are met: the opponent concedes and backs off, so he can walk back and hand it in
       if (foe === fighters[ME] && careerRunOn() && career.getSnapshot().run?.ready) {
@@ -10324,7 +10325,14 @@ function GameImpl({
         const d = Math.hypot(dx, dz) || 1;
         out.move.set(d < 14 ? dx / d : 0, 0, d < 14 ? dz / d : 0);
         out.request = null;
-        out.block = d < 4;
+        out.block = false;
+        // turn round and walk off (facing the player while backing away looked like a bug)
+        if (d < 14) out.faceYaw = Math.atan2(-dx, -dz);
+        const rid = career.getSnapshot().run?.id;
+        if (rid && concedeToast !== rid) {
+          concedeToast = rid;
+          onRoundEvent?.({ type: 'toast', text: '契约条件已完成：对手认输后撤，回到出发点交付' });
+        }
         return;
       }
       if ((me.dreamT ?? 0) > 0 && (foe.side ?? 0) !== (me.side ?? 0)) {
