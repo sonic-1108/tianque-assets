@@ -18,7 +18,7 @@ import React, { useRef, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette, ToneMapping, wrapEffect } from '@react-three/postprocessing';
-import { Effect } from 'postprocessing';
+import { Effect, Pass } from 'postprocessing';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig, SLOTS, SLOT_IDS } from './constants';
@@ -8850,6 +8850,22 @@ function GameImpl({
       if (map.id === 'wending') updateWar();
       if (map.id === 'losangeles') updateLoot();
       updateTrader();
+      // a NaN slipped into someone's position or speed (a zero-length direction somewhere): put him back where he last was
+      for (const f of fighters) {
+        const okP = Number.isFinite(f.pos[0] + f.pos[1] + f.pos[2]);
+        const okV = Number.isFinite(f.vel[0] + f.vel[1] + f.vel[2]);
+        if (okP && okV) {
+          const g = ((f as any).__good ||= [0, 0, 0]);
+          g[0] = f.pos[0]; g[1] = f.pos[1]; g[2] = f.pos[2];
+          if (!Number.isFinite(f.rotY)) f.rotY = f.targetRotY = 0;
+          continue;
+        }
+        const g = (f as any).__good || [0, 2, 0];
+        f.pos[0] = g[0]; f.pos[1] = g[1]; f.pos[2] = g[2];
+        f.vel[0] = f.vel[1] = f.vel[2] = 0;
+        if (!Number.isFinite(f.rotY)) f.rotY = f.targetRotY = 0;
+        console.warn('[TQ] non-finite fighter state reset', fighters.indexOf(f));
+      }
       updateDixian();
 
       if (map.id === 'lavacliff' && map.vents) {
@@ -10727,6 +10743,7 @@ function GameImpl({
             anyone near the lens, and darkened the whole screen when a skill burst dust and debris in front of the camera */}
         {/* no saturation / contrast grading: on Apple GPUs it pushed saturated reds and oranges (lanterns, robes, the
             dragon's fins) below zero, which came out black, and the bloom then smeared that across the whole screen */}
+        <primitive object={sanitizePass} />
         <Bloom mipmapBlur intensity={QUALITY[quality].bloom ? map.bloom ?? 0.9 : 0} luminanceThreshold={0.95} luminanceSmoothing={0.2} />
         <Vignette offset={0.3} darkness={0.55} />
         <ToneMapping mode={ACES_FILMIC as any} />
@@ -10757,6 +10774,33 @@ class SafeGradeEffect extends Effect {
   }
 }
 const SafeGrade = wrapEffect(SafeGradeEffect);
+
+/**
+ * Before the bloom: one bad pixel (NaN / Inf / below zero, from any shader on any GPU) gets blurred by the mipmap
+ * bloom across the whole screen and the picture goes black while the HUD carries on. Scrub them out first.
+ */
+class SanitizePass extends Pass {
+  mat: THREE.ShaderMaterial;
+  constructor() {
+    super('SanitizePass');
+    this.mat = new THREE.ShaderMaterial({
+      uniforms: { inputBuffer: { value: null } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 1.0, 1.0); }',
+      fragmentShader: `uniform sampler2D inputBuffer; varying vec2 vUv;
+        float ok(float v) { return (v >= 0.0 && v <= 2000.0) ? v : (v > 2000.0 ? 2000.0 : 0.0); }
+        void main() { vec4 c = texture2D(inputBuffer, vUv); gl_FragColor = vec4(ok(c.r), ok(c.g), ok(c.b), (c.a >= 0.0 && c.a <= 1.0) ? c.a : 1.0); }`,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.fullscreenMaterial = this.mat;
+  }
+  render(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget, outputBuffer: THREE.WebGLRenderTarget) {
+    this.mat.uniforms.inputBuffer.value = inputBuffer.texture;
+    renderer.setRenderTarget(this.renderToScreen ? null : outputBuffer);
+    renderer.render(this.scene, this.camera);
+  }
+}
+const sanitizePass = new SanitizePass();
 
 /** 青冥古林: a candle carried in the hand: a warm light that shows you (and gives you away) in the dark */
 function HeldCandle({ combatantRef, socketsRef }: { combatantRef: React.MutableRefObject<CombatantState>; socketsRef: React.MutableRefObject<RigSockets> }) {

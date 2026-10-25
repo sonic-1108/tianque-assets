@@ -38,6 +38,7 @@ export function CareerHall({name,onClose,onStart}:{name:string;onClose:()=>void;
  <div className="career-progress"><strong>百业等级 {s.level}</strong><progress max={40*s.level*s.level-40*(s.level-1)**2} value={s.xp-40*(s.level-1)**2}/><span>{status}</span>
   <span className="career-sp"><strong>技能点 {s.sp-s.spUsed}</strong> / 共 {s.sp}</span>
   <button disabled={!s.ready||s.busy||!!s.active||!s.spUsed} onClick={()=>{if(resetArm){career.reset();setResetArm(false)}else setResetArm(true)}} onBlur={()=>setResetArm(false)}>{resetArm?'再点一次确认洗点':'洗点'}</button>
+  {s.active&&<small style={{color:'#f5c26b',fontWeight:700}}>契约进行中，不能加点和洗点：先回出发点按 F 交付，或在右边放弃当前契约。</small>}
   <small>每升一级 +2 技能点，每张地图第一次交付契约 +3。1 到 5 级每级 1 点，6 到 10 级每级 2 点。</small></div>
  <div className="career-body"><main>
   <h2>一 · {s.hero?CLASS_CONFIGS[s.hero].name+'技能':'七家低阶技能（转职前谁都能学）'}</h2>

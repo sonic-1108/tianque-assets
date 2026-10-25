@@ -76,6 +76,14 @@ export class CameraController {
   }
 
   update(playerPos: THREE.Vector3, dt: number) {
+    // a NaN anywhere (player position, a frame time) would put the camera nowhere and the screen goes black for good
+    if (!Number.isFinite(playerPos.x + playerPos.y + playerPos.z) || !Number.isFinite(dt)) return;
+    if (!Number.isFinite(this.yaw)) this.yaw = 0;
+    if (!Number.isFinite(this.pitch)) this.pitch = 0.3;
+    if (!Number.isFinite(this.smoothPos.x + this.smoothPos.y + this.smoothPos.z) || !Number.isFinite(this.followY)) {
+      this.initialized = false;
+      this.smoothPos.set(0, 0, 0);
+    }
     // consume mouse input ONCE, then reset it
     const sens = this.sensitivity * getSettings().sens * (this.scopeEye ? 0.28 : 1);
     this.yaw -= this.pendingDX * sens;
