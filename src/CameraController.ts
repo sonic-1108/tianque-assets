@@ -5,8 +5,8 @@ import * as THREE from 'three';
 export class CameraController {
   enabled = false;
   yaw = 0; // radians, absolute
-  pitch = 0.28; // radians, absolute
-  distance = 6.5; // owner: pulled back for a wider view (was 4.6); the wheel still zooms
+  pitch = 0.2; // radians, absolute (永劫-style: lower, looking past him rather than down on him)
+  distance = 6.0; // owner: pulled back for a wider view (was 4.6); the wheel still zooms
   /** terrain height under a point, so the camera never sinks into a slope */
   groundAt: ((x: number, z: number) => number) | null = null;
   /** underside of a ceiling over a point (cabins), so the camera stays in the room */
@@ -110,9 +110,11 @@ export class CameraController {
     // the height the camera follows is eased, so walking up stairs (a 30 cm hop per step) glides instead of jolting
     if (!this.initialized || Math.abs(playerPos.y - this.followY) > 2.5) this.followY = playerPos.y;
     else this.followY = THREE.MathUtils.damp(this.followY, playerPos.y, 10, dt);
-    const target = new THREE.Vector3(playerPos.x, this.followY + 1.55, playerPos.z);
-    target.x += Math.cos(this.yaw) * 0.45;
-    target.z -= Math.sin(this.yaw) * 0.45;
+    // 永劫无间-style: well over the right shoulder, so he stands in the left third and the middle of the screen is open
+    const target = new THREE.Vector3(playerPos.x, this.followY + 1.7, playerPos.z);
+    const sh = 0.95 * Math.min(1, this.distance / 4);
+    target.x += Math.cos(this.yaw) * sh;
+    target.z -= Math.sin(this.yaw) * sh;
 
     // desired position is computed fresh every frame from the player
     const offset = new THREE.Vector3(
