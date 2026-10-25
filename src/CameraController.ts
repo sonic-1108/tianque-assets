@@ -6,7 +6,7 @@ export class CameraController {
   enabled = false;
   yaw = 0; // radians, absolute
   pitch = 0.28; // radians, absolute
-  distance = 4.6;
+  distance = 6.5; // owner: pulled back for a wider view (was 4.6); the wheel still zooms
   /** terrain height under a point, so the camera never sinks into a slope */
   groundAt: ((x: number, z: number) => number) | null = null;
   /** underside of a ceiling over a point (cabins), so the camera stays in the room */
@@ -52,7 +52,7 @@ export class CameraController {
     };
     this.onWheel = (e: WheelEvent) => {
       if (!this.enabled) return;
-      this.distance = THREE.MathUtils.clamp(this.distance + e.deltaY * 0.004, 2.6, 9);
+      this.distance = THREE.MathUtils.clamp(this.distance + e.deltaY * 0.004, 2.6, 12);
     };
 
     document.addEventListener('mousemove', this.onMouseMove);
