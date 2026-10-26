@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette, ToneMapping, wrapEffect } from '@react-three/postprocessing';
 import { Effect, Pass } from 'postprocessing';
+import { deathLine, castLine, bannerLine } from './abstract';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig, SLOTS, SLOT_IDS } from './constants';
@@ -1259,7 +1260,16 @@ function GameImpl({
         intents[i].request = null;
         hintOnce('locked:' + careerSkill, `「${CLASS_CONFIGS[fc.classId].skills.find((s) => s.id === careerSkill)?.name ?? ''}」还没学：回百业试炼用技能点学会`);
       }
+      const quipReq = intents[i].request;
       const ok = executeIntent(i, fighters[i], foes[i], intents[i]);
+      if (ok && quipReq && gt > ((fc as any).quipT ?? 0)) {
+        // 抽象: now and then (always for an ultimate) a line over his head
+        const q = castLine(fc.wanderer && Math.random() < 0.5 ? 'Wanderer' : fc.classId, quipReq);
+        if (q) {
+          (fc as any).quipT = gt + 3;
+          vfx.quip(vA.set(fc.pos[0], fc.pos[1] + 2.6, fc.pos[2]), q);
+        }
+      }
       if (ok && careerSkill && fc.actionState !== 'idle') fc.castMult = skillPower(levelOf(careerSkill));
       if (i === ME) {
         if (ok && playerIntent.request) input.consumeBuffer();
@@ -3191,6 +3201,8 @@ function GameImpl({
         def.isGrounded = false;
       }
       att.totalDamageDealt += dmg;
+      (def as any).lastBy = fighters.indexOf(att); // 抽象: who to blame in the death line
+      (def as any).lastEnv = undefined;
       att.comboCount += 1;
       att.comboDamage += dmg;
       att.highestCombo = Math.max(att.highestCombo, att.comboCount);
@@ -7304,6 +7316,24 @@ function GameImpl({
         def.vel[1] = 6;
         def.isGrounded = false;
       }
+      {
+        // 抽象: the last blow sends him flying, tumbling head over heels, and everyone gets a line about how he went
+        const killer = fighters[(def as any).lastBy ?? -1];
+        if (killer && killer !== def) {
+          const kx = def.pos[0] - killer.pos[0];
+          const kz = def.pos[2] - killer.pos[2];
+          const kd = Math.hypot(kx, kz) || 1;
+          def.vel[0] = (kx / kd) * 7;
+          def.vel[2] = (kz / kd) * 7;
+          def.vel[1] = Math.max(def.vel[1], 9);
+          def.isGrounded = false;
+        }
+        (def as any).tumble = 8 + Math.random() * 7;
+        const who = defSlot === ME ? '你' : def.tag || CLASS_CONFIGS[def.classId]?.name || '对手';
+        const line = deathLine(who, killer && killer !== def ? killer.classId : undefined, (def as any).lastEnv);
+        vfx.quip(vA.set(def.pos[0], def.pos[1] + 2.8, def.pos[2]), line, '#ffe08a', true);
+        if (defSlot === ME || (def as any).lastBy === ME) onRoundEvent?.({ type: 'toast', text: line });
+      }
       vfx.ring(vA.set(def.pos[0], fy(def.pos[0], def.pos[2], def.pos[1]), def.pos[2]), 3, color, 0.7, 0.12, 0.5);
       gameAudio.playGong();
       if (def.ballista !== undefined) leaveBallista(defSlot, def);
@@ -7388,7 +7418,7 @@ function GameImpl({
       const winSide = standing[0] ? 0 : standing[1] ? 1 : 1 - (def.side ?? 0);
       for (const f of fighters) if ((f.side ?? 0) === winSide && f.hp > 0) f.celebrate = true;
       slowMoTimerRef.current = 0.7;
-      onRoundEvent?.({ type: 'ko', winner: winSide === (p1.side ?? 0) ? 'player' : 'enemy', side: winSide });
+      onRoundEvent?.({ type: 'ko', winner: winSide === (p1.side ?? 0) ? 'player' : 'enemy', side: winSide, reason: bannerLine(winSide === (p1.side ?? 0)) });
     }
 
     /** Environmental damage (vents, lava, ring-out) */
@@ -7398,6 +7428,8 @@ function GameImpl({
       if (launch > 0 && c.dodgeIframeTimer > 0) return;
       dmg = Math.round(dmg * HP_SCALE);
       c.hp = Math.max(0, c.hp - dmg);
+      (c as any).lastEnv = label;
+      (c as any).lastBy = -1;
       c.whiteFlashTimer = 0.06;
       if (c.treeClimb !== undefined) {
         c.treeClimb = undefined;

@@ -605,6 +605,8 @@ export class VFXSystem {
   private rings: RingFx[] = [];
   private decals: DecalFx[] = [];
   private dmg: DmgFx[] = [];
+  /** 抽象: wide speech lines (death lines, quips): a long sentence doesn't fit a damage number */
+  private quips: DmgFx[] = [];
   private lights: FlashLight[] = [];
   private crackTex = makeCrackTextures();
   // one whirlwind + one rage pillar per fighter slot (0 = player, 1 = opponent)
@@ -696,6 +698,19 @@ export class VFXSystem {
       sprite.renderOrder = 40;
       this.root.add(sprite);
       this.dmg.push({ sprite, canvas, tex, life: 0, maxLife: 1, vel: new THREE.Vector3(), baseScale: 1, active: false });
+    }
+    for (let i = 0; i < 6; i++) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 128;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+      const sprite = new THREE.Sprite(mat);
+      sprite.visible = false;
+      sprite.renderOrder = 41;
+      this.root.add(sprite);
+      this.quips.push({ sprite, canvas, tex, life: 0, maxLife: 1, vel: new THREE.Vector3(), baseScale: 1, active: false });
     }
 
     const meteorGeo = new THREE.IcosahedronGeometry(0.55, 1);
@@ -1101,6 +1116,36 @@ export class VFXSystem {
     d.vel.set((Math.random() - 0.5) * 0.6, crit ? 2.4 : 2.0, (Math.random() - 0.5) * 0.6);
   }
 
+  /** a line of speech over someone's head (big = a death line: bigger, longer) */
+  quip(pos: THREE.Vector3, text: string, color = '#fff3c4', big = false) {
+    const d = this.quips.find((x) => !x.active) || this.quips.reduce((a, b) => (a.life < b.life ? a : b));
+    const ctx = d.canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, 1024, 128);
+    let size = 64;
+    ctx.font = `900 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    const w = ctx.measureText(text).width;
+    if (w > 980) {
+      size = Math.floor((size * 980) / w);
+      ctx.font = `900 ${size}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 12;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(20,6,2,0.92)';
+    ctx.strokeText(text, 512, 64);
+    ctx.fillStyle = color;
+    ctx.fillText(text, 512, 64);
+    d.tex.needsUpdate = true;
+    d.active = true;
+    d.life = big ? 3.2 : 2.2;
+    d.maxLife = d.life;
+    d.baseScale = big ? 0.75 : 0.55;
+    d.sprite.visible = true;
+    d.sprite.position.copy(pos);
+    d.vel.set(0, big ? 0.6 : 0.45, 0);
+  }
+
   // ---------------- continuous effects ----------------
   setVortex(on: boolean, duration = 1.6, slot = 0) {
     const sl = this.slots[slot];
@@ -1329,6 +1374,20 @@ export class VFXSystem {
       d.group.children.forEach((c) => c.scale.setScalar(grow));
     }
 
+    for (const d of this.quips) {
+      if (!d.active) continue;
+      d.life -= dt;
+      if (d.life <= 0) {
+        d.active = false;
+        d.sprite.visible = false;
+        continue;
+      }
+      const t = 1 - d.life / d.maxLife;
+      d.sprite.position.addScaledVector(d.vel, dt);
+      const s = d.baseScale * (t < 0.08 ? 0.6 + (t / 0.08) * 0.4 : 1);
+      d.sprite.scale.set(s * 8, s, 1);
+      (d.sprite.material as THREE.SpriteMaterial).opacity = t > 0.8 ? 1 - (t - 0.8) / 0.2 : 1;
+    }
     for (const d of this.dmg) {
       if (!d.active) continue;
       d.life -= dt;

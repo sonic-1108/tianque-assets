@@ -809,6 +809,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const strafeYawRef = useRef(0);
   const spinRef = useRef(0);
   const flipRef = useRef(0);
+  const tumbleRef = useRef(0); // 抽象: the knockout blow sends him cartwheeling
   const leanRef = useRef(new THREE.Vector2());
   const weaponScaledRef = useRef(false);
   const forgedRef=useRef<{key:string;group:THREE.Group;parent:THREE.Group}|null>(null);
@@ -1473,7 +1474,11 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
 
     let leanX = 0;
     let leanZ = 0;
-    if (st === 'skill_3' && ec === 'Berserker') leanX = 0.32;
+    const tumbling = c.hp <= 0 && st === 'launched' && !c.isGrounded && ((c as any).tumble ?? 0) > 0;
+    if (tumbling) tumbleRef.current += delta * (c as any).tumble;
+    else tumbleRef.current = 0;
+    if (tumbling) flipRef.current = tumbleRef.current;
+    else if (st === 'skill_3' && ec === 'Berserker') leanX = 0.32;
     else if (st === 'skill_3' && ec === 'BuddhistMage') leanX = 0.1;
     else if (st === 'skill_3' && ec === 'HeavyHealer') leanX = 0.34; // 缩地成寸: shooting forward low over the ground
     else if (st === 'skill_3') flipRef.current = -THREE.MathUtils.clamp(c.stateTimer / 0.5, 0, 1) * Math.PI * 2;
@@ -1492,7 +1497,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     leanRef.current.x = THREE.MathUtils.damp(leanRef.current.x, leanX, 10, delta);
     leanRef.current.y = THREE.MathUtils.damp(leanRef.current.y, leanZ, 10, delta);
 
-    pose.rotation.set(leanRef.current.x - flipRef.current, strafeYawRef.current + spinRef.current, leanRef.current.y, 'YXZ');
+    pose.rotation.set(leanRef.current.x - flipRef.current, strafeYawRef.current + spinRef.current + tumbleRef.current * 0.37, leanRef.current.y + tumbleRef.current * 0.21, 'YXZ');
     // 梵音 floats a little off the ground while meditating for 万佛朝宗
     let levitate = classId === 'BuddhistMage' && st === 'ultimate' ? 0.45 + Math.sin(performance.now() * 0.003) * 0.05 : 0;
     if (classId === 'HeavyHealer') {
