@@ -810,6 +810,7 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
   const spinRef = useRef(0);
   const flipRef = useRef(0);
   const tumbleRef = useRef(0); // 抽象: the knockout blow sends him cartwheeling
+  const flopRef = useRef({ t: 0, ground: 0, seed: Math.random() * 10 }); // 抽象: limbs flail like a rag doll
   const leanRef = useRef(new THREE.Vector2());
   const weaponScaledRef = useRef(false);
   const forgedRef=useRef<{key:string;group:THREE.Group;parent:THREE.Group}|null>(null);
@@ -1308,6 +1309,43 @@ export function CharacterRig3D({ combatantRef, classId = 'Berserker', isPlayer, 
     if (cur && currentKeyRef.current === 'swim') cur.setEffectiveTimeScale(speed > 0.6 ? THREE.MathUtils.clamp(speed / 3.5, 0.7, 1.4) : 0.45);
 
     mixer.update(delta);
+    {
+      // 抽象: a body sent flying flails like a rag doll (on top of the clip, so it never sticks); it goes limp once
+      // it has been on the ground a moment. Launched but alive: a smaller flail.
+      const F = flopRef.current;
+      const flying = st === 'launched' && !c.isGrounded;
+      const down = c.hp <= 0 && (st === 'launched' || st === 'knockdown' || st === 'dead');
+      if (limbsRef.current && (flying || down)) {
+        F.t += delta;
+        F.ground = c.isGrounded ? F.ground + delta : 0;
+        const amp = (c.hp <= 0 ? 1 : 0.5) * (flying ? 1 : Math.max(0, 1 - F.ground * 1.5));
+        if (amp > 0.01) {
+          const B = limbsRef.current.bones;
+          const w = F.t * 17 + F.seed;
+          const flail: [string, number, number, number][] = [
+            ['leftarm', 1.1, 1.0, 0],
+            ['rightarm', 1.1, 1.13, 1.7],
+            ['leftforearm', 0.9, 1.4, 0.6],
+            ['rightforearm', 0.9, 1.27, 2.4],
+            ['leftupleg', 0.7, 0.9, 3.1],
+            ['rightupleg', 0.7, 1.05, 0.9],
+            ['leftleg', 0.8, 1.2, 1.3],
+            ['rightleg', 0.8, 1.31, 2.9],
+            ['spine1', 0.22, 0.7, 0.4],
+            ['neck', 0.3, 1.6, 1.1],
+          ];
+          for (const [n, mag, f, ph] of flail) {
+            const bn = B[n];
+            if (!bn) continue;
+            bn.rotateX(Math.sin(w * f + ph) * mag * amp);
+            bn.rotateZ(Math.cos(w * f * 0.77 + ph * 1.3) * mag * 0.6 * amp);
+          }
+        }
+      } else {
+        F.t = 0;
+        F.ground = 0;
+      }
+    }
     if (limbsRef.current && glideBlend > 0.001) {
       const lift = THREE.MathUtils.smoothstep(TRADER.glide.t - (c.glide ?? 0), 0, 0.55);
       applyGlidePose(limbsRef.current, ladderFwd.set(-Math.sin(c.rotY), 0, -Math.cos(c.rotY)), lift, glideBlend, performance.now() / 1000, classId === 'Wanderer' ? 0.14 : 0.52);

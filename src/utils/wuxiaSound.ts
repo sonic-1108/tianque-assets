@@ -234,6 +234,59 @@ export class WuxiaSound {
     o.stop(at + dur + 0.05);
   }
 
+  /** 抽象: a slide whistle going down (someone sent flying) */
+  slideWhistle() {
+    const b = this.bus();
+    if (!b) return;
+    const at = b.now;
+    const o = b.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(1900 * this.v(0.05), at);
+    o.frequency.exponentialRampToValueAtTime(260, at + 0.95);
+    const vib = b.ctx.createOscillator();
+    vib.frequency.value = 7;
+    const vg = b.ctx.createGain();
+    vg.gain.value = 35;
+    vib.connect(vg).connect(o.frequency);
+    const g = b.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.22, at + 0.05);
+    g.gain.setValueAtTime(0.22, at + 0.8);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 1.0);
+    o.connect(g);
+    g.connect(b.out);
+    o.start(at);
+    vib.start(at);
+    o.stop(at + 1.05);
+    vib.stop(at + 1.05);
+  }
+  /** 抽象: a cartoon boing (a body bouncing) */
+  boing() {
+    const b = this.bus();
+    if (!b) return;
+    const at = b.now;
+    const o = b.ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(110 * this.v(0.08), at);
+    o.frequency.exponentialRampToValueAtTime(330, at + 0.08);
+    o.frequency.exponentialRampToValueAtTime(160, at + 0.45);
+    const vib = b.ctx.createOscillator();
+    vib.frequency.value = 18;
+    const vg = b.ctx.createGain();
+    vg.gain.value = 40;
+    vib.connect(vg).connect(o.frequency);
+    const g = b.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.45, at + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.5);
+    o.connect(g);
+    g.connect(b.out);
+    o.start(at);
+    vib.start(at);
+    o.stop(at + 0.55);
+    vib.stop(at + 0.55);
+  }
+
   // ------------------------------------------------------------------
   // combat sounds
   // ------------------------------------------------------------------

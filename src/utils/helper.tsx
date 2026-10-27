@@ -802,6 +802,8 @@ interface GameAudio {
   playUltRise(): void;
   playUltImpact(): void;
   playGong(): void;
+  playSlide(): void;
+  playBoing(): void;
   playThunder(): void;
   playWaveCrash(): void;
   startMusic(): void;
@@ -861,6 +863,8 @@ Object.assign(GameAudio.prototype, {
   playUltRise: viaWuxia((w) => w.ultRise()),
   playUltImpact: viaWuxia((w) => w.ultImpact()),
   playGong: viaWuxia((w) => w.gong()),
+  playSlide: viaWuxia((w) => w.slideWhistle()),
+  playBoing: viaWuxia((w) => w.boing()),
   playThunder: viaWuxia((w) => w.thunder()),
   playWaveCrash: viaWuxia((w) => w.waveCrash()),
   // music and ambience ignore the sfx mute flag (music has its own toggle)

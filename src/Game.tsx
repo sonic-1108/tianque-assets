@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { useFrame, useThree, advance } from '@react-three/fiber';
 import { EffectComposer, Bloom, Vignette, ToneMapping, wrapEffect } from '@react-three/postprocessing';
 import { Effect, Pass } from 'postprocessing';
-import { deathLine, castLine, bannerLine } from './abstract';
+import { deathLine, castLine, bannerLine, hurtLine } from './abstract';
 import { SKY_ENV, makeSkyEnvironment } from './envSky';
 import { RoomEnvironment } from 'three-stdlib';
 import { getConfig, SLOTS, SLOT_IDS } from './constants';
@@ -1403,7 +1403,16 @@ function GameImpl({
           c.juggleCount = 0;
           c.doubleJumped = false;
           if (c.actionState === 'jump') c.actionState = 'idle';
-          if (c.actionState === 'launched') {
+          if (c.hp <= 0 && c.actionState === 'launched' && ((c as any).bounces ?? 9) < 2 && impact > 4) {
+            // 抽象: a knocked-out body bounces (twice, lower each time) and keeps cartwheeling
+            (c as any).bounces = ((c as any).bounces ?? 0) + 1;
+            c.vel[1] = impact * 0.5;
+            c.vel[0] *= 0.6;
+            c.vel[2] *= 0.6;
+            c.isGrounded = false;
+            gameAudio.playBoing();
+            vfx.dustPuff(vB.set(c.pos[0], c.pos[1], c.pos[2]), 10, 0.5, 2, 0.5);
+          } else if (c.actionState === 'launched') {
             c.actionState = 'knockdown';
             c.stateTimer = 0;
             c.stateDuration = c.hp > 0 ? 0.8 : 99;
@@ -3203,6 +3212,13 @@ function GameImpl({
       att.totalDamageDealt += dmg;
       (def as any).lastBy = fighters.indexOf(att); // 抽象: who to blame in the death line
       (def as any).lastEnv = undefined;
+      if (def.hp > 0 && dmg > def.maxHp * 0.05 && gt > ((def as any).quipT ?? 0)) {
+        const y = hurtLine();
+        if (y) {
+          (def as any).quipT = gt + 3;
+          vfx.quip(vB.set(def.pos[0], def.pos[1] + 2.5, def.pos[2]), y, '#ffd0c8');
+        }
+      }
       att.comboCount += 1;
       att.comboDamage += dmg;
       att.highestCombo = Math.max(att.highestCombo, att.comboCount);
@@ -7323,12 +7339,20 @@ function GameImpl({
           const kx = def.pos[0] - killer.pos[0];
           const kz = def.pos[2] - killer.pos[2];
           const kd = Math.hypot(kx, kz) || 1;
-          def.vel[0] = (kx / kd) * 7;
-          def.vel[2] = (kz / kd) * 7;
-          def.vel[1] = Math.max(def.vel[1], 9);
+          // a home run: further and higher than any hit in the game
+          def.vel[0] = (kx / kd) * 11;
+          def.vel[2] = (kz / kd) * 11;
+          def.vel[1] = Math.max(def.vel[1], 13);
           def.isGrounded = false;
         }
-        (def as any).tumble = 8 + Math.random() * 7;
+        (def as any).tumble = 9 + Math.random() * 8;
+        (def as any).bounces = 0;
+        gameAudio.playSlide();
+        if (defSlot === ME || (def as any).lastBy === ME) {
+          slowMoTimerRef.current = Math.max(slowMoTimerRef.current, 0.6);
+          controller?.kick(-7);
+          controller?.addShake(0.35);
+        }
         const who = defSlot === ME ? '你' : def.tag || CLASS_CONFIGS[def.classId]?.name || '对手';
         const line = deathLine(who, killer && killer !== def ? killer.classId : undefined, (def as any).lastEnv);
         vfx.quip(vA.set(def.pos[0], def.pos[1] + 2.8, def.pos[2]), line, '#ffe08a', true);

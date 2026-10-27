@@ -24,7 +24,11 @@ const ENV: Record<string, string[]> = {
   烟花: ['{v}成了今晚最亮的烟花'],
   捕兽夹: ['{v}踩夹子了，猎户今晚加餐'],
 };
-const ANY = ['{v}倒下了，遗言：这把是网卡', '{v}倒下了，遗言：我手柄没电了', '{v}卒，享年不详', '{v}：我还会回来的（不会）'];
+const ANY = [
+  '{v}倒下了，遗言：这把是网卡', '{v}倒下了，遗言：我手柄没电了', '{v}卒，享年不详', '{v}：我还会回来的（不会）',
+  '{v}绷不住了', '{v}破防了，物理意义上的', '{v}：小丑竟是我自己', '{v}已躺平，主打一个摆烂', '{v}：这合理吗',
+  '{v}被打出了 GDP', '{v}的人生进入了熊市', '{v}：我真的会谢', '{v}已下线，原因：菜', '{v}飞走了，记得给个好评',
+];
 
 /** a line for someone going down: by whose hand (class) or what in the world (envHit's label) */
 export function deathLine(victim: string, killerClass?: string, env?: string): string {
@@ -54,3 +58,7 @@ export function castLine(classId: string, req: string): string | null {
 const WIN = ['MD：下周一来上班', 'Super Day 通过，offer 已发', '年终奖到账，三个月', '老板说你是公司的未来'];
 const LOSE = ['感谢你的申请，我们决定推进其他候选人', '被裁员了，请交还工牌', 'HR：我们保持联系', '简历已进入人才库（垃圾桶）'];
 export const bannerLine = (won: boolean) => pick(won ? WIN : LOSE);
+
+const HURT = ['我的腰!', '打人不打脸!', '疼疼疼', '破防了', '急了急了', '绷不住了', '救命啊', '妈妈我想回家', '这合理吗', '我真的会谢', '你礼貌吗', '有被冒犯到', '一整个大无语', '我不玩了!'];
+/** a yelp from someone who just took a big hit (null most of the time) */
+export const hurtLine = () => (Math.random() < 0.35 ? pick(HURT) : null);
