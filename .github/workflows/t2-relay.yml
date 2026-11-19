@@ -1,0 +1,40 @@
+# 天阙 · 散人行 (sonic-1108/tianque2) server: its relay worker (联机 rooms, accounts, cloud saves, the big 江湖's
+# presence, chat and friends) lives in that repo's relay/; it is deployed from here, where the Cloudflare secrets are.
+# Run by hand (Actions → t2 relay → Run workflow, or `gh workflow run t2-relay.yml`); it changes nothing of 天阙 1.
+name: t2 relay
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sonic-1108/tianque2
+          ref: main
+          sparse-checkout: relay
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Deploy tianque2-relay
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          api=https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain
+          sub=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" $api | jq -r '.result.subdomain // empty')
+          [ -z "$sub" ] && sub=msjzxy2022
+          echo "SUB=$sub" >> $GITHUB_ENV
+          cd relay
+          npx --yes wrangler@4 deploy > ../wrangler.log 2>&1 || { grep -i -m5 'error' ../wrangler.log; exit 1; }
+          grep -i -m3 'https://\|Uploaded\|Deployed' ../wrangler.log || true
+          echo "::notice::relay deployed: wss://tianque2-relay.$sub.workers.dev"
+      - name: Check it answers
+        run: |
+          base=https://tianque2-relay.$SUB.workers.dev
+          for k in 1 2 3 4 5 6; do r=$(curl -s $base/) && [ "$r" = "tianque2 relay ok" ] && break; sleep 5; done
+          echo "::notice::root: $r"
+          code=$(curl -s -o out.json -w '%{http_code}' -X POST $base/api/login -H 'content-type: text/plain' --data '{"email":"nobody@example.com","pw":"0000000000000000000000000000000000000000000000000000000000000000"}')
+          echo "::notice::login with a wrong password: $code $(cat out.json)"
+          [ "$r" = "tianque2 relay ok" ] && [ "$code" = "401" ]
